@@ -8,6 +8,8 @@ import pty from 'node-pty'
 import Anthropic from '@anthropic-ai/sdk'
 import mammoth from 'mammoth'
 import * as XLSX from 'xlsx'
+import * as airgap from './airgap'
+import * as authlock from './authlock'
 
 const ptys = new Map()
 let win = null
@@ -73,27 +75,45 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   protocol.handle('tome', (req) => {
     const p = decodeURIComponent(new URL(req.url).searchParams.get('p') || '')
     return net.fetch(pathToFileURL(p).toString())
   })
 
+  const userData = app.getPath('userData')
+  await airgap.loadAllowlist(userData)
+  await authlock.initAuth(userData)
+  airgap.setEventSink((type, payload) => win?.webContents.send('airgap:' + type, payload))
+
   createWindow()
 
   // ---- pty ----
-  ipcMain.handle('pty:create', (e, { id, cmd, args, cwd }) => {
-    const p = pty.spawn(cmd || SHELL, args || ['-l'], {
+  ipcMain.handle('pty:create', async (e, { id, cmd, args, cwd, airgap: gapped }) => {
+    let spawnCmd = cmd || SHELL
+    let spawnArgs = args || ['-l']
+    const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
+    if (gapped && process.platform === 'darwin') {
+      const { port } = await airgap.createPaneProxy(id)
+      const proxy = `http://127.0.0.1:${port}`
+      for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY'])
+        env[k] = proxy
+      env.NO_PROXY = env.no_proxy = 'localhost,127.0.0.1'
+      spawnArgs = ['-p', airgap.seatbeltProfile(userData), spawnCmd, ...spawnArgs]
+      spawnCmd = '/usr/bin/sandbox-exec'
+    }
+    const p = pty.spawn(spawnCmd, spawnArgs, {
       name: 'xterm-256color',
       cols: 80,
       rows: 24,
       cwd: cwd || homedir(),
-      env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+      env,
     })
     ptys.set(id, p)
     p.onData((data) => win?.webContents.send('pty:data', { id, data }))
     p.onExit(({ exitCode }) => {
       ptys.delete(id)
+      airgap.closePane(id)
       win?.webContents.send('pty:exit', { id, exitCode })
     })
   })
@@ -102,7 +122,26 @@ app.whenReady().then(() => {
   ipcMain.on('pty:kill', (e, { id }) => {
     ptys.get(id)?.kill()
     ptys.delete(id)
+    airgap.closePane(id)
   })
+
+  // ---- air gap ----
+  ipcMain.handle('airgap:state', () => ({ ...airgap.getState(), auth: authlock.authStatus() }))
+  ipcMain.handle('airgap:unlock', (e, { paneId, passphrase, code, minutes }) => {
+    if (!authlock.verifyPassphrase(passphrase)) return { ok: false, error: 'Wrong passphrase.' }
+    if (authlock.totpActive() && !authlock.verifyTotp(code))
+      return { ok: false, error: 'Wrong 2FA code.' }
+    airgap.unlockPane(paneId, minutes)
+    return { ok: true }
+  })
+  ipcMain.handle('airgap:relock', (e, paneId) => airgap.relockPane(paneId))
+  ipcMain.handle('airgap:setup', async (e, { passphrase }) => {
+    if (authlock.authStatus().configured) return { ok: false, error: 'Already configured.' }
+    await authlock.setPassphrase(passphrase)
+    return { ok: true }
+  })
+  ipcMain.handle('airgap:enrollTotp', () => authlock.enrollTotp())
+  ipcMain.handle('airgap:confirmTotp', (e, { code }) => authlock.confirmTotp(code))
 
   // ---- fs ----
   ipcMain.handle('fs:readDir', async (e, dir) => {

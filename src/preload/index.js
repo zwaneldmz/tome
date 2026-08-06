@@ -29,6 +29,16 @@ contextBridge.exposeInMainWorld('tome', {
     read: (p) => ipcRenderer.invoke('doc:read', p),
   },
   openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
+  airgap: {
+    state: () => ipcRenderer.invoke('airgap:state'),
+    unlock: (opts) => ipcRenderer.invoke('airgap:unlock', opts),
+    relock: (paneId) => ipcRenderer.invoke('airgap:relock', paneId),
+    setup: (passphrase) => ipcRenderer.invoke('airgap:setup', { passphrase }),
+    enrollTotp: () => ipcRenderer.invoke('airgap:enrollTotp'),
+    confirmTotp: (code) => ipcRenderer.invoke('airgap:confirmTotp', { code }),
+    onBlocked: (cb) => ipcRenderer.on('airgap:blocked', (e, m) => cb(m)),
+    onState: (cb) => ipcRenderer.on('airgap:state', (e, m) => cb(m)),
+  },
   agents: {
     list: () => ipcRenderer.invoke('agents:list'),
   },
