@@ -149,8 +149,7 @@ class TerminalPanel {
     terms.set(this.ptyId, term)
     tome.pty.create({
       id: this.ptyId,
-      cmd: params.cmd,
-      args: params.args,
+      kind: params.kind,
       cwd: params.cwd,
       airgap: params.airgap,
     })
@@ -381,7 +380,7 @@ function addTerminal(kind) {
     component: 'terminal',
     title: isAgent ? `${gapped ? '⛨ ' : ''}${kind} — ${name}` : `zsh — ${name}`,
     position: place(),
-    params: { ptyId: id, args: isAgent ? ['-l', '-c', kind] : ['-l'], cwd, airgap: gapped },
+    params: { ptyId: id, kind, cwd, airgap: gapped },
   })
 }
 
@@ -933,7 +932,7 @@ function renderAll() {
       id,
       component: 'terminal',
       title: `⛨ zsh — demo`,
-      params: { ptyId: id, args: ['-l'], cwd: activeRoot, airgap: true },
+      params: { ptyId: id, kind: 'terminal', cwd: activeRoot, airgap: true },
     })
     openFile(`${activeRoot}/package.json`)
     addChat()

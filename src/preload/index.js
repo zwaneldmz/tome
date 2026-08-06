@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('tome', {
-  home: process.env.HOME || '/',
+  home: ipcRenderer.sendSync('app:home'),
   shotMode: !!process.env.TOME_SHOT,
   pty: {
     create: (opts) => ipcRenderer.invoke('pty:create', opts),
