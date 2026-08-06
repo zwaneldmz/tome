@@ -1,9 +1,32 @@
 # Tome
 
-A desktop coding harness: a project browser on the left, a grid of panes for
-everything else — Claude Code, opencode, plain terminals, an assistant chat,
-and code editors — opened from one `＋` button, arranged how you like,
-collapsed to a title bar when you need the space.
+A neon-on-black desktop coding harness: your agents, terminals, editors,
+documents, and an assistant — one workspace, one grid.
+
+![Tome](docs/screenshot.png)
+
+## What it does
+
+- **Workspaces** — named groups of project folders. The `▚` chip in the top
+  bar names the active workspace; click it to switch, create, or add folders.
+  The tree shows every folder in the workspace; whatever you click becomes the
+  *active root* that new panes and the git widget follow.
+- **Agent panes** — the `＋` menu spawns Claude Code, opencode, or pi in a
+  real PTY (login shell, your prompt, your keybindings). Agents light up
+  automatically when their CLI appears on `PATH` — no config.
+- **Pane grid** — dockview tiling: drag to rearrange, drop one pane onto
+  another to stack as named tabs.
+- **Editor** — CodeMirror 6, language auto-detect, `⌘S` saves, dirty-dot in
+  the tab.
+- **Documents** — PDFs open in Chromium's viewer, images inline, `.docx` and
+  `.xlsx` are converted and rendered in sandboxed frames; anything else falls
+  back to "Open in default app".
+- **Git** — clickable branch chip (switch or create branches, IntelliJ-style)
+  with live working-tree counters `+added ~modified −deleted` and `↑↓`
+  ahead/behind.
+- **Assistant chat** — streams Claude (`claude-opus-5`, override with
+  `TOME_CHAT_MODEL`) from the main process; the API key never enters the
+  renderer.
 
 ## Run
 
@@ -12,24 +35,23 @@ npm install        # rebuilds node-pty for Electron's ABI (needs Xcode CLT)
 npm run dev
 ```
 
-If `npm run dev` fails with `Error: Electron uninstall`, the allow-scripts
-guard blocked Electron's binary download during install — run
-`npm run fix:electron` once.
+If `npm run dev` fails with `Error: Electron uninstall`, a script-blocking
+npm guard prevented Electron's binary download — run `npm run fix:electron`
+once.
 
-The assistant chat pane needs `ANTHROPIC_API_KEY` in the environment
-(model override: `TOME_CHAT_MODEL`, default `claude-sonnet-5`). Without a key
-the pane shows a setup hint; everything else works.
+The assistant pane needs `ANTHROPIC_API_KEY` in the environment (or an
+`ant auth login` profile). Without credentials the pane shows a setup hint;
+everything else works.
 
-Agent entries in the `＋` menu (claude / opencode / pi) light up automatically
-when the CLI is on `PATH` — no config file.
+Set `TOME_SHOT=/tmp/shot.png npm run dev` to boot into demo panes and write a
+screenshot — handy for design passes.
 
 ## Stack
 
-Electron + electron-vite · dockview-core (pane grid, drag-to-rearrange,
-tab-stacking) · @xterm/xterm + node-pty (real PTYs) · CodeMirror 6 (editor) ·
-Anthropic Messages API (chat, streamed from the main process).
+Electron + electron-vite · dockview-core (pane grid) · @xterm/xterm +
+node-pty (real PTYs) · CodeMirror 6 · mammoth + SheetJS (documents) ·
+@anthropic-ai/sdk (assistant).
 
-## Deliberately deferred
+## License
 
-git-worktree awareness · chat markdown + tool use · LSP · pane-layout
-persistence · packaging/distribution · pi (until installed).
+[MIT](LICENSE)
