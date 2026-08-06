@@ -22,7 +22,9 @@
     "@xterm/xterm": "^5.5.0",
     "codemirror": "^6.0.0",
     "dockview-core": "^4.0.0",
-    "node-pty": "^1.0.0"
+    "mammoth": "^1.12.0",
+    "node-pty": "^1.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.6.0",

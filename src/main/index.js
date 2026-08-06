@@ -1,10 +1,13 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
-import { join } from 'node:path'
-import { readdir, readFile, writeFile } from 'node:fs/promises'
+import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } from 'electron'
+import { join, extname } from 'node:path'
+import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { execFile } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 import pty from 'node-pty'
 import Anthropic from '@anthropic-ai/sdk'
+import mammoth from 'mammoth'
+import * as XLSX from 'xlsx'
 
 const ptys = new Map()
 let win = null
@@ -17,6 +20,27 @@ const CHAT_SYSTEM =
   'You are the assistant pane inside Tome, a desktop coding harness. ' +
   'Keep responses focused, brief, and concise. Plain text only — no markdown tables.'
 
+// local-file protocol so panes can embed PDFs/images without file:// cross-origin blocks
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'tome', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+])
+
+const git = (dir, args) =>
+  new Promise((resolve, reject) => {
+    execFile('git', ['-C', dir, ...args], { timeout: 10000 }, (err, stdout, stderr) => {
+      if (err) reject(new Error((stderr || err.message).trim()))
+      else resolve(stdout)
+    })
+  })
+
+// styles injected into sandboxed doc-viewer iframes (docx/xlsx conversions)
+const DOC_CSS =
+  '<style>body{font:14px/1.65 system-ui,sans-serif;background:#0c0d15;color:#c9d4e3;' +
+  'padding:30px;max-width:840px;margin:0 auto}h1,h2,h3{color:#eef4fb}a{color:#00e5ff}' +
+  'table{border-collapse:collapse;font-size:12.5px;font-family:ui-monospace,Menlo,monospace}' +
+  'td,th{border:1px solid #1b1e2f;padding:4px 10px;white-space:nowrap}th{background:#12141f}' +
+  'img{max-width:100%}</style>'
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1440,
@@ -24,7 +48,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 500,
     titleBarStyle: 'hiddenInset',
-    backgroundColor: '#14161d',
+    backgroundColor: '#060609',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -38,9 +62,23 @@ function createWindow() {
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+  if (process.env.TOME_SHOT) {
+    win.webContents.once('did-finish-load', () => {
+      setTimeout(async () => {
+        const img = await win.webContents.capturePage()
+        await writeFile(process.env.TOME_SHOT, img.toPNG())
+        console.log('shot saved:', process.env.TOME_SHOT)
+      }, 2500)
+    })
+  }
 }
 
 app.whenReady().then(() => {
+  protocol.handle('tome', (req) => {
+    const p = decodeURIComponent(new URL(req.url).searchParams.get('p') || '')
+    return net.fetch(pathToFileURL(p).toString())
+  })
+
   createWindow()
 
   // ---- pty ----
@@ -77,6 +115,82 @@ app.whenReady().then(() => {
   ipcMain.handle('fs:readFile', (e, p) => readFile(p, 'utf8'))
   ipcMain.handle('fs:writeFile', (e, { path, content }) => writeFile(path, content))
 
+  // ---- json store (workspaces, ui state) ----
+  const storeDir = app.getPath('userData')
+  ipcMain.handle('store:get', async (e, key) => {
+    try {
+      return JSON.parse(await readFile(join(storeDir, key + '.json'), 'utf8'))
+    } catch {
+      return null
+    }
+  })
+  ipcMain.handle('store:set', async (e, { key, value }) => {
+    await mkdir(storeDir, { recursive: true })
+    await writeFile(join(storeDir, key + '.json'), JSON.stringify(value, null, 2))
+  })
+
+  // ---- git ----
+  ipcMain.handle('git:info', async (e, dir) => {
+    try {
+      const branch = (await git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
+      let added = 0
+      let modified = 0
+      let deleted = 0
+      for (const line of (await git(dir, ['status', '--porcelain'])).split('\n')) {
+        if (!line) continue
+        const x = line[0]
+        const y = line[1]
+        if (x === '?' || x === 'A') added++
+        else if (x === 'D' || y === 'D') deleted++
+        else modified++
+      }
+      let ahead = 0
+      let behind = 0
+      try {
+        const ab = (await git(dir, ['rev-list', '--left-right', '--count', '@{u}...HEAD']))
+          .trim()
+          .split(/\s+/)
+        behind = +ab[0] || 0
+        ahead = +ab[1] || 0
+      } catch {} // no upstream
+      return { repo: true, branch, added, modified, deleted, ahead, behind }
+    } catch {
+      return { repo: false }
+    }
+  })
+  ipcMain.handle('git:branches', async (e, dir) =>
+    (await git(dir, ['branch', '--sort=-committerdate', '--format=%(refname:short)']))
+      .split('\n')
+      .filter(Boolean)
+  )
+  ipcMain.handle('git:checkout', async (e, { dir, branch, create }) => {
+    try {
+      await git(dir, create ? ['checkout', '-b', branch] : ['checkout', branch])
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err.message }
+    }
+  })
+
+  // ---- document conversion (docx/xlsx → sandboxed html) ----
+  ipcMain.handle('doc:read', async (e, path) => {
+    const ext = extname(path).toLowerCase()
+    if (ext === '.docx') {
+      const { value } = await mammoth.convertToHtml({ path })
+      return { html: DOC_CSS + value }
+    }
+    if (ext === '.xlsx' || ext === '.xls') {
+      const wb = XLSX.readFile(path)
+      const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      const parts = wb.SheetNames.map(
+        (n) => `<h3>${esc(n)}</h3>` + XLSX.utils.sheet_to_html(wb.Sheets[n], { header: '', footer: '' })
+      )
+      return { html: DOC_CSS + parts.join('') }
+    }
+    throw new Error('No viewer for ' + ext)
+  })
+  ipcMain.handle('shell:openPath', (e, p) => shell.openPath(p))
+
   // ---- dialogs ----
   ipcMain.handle('dialog:pickFolder', async () => {
     const r = await dialog.showOpenDialog(win, { properties: ['openDirectory'] })
@@ -101,8 +215,6 @@ app.whenReady().then(() => {
   // ---- chat (Claude API, streamed from main so the key never enters the renderer) ----
   ipcMain.handle('chat:send', async (e, { id, messages }) => {
     try {
-      // Zero-arg client: resolves ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN,
-      // or an `ant auth login` profile.
       anthropic ??= new Anthropic()
       const stream = anthropic.beta.messages.stream({
         model: CHAT_MODEL,
