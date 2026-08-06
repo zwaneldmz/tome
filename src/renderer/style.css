@@ -1,0 +1,246 @@
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #14161d;
+  color: #e8e4d8;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+}
+
+/* ---------- top bar ---------- */
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 10px;
+  border-bottom: 1px solid #2a2f3b;
+  background: #1c2029;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+#topbar button {
+  -webkit-app-region: no-drag;
+}
+.traffic-pad {
+  width: 68px;
+  flex: none;
+}
+.spacer {
+  flex: 1;
+}
+#pick-root {
+  font: inherit;
+  color: #e8e4d8;
+  background: transparent;
+  border: 1px solid #2a2f3b;
+  border-radius: 6px;
+  padding: 4px 12px;
+  cursor: pointer;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#pick-root:hover {
+  border-color: #3a4152;
+}
+#btn-add {
+  font-size: 16px;
+  line-height: 1;
+  width: 30px;
+  height: 27px;
+  color: #e8e4d8;
+  background: transparent;
+  border: 1px solid #2a2f3b;
+  border-radius: 6px;
+  cursor: pointer;
+}
+#btn-add:hover {
+  border-color: #c9a227;
+  color: #c9a227;
+}
+button:focus-visible {
+  outline: 2px solid #c9a227;
+  outline-offset: 1px;
+}
+
+/* ---------- ＋ menu ---------- */
+.add-wrap {
+  position: relative;
+}
+#add-menu {
+  position: absolute;
+  right: 0;
+  top: 32px;
+  z-index: 100;
+  min-width: 190px;
+  background: #1c2029;
+  border: 1px solid #2a2f3b;
+  border-radius: 8px;
+  padding: 5px;
+  box-shadow: 0 14px 30px -10px rgba(0, 0, 0, 0.6);
+}
+#add-menu.hidden {
+  display: none;
+}
+#add-menu button {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  font: inherit;
+  color: #e8e4d8;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  padding: 6px 10px;
+  cursor: pointer;
+  text-align: left;
+}
+#add-menu button:hover:not(:disabled) {
+  background: #2a2f3b;
+}
+#add-menu button:disabled {
+  color: #565163;
+  cursor: not-allowed;
+}
+#add-menu .hint {
+  color: #8f8a7e;
+  font-size: 11px;
+}
+#add-menu hr {
+  border: 0;
+  border-top: 1px solid #2a2f3b;
+  margin: 5px 4px;
+}
+
+/* ---------- layout ---------- */
+#body {
+  display: flex;
+  height: calc(100% - 38px);
+}
+#tree {
+  width: 220px;
+  min-width: 140px;
+  max-width: 480px;
+  flex: none;
+  overflow: auto;
+  resize: horizontal;
+  border-right: 1px solid #2a2f3b;
+  padding: 6px 0;
+  user-select: none;
+}
+#tree .entry {
+  padding: 2px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  color: #b9b4a6;
+}
+#tree .entry:hover {
+  color: #e8e4d8;
+  background: #1c2029;
+}
+#tree .entry.dir {
+  color: #d8d2c2;
+}
+#dock {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- panels ---------- */
+.panel-terminal {
+  height: 100%;
+  background: #171a21;
+  padding: 4px 0 0 6px;
+}
+.panel-terminal .xterm {
+  height: 100%;
+}
+.panel-editor {
+  height: 100%;
+  overflow: auto;
+}
+.panel-editor .cm-editor {
+  height: 100%;
+  font-size: 12.5px;
+}
+.panel-chat {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #171a21;
+}
+.chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg {
+  max-width: 85%;
+  padding: 7px 11px;
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+.msg.me {
+  align-self: flex-end;
+  background: #2a2f3b;
+}
+.msg.ai {
+  align-self: flex-start;
+  background: #1c2029;
+  border: 1px solid #2a2f3b;
+}
+.msg.err {
+  align-self: stretch;
+  background: transparent;
+  border: 1px dashed #7a4a4a;
+  color: #d9a0a0;
+  font-size: 12px;
+}
+.chat-form {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid #2a2f3b;
+}
+.chat-form textarea {
+  flex: 1;
+  resize: none;
+  font: inherit;
+  color: #e8e4d8;
+  background: #1c2029;
+  border: 1px solid #2a2f3b;
+  border-radius: 6px;
+  padding: 7px 10px;
+}
+.chat-form textarea:focus {
+  outline: none;
+  border-color: #c9a227;
+}
+.chat-form button {
+  font: inherit;
+  color: #14161d;
+  background: #c9a227;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 16px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.chat-form button:hover {
+  filter: brightness(1.1);
+}

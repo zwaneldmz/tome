@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>tome</title>
+  </head>
+  <body>
+    <header id="topbar">
+      <div class="traffic-pad"></div>
+      <button id="pick-root" title="Choose project folder">
+        <span id="root-name">choose folder…</span>
+      </button>
+      <div class="spacer"></div>
+      <div class="add-wrap">
+        <button id="btn-add" title="New pane" aria-haspopup="true" aria-expanded="false">＋</button>
+        <div id="add-menu" role="menu" class="hidden"></div>
+      </div>
+    </header>
+    <div id="body">
+      <aside id="tree"></aside>
+      <main id="dock"></main>
+    </div>
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>
