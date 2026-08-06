@@ -27,6 +27,25 @@ documents, and an assistant — one workspace, one grid.
 - **Assistant chat** — streams Claude (`claude-opus-5`, override with
   `TOME_CHAT_MODEL`) from the main process; the API key never enters the
   renderer.
+- **Air gap (macOS)** — agent panes spawn inside a seatbelt sandbox that kills
+  all direct network egress (DNS included); the only way out is a per-pane
+  local proxy that allows **model-provider domains only**. The cyan strip on
+  the pane frees it — passphrase (plus optional authenticator-app 2FA), scoped
+  to that pane, auto-relocking after 15/30/60 minutes. Blocked hosts surface
+  on the strip and as toasts.
+
+## Air gap notes
+
+- Unlocking widens the *proxy*, never the sandbox: freed panes get HTTP(S)
+  through the proxy; raw sockets/ssh never work inside an air-gapped pane —
+  spawn an unrestricted pane for that (toggle in the ＋ menu).
+- Claude Code's WebSearch/WebFetch are server-side (they run at
+  api.anthropic.com), so air-gapped claude can still search; opencode/pi
+  client-side fetch is genuinely blocked until freed.
+- Tools that ignore proxy env vars fail *closed* — they get nothing.
+- Allowlist lives in `~/Library/Application Support/tome/airgap.json`
+  (loaded at launch; edits apply on restart). The auth file is unreadable and
+  the config unwritable from inside sandboxed panes.
 
 ## Run
 
