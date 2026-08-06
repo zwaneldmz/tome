@@ -3,14 +3,36 @@
   "productName": "Tome",
   "version": "0.1.0",
   "description": "A coding harness: agents, terminals, editors, and chat in one bound workspace.",
+  "author": "Lwando Zwane",
   "main": "out/main/index.js",
   "private": true,
+  "build": {
+    "appId": "tech.abantu.tome",
+    "productName": "Tome",
+    "files": [
+      "out/**",
+      "package.json"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/node-pty/**"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "icon": "build/icon.icns",
+      "identity": null
+    }
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "postinstall": "electron-rebuild -f -w node-pty",
-    "fix:electron": "sh scripts/fix-electron.sh"
+    "fix:electron": "sh scripts/fix-electron.sh",
+    "icon": "node scripts/gen-icon.mjs",
+    "package": "electron-vite build && electron-builder --mac --dir"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
@@ -30,6 +52,7 @@
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
     "electron": "^43.3.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^3.0.0",
     "vite": "^6.0.0"
   }
