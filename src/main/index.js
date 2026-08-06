@@ -22,9 +22,15 @@ const CHAT_SYSTEM =
   'You are the assistant pane inside Tome, a desktop coding harness. ' +
   'Keep responses focused, brief, and concise. Plain text only — no markdown tables.'
 
-// local-file protocol so panes can embed PDFs/images without file:// cross-origin blocks
+app.setName('Tome')
+
+// local-file protocol so panes can embed PDFs/images without file:// cross-origin blocks.
+// corsEnabled: embedding (img/iframe) works; renderer JS cannot *read* tome:// bodies.
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'tome', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+  {
+    scheme: 'tome',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true },
+  },
 ])
 
 const git = (dir, args) =>
@@ -53,7 +59,7 @@ function createWindow() {
     backgroundColor: '#060609',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true,
     },
   })
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -81,6 +87,10 @@ app.whenReady().then(async () => {
     return net.fetch(pathToFileURL(p).toString())
   })
 
+  ipcMain.on('app:home', (e) => {
+    e.returnValue = homedir()
+  })
+
   const userData = app.getPath('userData')
   await airgap.loadAllowlist(userData)
   await authlock.initAuth(userData)
@@ -89,9 +99,13 @@ app.whenReady().then(async () => {
   createWindow()
 
   // ---- pty ----
-  ipcMain.handle('pty:create', async (e, { id, cmd, args, cwd, airgap: gapped }) => {
-    let spawnCmd = cmd || SHELL
-    let spawnArgs = args || ['-l']
+  // The renderer names a vetted pane kind; the command line is built HERE so a
+  // compromised renderer can't request arbitrary binaries or arguments.
+  ipcMain.handle('pty:create', async (e, { id, kind, cwd, airgap: gapped }) => {
+    const isAgent = AGENTS.includes(kind)
+    if (!isAgent && kind !== 'terminal') return
+    let spawnCmd = SHELL
+    let spawnArgs = isAgent ? ['-l', '-c', kind] : ['-l']
     const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
     if (gapped && process.platform === 'darwin') {
       const { port } = await airgap.createPaneProxy(id)
