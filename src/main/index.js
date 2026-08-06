@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } from 'elect
 import { join, extname } from 'node:path'
 import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 import pty from 'node-pty'
 import Anthropic from '@anthropic-ai/sdk'
@@ -23,6 +23,34 @@ const CHAT_SYSTEM =
   'Keep responses focused, brief, and concise. Plain text only — no markdown tables.'
 
 app.setName('Tome')
+
+// When launched from Finder/Spotlight the app gets launchd's bare PATH, and a
+// non-interactive login shell never reads .zshrc — where PATH additions like
+// ~/.local/bin (claude) usually live. Resolve the user's real interactive
+// PATH once, with well-known agent bins as a fallback.
+function resolveLoginPath() {
+  try {
+    const out = execFileSync(SHELL, ['-ilc', 'echo -n "$PATH"'], {
+      timeout: 8000,
+      encoding: 'utf8',
+    })
+    const line = out
+      .split('\n')
+      .map((l) => l.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').trim())
+      .filter((l) => l.includes('/usr/bin'))
+      .pop()
+    if (line) process.env.PATH = line
+  } catch {}
+  const cur = process.env.PATH ? process.env.PATH.split(':') : []
+  const extras = [
+    join(homedir(), '.local/bin'),
+    join(homedir(), '.opencode/bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+  ].filter((e) => !cur.includes(e))
+  process.env.PATH = [...cur, ...extras].join(':')
+}
+resolveLoginPath()
 
 // local-file protocol so panes can embed PDFs/images without file:// cross-origin blocks.
 // corsEnabled: embedding (img/iframe) works; renderer JS cannot *read* tome:// bodies.
