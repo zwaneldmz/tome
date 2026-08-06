@@ -87,6 +87,12 @@ app.whenReady().then(async () => {
     return net.fetch(pathToFileURL(p).toString())
   })
 
+  if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
+    try {
+      app.dock.setIcon(join(__dirname, '../../build/icon.png'))
+    } catch {}
+  }
+
   ipcMain.on('app:home', (e) => {
     e.returnValue = homedir()
   })

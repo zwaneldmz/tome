@@ -1,4 +1,4 @@
-# Tome
+# <img src="docs/icon.png" width="28" align="top" alt=""> Tome
 
 A neon-on-black desktop coding harness: your agents, terminals, editors,
 documents, and an assistant — one workspace, one grid.
@@ -64,6 +64,17 @@ everything else works.
 
 Set `TOME_SHOT=/tmp/shot.png npm run dev` to boot into demo panes and write a
 screenshot — handy for design passes.
+
+## Install as an app
+
+```bash
+npm run icon       # regenerate the sprite icon (edit the grid in scripts/gen-icon.mjs)
+npm run package    # → dist/mac-arm64/Tome.app (unsigned; ad-hoc sign if you like)
+ditto dist/mac-arm64/Tome.app /Applications/Tome.app
+```
+
+The icon is a hand-authored 16×16 pixel sprite (a neon grimoire) rendered to
+every macOS size by `scripts/gen-icon.mjs` — no image tooling required.
 
 ## Stack
 
