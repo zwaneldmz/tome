@@ -13,6 +13,7 @@ import { DocPanel } from './panels/doc.js'
 import { ChatPanel } from './panels/chat.js'
 import { BrainPanel } from './panels/brain.js'
 import { HistoryPanel } from './history.js'
+import { AGENTS } from '../shared/pane-kinds.js'
 
 class Watermark {
   constructor() {
@@ -55,8 +56,7 @@ tome.conductor.onOpen(({ kind, file }) => {
   if (file) return openFile(file)
   if (kind === 'chat') return addChat()
   if (kind === 'brain') return addBrain()
-  if (kind === 'terminal' || kind === 'claude' || kind === 'opencode' || kind === 'pi')
-    return addTerminal(kind)
+  if (kind === 'terminal' || AGENTS.includes(kind)) return addTerminal(kind)
   toast(`assistant asked for unknown pane: ${kind}`)
 })
 tome.conductor.onActed(({ pane, ran }) =>
