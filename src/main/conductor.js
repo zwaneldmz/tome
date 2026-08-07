@@ -8,6 +8,7 @@ let ptys = null // Map shared with index.js
 let send = () => {} // (channel, payload) -> renderer
 let panes = [] // renderer's pane snapshot [{ id, title }]
 let allowRun = false
+let canOpenFile = () => false // main's workspace confinement check
 
 const meta = new Map() // ptyId -> { kind, cwd, airgap, exited }
 const scrolls = new Map() // ptyId -> recent raw output
@@ -16,6 +17,7 @@ const SCROLL_CAP = 200_000
 export function init(opts) {
   ptys = opts.ptys
   send = opts.send
+  if (typeof opts.canOpenFile === 'function') canOpenFile = opts.canOpenFile
 }
 
 export function register(id, info) {
@@ -143,9 +145,16 @@ function runTool(name, input) {
     case 'open_pane':
       send('conductor:open', { kind: String(input.kind || '') })
       return 'Requested.'
-    case 'open_file':
-      send('conductor:open', { file: String(input.path || '') })
+    case 'open_file': {
+      const file = String(input.path || '')
+      // The model must not make main open/parse arbitrary files on disk
+      // (doc:read runs mammoth/SheetJS on whatever it points at) — only
+      // paths inside the open workspace folders or a brain vault.
+      if (!canOpenFile(file))
+        return 'Refused: open_file is confined to the open workspace folders and brain vaults.'
+      send('conductor:open', { file })
       return 'Requested.'
+    }
     default:
       return 'Unknown tool.'
   }

@@ -36,6 +36,10 @@ contextBridge.exposeInMainWorld('tome', {
   panes: {
     sync: (list) => ipcRenderer.send('panes:sync', list),
   },
+  ws: {
+    // keeps main's open-folder confinement list in sync with the workspace state
+    syncFolders: (folders) => ipcRenderer.send('ws:sync', folders),
+  },
   conductor: {
     allowRun: (v) => ipcRenderer.send('conductor:allowRun', v),
     onOpen: (cb) => ipcRenderer.on('conductor:open', (e, m) => cb(m)),
