@@ -41,34 +41,40 @@ export function startGitPolling() {
   setInterval(refreshGit, 5000)
 }
 
-wireMenu('git-chip', 'git-menu', async (menu) => {
-  menu.innerHTML = ''
-  menuLabel(menu, wsState.activeRoot.split('/').pop())
-  menuInput(menu, 'new branch from HEAD…', 'Create', async (name) => {
-    const r = await tome.git.checkout(wsState.activeRoot, name, true)
-    r.ok ? checkoutPulse(name) : toast(r.error)
-  })
-  menuRule(menu)
-  menuItem(menu, { label: 'History', hint: 'commit log', onClick: addHistory })
-  menuRule(menu)
-  let branches = []
-  try {
-    branches = await tome.git.branches(wsState.activeRoot)
-  } catch {}
-  const current = gitBranch.textContent
-  for (const b of branches) {
-    menuItem(menu, {
-      label: b,
-      active: b === current,
-      hint: b === current ? 'current' : '',
-      onClick: async () => {
-        if (b === current) return
-        const r = await tome.git.checkout(wsState.activeRoot, b, false)
-        r.ok ? checkoutPulse(b) : toast(r.error)
-      },
+// Deferred, not top-level: menus.js imports this module, so at our evaluation
+// time its `allMenus` const is still in TDZ and wireMenu() would throw,
+// killing the whole renderer module graph. renderer.js calls this once the
+// graph is loaded.
+export function initGitMenu() {
+  wireMenu('git-chip', 'git-menu', async (menu) => {
+    menu.innerHTML = ''
+    menuLabel(menu, wsState.activeRoot.split('/').pop())
+    menuInput(menu, 'new branch from HEAD…', 'Create', async (name) => {
+      const r = await tome.git.checkout(wsState.activeRoot, name, true)
+      r.ok ? checkoutPulse(name) : toast(r.error)
     })
-  }
-})
+    menuRule(menu)
+    menuItem(menu, { label: 'History', hint: 'commit log', onClick: addHistory })
+    menuRule(menu)
+    let branches = []
+    try {
+      branches = await tome.git.branches(wsState.activeRoot)
+    } catch {}
+    const current = gitBranch.textContent
+    for (const b of branches) {
+      menuItem(menu, {
+        label: b,
+        active: b === current,
+        hint: b === current ? 'current' : '',
+        onClick: async () => {
+          if (b === current) return
+          const r = await tome.git.checkout(wsState.activeRoot, b, false)
+          r.ok ? checkoutPulse(b) : toast(r.error)
+        },
+      })
+    }
+  })
+}
 
 function checkoutPulse(branch) {
   gitBranch.textContent = branch

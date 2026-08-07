@@ -3,8 +3,8 @@ import { basicSetup } from 'codemirror'
 import { EditorView, keymap } from '@codemirror/view'
 import { LanguageDescription } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
-import { oneDark } from '@codemirror/theme-one-dark'
 import { tome } from '../util.js'
+import { cmTheme } from '../theme.js'
 
 export class EditorPanel {
   constructor() {
@@ -27,12 +27,13 @@ export class EditorPanel {
       tome.fs.writeFile(path, view.state.doc.toString()).then(() => api.setTitle(name))
       return true
     }
+    const theme = cmTheme()
     this.view = new EditorView({
       doc: text,
       parent: this.element,
       extensions: [
         basicSetup,
-        oneDark,
+        theme.ext(),
         langExt,
         keymap.of([{ key: 'Mod-s', run: save }]),
         EditorView.updateListener.of((u) => {
@@ -40,8 +41,10 @@ export class EditorPanel {
         }),
       ],
     })
+    this.untheme = theme.attach(this.view)
   }
   dispose() {
+    this.untheme?.()
     this.view?.destroy()
   }
 }

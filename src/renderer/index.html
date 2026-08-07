@@ -12,6 +12,9 @@
   <body>
     <header id="topbar">
       <div class="traffic-pad"></div>
+      <button id="btn-sidebar" class="icon-btn" title="Hide sidebar (⌘B)" aria-label="Toggle sidebar">
+        <span class="chev">⇤</span>
+      </button>
       <div class="chip-wrap">
         <button id="ws-chip" title="Workspace" aria-haspopup="true">
           <span class="sigil">▚</span><span id="ws-name">no workspace</span><span class="caret">▾</span>
@@ -26,12 +29,15 @@
       </div>
       <div id="git-stats" title="Working tree changes"></div>
       <div class="spacer"></div>
+      <button id="btn-theme" class="icon-btn" title="Appearance" aria-label="Appearance">◐</button>
       <div class="chip-wrap">
-        <button id="btn-notifs" title="Notifications" aria-haspopup="true">♪</button>
+        <button id="btn-notifs" class="icon-btn" title="Notifications" aria-haspopup="true">♪</button>
         <div id="notifs-menu" class="menu hidden" role="menu"></div>
       </div>
       <div class="chip-wrap">
-        <button id="btn-add" title="New pane" aria-haspopup="true">＋</button>
+        <button id="btn-add" class="icon-btn" title="New pane" aria-haspopup="true">
+          <span class="plus">＋</span>
+        </button>
         <div id="add-menu" class="menu hidden" role="menu"></div>
       </div>
     </header>

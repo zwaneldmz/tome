@@ -1,7 +1,8 @@
 # <img src="docs/icon.png" width="28" align="top" alt=""> Tome
 
-A neon-on-black desktop coding harness: your agents, terminals, editors,
-documents, and an assistant — one workspace, one grid.
+A desktop coding harness: your agents, terminals, editors, documents, and an
+assistant — one workspace, one grid. Light and dark, and it follows the
+system by default.
 
 ![Tome](docs/screenshot.png)
 
@@ -15,7 +16,19 @@ documents, and an assistant — one workspace, one grid.
   real PTY (login shell, your prompt, your keybindings). Agents light up
   automatically when their CLI appears on `PATH` — no config.
 - **Pane grid** — dockview tiling: drag to rearrange, drop one pane onto
-  another to stack as named tabs.
+  another to stack as named tabs. Every pane header carries a `＋` that opens
+  a new pane *as a tab in that group* — so an agent and the helpers it needs
+  stay stacked together instead of carving up the grid. The assistant's own
+  `open_pane` follows the same rule: what it opens lands as a tab beside the
+  chat that asked for it.
+- **Panes as windows** — the `⧉` in a pane header tears that group off into
+  its own OS window, and so does dragging a pane past the edge of the window
+  (onto a second display, say — it opens where you dropped it). Closing the
+  window docks the panes back into the grid, and the arrangement is saved
+  with the rest of the layout.
+- **Appearance** — light, dark, or match the system, from the `◐` in the top
+  bar. Terminals, editors, the note graph, and converted documents all
+  re-skin live. `⌘B` folds the sidebar away.
 - **Editor** — CodeMirror 6, language auto-detect, `⌘S` saves, dirty-dot in
   the tab.
 - **Documents** — PDFs open in Chromium's viewer, images inline, `.docx` and

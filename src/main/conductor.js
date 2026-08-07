@@ -112,7 +112,9 @@ export const SYSTEM =
   'Your replies may be read aloud, so keep them focused, brief, and speakable. ' +
   'Plain text only — no markdown tables.'
 
-function runTool(name, input) {
+// `chatId` rides along so the renderer can open what the assistant asks for
+// as a tab in the requesting pane's own group instead of resplitting the grid.
+function runTool(name, input, chatId) {
   switch (name) {
     case 'list_panes': {
       const rows = panes.map((p) => {
@@ -145,7 +147,7 @@ function runTool(name, input) {
         : 'Typed (not submitted).'
     }
     case 'open_pane':
-      send('conductor:open', { kind: String(input.kind || '') })
+      send('conductor:open', { kind: String(input.kind || ''), source: chatId })
       return 'Requested.'
     case 'open_file': {
       const file = String(input.path || '')
@@ -154,7 +156,7 @@ function runTool(name, input) {
       // paths inside the open workspace folders or a brain vault.
       if (!canOpenFile(file))
         return 'Refused: open_file is confined to the open workspace folders and brain vaults.'
-      send('conductor:open', { file })
+      send('conductor:open', { file, source: chatId })
       return 'Requested.'
     }
     default:
@@ -225,7 +227,7 @@ export async function runChat(anthropic, { id, model, system, messages, betas, f
         send('chat:tool', { id, tool: block.name, hint: block.input?.pane_id || block.input?.kind || block.input?.path || '' })
         let out
         try {
-          out = runTool(block.name, block.input || {})
+          out = runTool(block.name, block.input || {}, id)
         } catch (err) {
           out = 'Tool error: ' + err.message
         }

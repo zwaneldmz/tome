@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, systemPreferences, nativeTheme } from 'electron'
 import { join, resolve, extname, sep } from 'node:path'
 import { readdir, readFile, writeFile, mkdir, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -6,7 +6,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
-import { pathToFileURL } from 'node:url'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 import pty from 'node-pty'
 import Anthropic from '@anthropic-ai/sdk'
 import mammoth from 'mammoth'
@@ -266,26 +266,87 @@ const git = (dir, args) =>
     })
   })
 
+// ---- appearance ----
+// The renderer owns the choice (system / light / dark) and reports the
+// resolved mode here, because main needs it for two things it paints itself:
+// window backgrounds and the CSS injected into converted-document iframes.
+// nativeTheme cannot be read before the app is ready, so this starts on the
+// old default and is corrected in createWindow().
+let uiTheme = 'dark'
+const WINDOW_BG = { dark: '#050508', light: '#eeeef2' }
+
 // styles injected into sandboxed doc-viewer iframes (docx/xlsx conversions)
-const DOC_CSS =
-  '<style>body{font:14px/1.65 system-ui,sans-serif;background:#0c0d15;color:#c9d4e3;' +
-  'padding:30px;max-width:840px;margin:0 auto}h1,h2,h3{color:#eef4fb}a{color:#00e5ff}' +
-  'table{border-collapse:collapse;font-size:12.5px;font-family:ui-monospace,Menlo,monospace}' +
-  'td,th{border:1px solid #1b1e2f;padding:4px 10px;white-space:nowrap}th{background:#12141f}' +
-  'img{max-width:100%}</style>'
+const docCss = () => {
+  const d = uiTheme === 'dark'
+  const bg = d ? '#0b0b11' : '#ffffff'
+  const fg = d ? '#c9d4e3' : '#35353d'
+  const head = d ? '#eef4fb' : '#101014'
+  const link = d ? '#00e5ff' : '#0071e3'
+  const line = d ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'
+  const zebra = d ? '#151723' : '#f1f1f5'
+  return (
+    `<style>body{font:14px/1.65 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;` +
+    `background:${bg};color:${fg};padding:30px;max-width:840px;margin:0 auto}` +
+    `h1,h2,h3{color:${head}}a{color:${link}}` +
+    'table{border-collapse:collapse;font-size:12.5px;font-family:ui-monospace,Menlo,monospace}' +
+    `td,th{border:1px solid ${line};padding:4px 10px;white-space:nowrap}th{background:${zebra}}` +
+    'img{max-width:100%}</style>'
+  )
+}
+
+// A popout window is only ever our own renderer's popout.html — same dev
+// server in development, the bundled file next to index.html when packaged.
+function isPopoutUrl(raw) {
+  let u
+  try {
+    u = new URL(raw)
+  } catch {
+    return false
+  }
+  if (!u.pathname.endsWith('/popout.html')) return false
+  if (process.env.ELECTRON_RENDERER_URL) {
+    const base = new URL(process.env.ELECTRON_RENDERER_URL)
+    return u.protocol === base.protocol && u.host === base.host
+  }
+  if (u.protocol !== 'file:') return false
+  try {
+    return resolve(fileURLToPath(u)) === resolve(join(__dirname, '../renderer/popout.html'))
+  } catch {
+    return false
+  }
+}
 
 function createWindow() {
+  uiTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
   win = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 800,
     minHeight: 500,
     titleBarStyle: 'hiddenInset',
-    backgroundColor: '#060609',
+    backgroundColor: WINDOW_BG[uiTheme],
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
     },
+  })
+  // ---- popped-out panes ----
+  // dockview tears a pane group off into its own OS window with window.open()
+  // on a same-origin popout.html and then moves the live DOM across. Only
+  // that document is allowed through; anything else a renderer tries to open
+  // is refused rather than silently becoming a chromeless window.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (!isPopoutUrl(url)) return { action: 'deny' }
+    return {
+      action: 'allow',
+      overrideBrowserWindowOptions: {
+        minWidth: 320,
+        minHeight: 200,
+        titleBarStyle: 'hiddenInset',
+        backgroundColor: WINDOW_BG[uiTheme],
+        webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: true },
+      },
+    }
   })
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -365,6 +426,14 @@ app.whenReady().then(async () => {
     ptys,
     send: (channel, payload) => win?.webContents.send(channel, payload),
     canOpenFile: isConfinedPath,
+  })
+  // The renderer resolves 'system' itself and reports both the preference
+  // (so native chrome can keep following the OS) and the resolved mode.
+  ipcMain.on('theme:set', (e, msg) => {
+    const pref = msg?.pref === 'light' || msg?.pref === 'dark' ? msg.pref : 'system'
+    uiTheme = msg?.mode === 'dark' ? 'dark' : 'light'
+    nativeTheme.themeSource = pref
+    for (const w of BrowserWindow.getAllWindows()) w.setBackgroundColor(WINDOW_BG[uiTheme])
   })
   ipcMain.on('panes:sync', (e, list) => conductor.setPanes(list))
   ipcMain.on('ws:sync', (e, folders) => setOpenFolders(folders))
@@ -654,7 +723,7 @@ app.whenReady().then(async () => {
     const ext = extname(path).toLowerCase()
     if (ext === '.docx') {
       const { value } = await mammoth.convertToHtml({ path })
-      return { html: DOC_CSS + value }
+      return { html: docCss() + value }
     }
     if (ext === '.xlsx' || ext === '.xls') {
       const wb = XLSX.readFile(path)
@@ -662,7 +731,7 @@ app.whenReady().then(async () => {
       const parts = wb.SheetNames.map(
         (n) => `<h3>${esc(n)}</h3>` + XLSX.utils.sheet_to_html(wb.Sheets[n], { header: '', footer: '' })
       )
-      return { html: DOC_CSS + parts.join('') }
+      return { html: docCss() + parts.join('') }
     }
     throw new Error('No viewer for ' + ext)
   })

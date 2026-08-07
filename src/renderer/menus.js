@@ -12,6 +12,45 @@ export function closeMenus(except) {
   for (const m of allMenus) if (m !== except) m.classList.add('hidden')
 }
 document.addEventListener('click', () => closeMenus())
+
+// ---------- floating menus ----------
+// The topbar menus are anchored in markup; a pane's header ＋ has no such
+// slot, so it borrows a single reusable popover per document. Per document,
+// because a popped-out pane lives in its own window and must not open its
+// menu back in the main one.
+const floaters = new Map() // Document -> menu element
+function floaterFor(doc) {
+  let menu = floaters.get(doc)
+  if (!menu) {
+    menu = doc.createElement('div')
+    menu.className = 'menu floating hidden'
+    menu.setAttribute('role', 'menu')
+    menu.addEventListener('click', (e) => e.stopPropagation())
+    doc.body.appendChild(menu)
+    if (doc !== document) doc.addEventListener('click', () => closeMenus())
+    allMenus.push(menu)
+    floaters.set(doc, menu)
+  }
+  return menu
+}
+
+/** Open (or toggle shut) a popover anchored under `anchor`, built by `build`. */
+export function floatingMenu(anchor, build) {
+  const doc = anchor.ownerDocument
+  const menu = floaterFor(doc)
+  const key = anchor.dataset.menuKey || (anchor.dataset.menuKey = String(allMenus.length) + Math.random())
+  const reopen = menu.classList.contains('hidden') || menu.dataset.openFor !== key
+  closeMenus()
+  if (!reopen) return
+  menu.innerHTML = ''
+  menu.dataset.openFor = key
+  build(menu)
+  const r = anchor.getBoundingClientRect()
+  const view = doc.defaultView
+  menu.style.top = `${Math.round(r.bottom + 6)}px`
+  menu.style.right = `${Math.max(8, Math.round(view.innerWidth - r.right))}px`
+  menu.classList.remove('hidden')
+}
 export function wireMenu(btnId, menuId, onOpen) {
   const btn = document.getElementById(btnId)
   const menu = document.getElementById(menuId)
@@ -166,15 +205,18 @@ wireMenu('ws-chip', 'ws-menu', (menu) => {
 })
 
 // ---------- ＋ menu ----------
-wireMenu('btn-add', 'add-menu', async (menu) => {
+// Shared by the topbar ＋ (opens panes wherever the grid has room) and each
+// pane header's ＋ (`target = { group }` — the new pane joins that group as a
+// tab, which is how an agent's helpers stay stacked with it).
+export async function populateAddMenu(menu, target) {
   menu.innerHTML = ''
   const agents = await tome.agents.list()
   for (const a of agents) {
     menuItem(menu, {
       label: (prefs.airgapDefault ? '⛨ ' : '') + a.name,
-      hint: a.available ? 'agent' : 'not installed',
+      hint: a.available ? (target ? 'as a tab' : 'agent') : 'not installed',
       disabled: !a.available,
-      onClick: () => addTerminal(a.name),
+      onClick: () => addTerminal(a.name, target),
     })
   }
   menuItem(menu, {
@@ -197,19 +239,21 @@ wireMenu('btn-add', 'add-menu', async (menu) => {
     },
   })
   menuRule(menu)
-  menuItem(menu, { label: 'Assistant chat', hint: 'API', onClick: addChat })
-  menuItem(menu, { label: 'Terminal', hint: 'zsh', onClick: () => addTerminal('terminal') })
+  menuItem(menu, { label: 'Assistant chat', hint: 'API', onClick: () => addChat(target) })
+  menuItem(menu, { label: 'Terminal', hint: 'zsh', onClick: () => addTerminal('terminal', target) })
   menuItem(menu, {
     label: 'Brain',
     hint: activeWorkspace() ? 'vault' : 'needs a workspace',
     disabled: !activeWorkspace(),
-    onClick: addBrain,
+    onClick: () => addBrain(target),
   })
   menuItem(menu, {
     label: 'Open file…',
     onClick: async () => {
       const p = await tome.pickFile()
-      if (p) openFile(p)
+      if (p) openFile(p, undefined, target)
     },
   })
-})
+}
+
+wireMenu('btn-add', 'add-menu', (menu) => populateAddMenu(menu))
