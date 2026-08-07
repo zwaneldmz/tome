@@ -2,7 +2,10 @@ import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, systemPrefer
 import { join, resolve, extname, sep } from 'node:path'
 import { readdir, readFile, writeFile, mkdir, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { execFile, execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+
+const execFileAsync = promisify(execFile)
 import { pathToFileURL } from 'node:url'
 import pty from 'node-pty'
 import Anthropic from '@anthropic-ai/sdk'
@@ -14,6 +17,37 @@ import * as brain from './brain'
 import * as conductor from './conductor'
 
 const ptys = new Map()
+
+// ---- pty data coalescing ----
+// node-pty emits one onData per read() chunk; forwarding each as its own IPC
+// message floods the renderer under heavy output (build logs, cat of a big
+// file). Buffer per pane and flush on a ~4 ms window or at 64 KB buffered,
+// whichever comes first. xterm.write() accepts arbitrarily large batched
+// strings, so the renderer side is unchanged.
+const PTY_FLUSH_MS = 4
+const PTY_FLUSH_BYTES = 64 * 1024
+const ptyBuffers = new Map() // id -> { data, timer }
+function queuePtyData(id, data) {
+  let buf = ptyBuffers.get(id)
+  if (!buf) {
+    buf = { data: '', timer: null }
+    ptyBuffers.set(id, buf)
+  }
+  buf.data += data
+  if (buf.data.length >= PTY_FLUSH_BYTES) {
+    flushPtyData(id)
+  } else if (!buf.timer) {
+    buf.timer = setTimeout(() => flushPtyData(id), PTY_FLUSH_MS)
+  }
+}
+function flushPtyData(id) {
+  const buf = ptyBuffers.get(id)
+  if (!buf) return
+  ptyBuffers.delete(id)
+  if (buf.timer) clearTimeout(buf.timer)
+  if (buf.data) win?.webContents.send('pty:data', { id, data: buf.data })
+}
+
 let win = null
 let anthropic = null
 
@@ -67,45 +101,83 @@ const CHAT_SYSTEM =
 
 app.setName('Tome')
 
+// One Tome at a time: a second launch focuses the existing window and exits.
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!win) return
+    if (win.isMinimized()) win.restore()
+    win.focus()
+  })
+}
+
 // When launched from Finder/Spotlight the app gets launchd's bare PATH, and a
 // non-interactive login shell never reads .zshrc — where PATH additions like
 // ~/.local/bin (claude) usually live. Resolve the user's real interactive
 // PATH once, with well-known agent bins as a fallback.
-function resolveLoginPath() {
-  try {
-    const out = execFileSync(SHELL, ['-ilc', 'echo -n "$PATH"'], {
-      timeout: 8000,
-      encoding: 'utf8',
-    })
-    const line = out
-      .split('\n')
-      .map((l) => l.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').trim())
-      .filter((l) => l.includes('/usr/bin'))
-      .pop()
-    if (line) process.env.PATH = line
-  } catch {}
-  const cur = process.env.PATH ? process.env.PATH.split(':') : []
-  const extras = [
-    join(homedir(), '.local/bin'),
-    join(homedir(), '.opencode/bin'),
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-  ].filter((e) => !cur.includes(e))
-  process.env.PATH = [...cur, ...extras].join(':')
+//
+// ASYNC + CACHED: this used to be an execFileSync on the launch path, blocking
+// the event loop for up to 8 s on a cold shell. Now it fires once, in the
+// background, and every consumer (pty spawn, chat provider, agents:list)
+// awaits the same in-flight promise. Only the first caller pays the shell-out.
+let loginEnvPromise = null
+function ensureLoginEnv() {
+  if (loginEnvPromise) return loginEnvPromise
+  loginEnvPromise = (async () => {
+    // PATH and provider secrets come from the same login shell — spawn it
+    // once, not twice.
+    const [pathRes, envRes] = await Promise.allSettled([
+      execFileAsync(SHELL, ['-ilc', 'echo -n "$PATH"'], { timeout: 8000, encoding: 'utf8' }),
+      execFileAsync(SHELL, ['-ilc', 'env'], { timeout: 8000, encoding: 'utf8' }),
+    ])
+    if (pathRes.status === 'fulfilled') {
+      const line = pathRes.value.stdout
+        .split('\n')
+        .map((l) => l.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').trim())
+        .filter((l) => l.includes('/usr/bin'))
+        .pop()
+      if (line) process.env.PATH = line
+    }
+    // Well-known agent bins as a fallback, whether or not the shell answered.
+    const cur = process.env.PATH ? process.env.PATH.split(':') : []
+    const extras = [
+      join(homedir(), '.local/bin'),
+      join(homedir(), '.opencode/bin'),
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+    ].filter((e) => !cur.includes(e))
+    process.env.PATH = [...cur, ...extras].join(':')
+    const secrets = {}
+    if (envRes.status === 'fulfilled') {
+      for (const line of envRes.value.stdout.split('\n')) {
+        // Least-privilege forwarding: the old suffix match handed EVERY
+        // *_API_KEY/*_KEY/*_TOKEN in the login shell (GITHUB_TOKEN, NPM_TOKEN,
+        // DIGITALOCEAN_TOKEN, …) to every agent pane — air-gapped ones
+        // included — when a pane needs exactly its provider's key.
+        const i = line.indexOf('=')
+        if (i < 1) continue
+        const key = line.slice(0, i)
+        const val = line.slice(i + 1)
+        if (AGENT_SECRET_KEYS.has(key) && val) secrets[key] = val
+      }
+    }
+    return { secrets }
+  })()
+  return loginEnvPromise
 }
-resolveLoginPath()
+// Kick off at boot so the shell-out overlaps window creation instead of
+// sitting in front of the first pane spawn.
+ensureLoginEnv()
 
 // Same .zshrc blind spot as PATH, for provider credentials: agent CLIs are
 // spawned with `-l -c`, which never reads .zshrc, so keys exported there are
 // invisible and the CLI fails auth. Read them from an interactive login shell
 // once, and hand them only to agent panes — a plain terminal pane inherits
 // nothing, and tome's own process env is left untouched.
-let agentSecrets = null
-// Least-privilege forwarding: the old suffix match handed EVERY
-// *_API_KEY/*_KEY/*_TOKEN in the login shell (GITHUB_TOKEN, NPM_TOKEN,
-// DIGITALOCEAN_TOKEN, …) to every agent pane — air-gapped ones included —
-// when a pane needs exactly its provider's key. Forward only the credentials
-// the supported providers actually consume. New provider? Add its key here.
+// Forward only the credentials the supported providers actually consume.
+// New provider? Add its key here.
 const AGENT_SECRET_KEYS = new Set([
   'ANTHROPIC_API_KEY',
   'OPENAI_API_KEY',
@@ -124,20 +196,11 @@ const AGENT_SECRET_KEYS = new Set([
   'AWS_REGION',
   'AWS_DEFAULT_REGION',
 ])
-function resolveAgentSecrets() {
-  if (agentSecrets) return agentSecrets
-  agentSecrets = {}
-  try {
-    const out = execFileSync(SHELL, ['-ilc', 'env'], { timeout: 8000, encoding: 'utf8' })
-    for (const line of out.split('\n')) {
-      const i = line.indexOf('=')
-      if (i < 1) continue
-      const key = line.slice(0, i)
-      const val = line.slice(i + 1)
-      if (AGENT_SECRET_KEYS.has(key) && val) agentSecrets[key] = val
-    }
-  } catch {}
-  return agentSecrets
+// LAZY: resolved via the shared ensureLoginEnv() promise — off the boot path,
+// cached, and paid for only by the first agent spawn / chat send.
+async function resolveAgentSecrets() {
+  const { secrets } = await ensureLoginEnv()
+  return secrets
 }
 
 // local-file protocol so panes can embed PDFs/images without file:// cross-origin blocks.
@@ -333,8 +396,11 @@ app.whenReady().then(async () => {
     if (!isAgent && kind !== 'terminal') return
     let spawnCmd = SHELL
     let spawnArgs = isAgent ? ['-l', '-c', kind] : ['-l']
+    // Await the login shell before spawning so the agent lands in the user's
+    // real PATH (first spawn pays for the shell-out; later spawns get the cache).
+    await ensureLoginEnv()
     const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
-    if (isAgent) Object.assign(env, resolveAgentSecrets())
+    if (isAgent) Object.assign(env, await resolveAgentSecrets())
     if (ws) {
       env.TOME_BRAIN = await brain.ensureBrain(ws)
       const info = await brain.coreInfo(await readStore('core-vault'))
@@ -360,9 +426,10 @@ app.whenReady().then(async () => {
     conductor.register(id, { kind, cwd: cwd || homedir(), airgap: !!gapped })
     p.onData((data) => {
       conductor.record(id, data)
-      win?.webContents.send('pty:data', { id, data })
+      queuePtyData(id, data)
     })
     p.onExit(({ exitCode }) => {
+      flushPtyData(id) // don't strand buffered output on exit
       ptys.delete(id)
       conductor.markExited(id)
       airgap.closePane(id)
@@ -370,8 +437,10 @@ app.whenReady().then(async () => {
     })
   }
   ipcMain.on('pty:write', (e, { id, data }) => ptys.get(id)?.write(data))
+  ipcMain.on('chat:abort', (e, id) => conductor.abortChat(id))
   ipcMain.on('pty:resize', (e, { id, cols, rows }) => ptys.get(id)?.resize(cols, rows))
   ipcMain.on('pty:kill', (e, { id }) => {
+    flushPtyData(id)
     ptys.get(id)?.kill()
     ptys.delete(id)
     conductor.forget(id)
@@ -611,6 +680,9 @@ app.whenReady().then(async () => {
 
   // ---- agents ----
   ipcMain.handle('agents:list', async () => {
+    // Wait for the login-shell PATH (async, cached) so Finder launches still
+    // find agents installed in ~/.local/bin etc.
+    await ensureLoginEnv()
     const check = (name) =>
       new Promise((resolve) => {
         execFile(SHELL, ['-l', '-c', `command -v ${name}`], (err) =>
@@ -623,8 +695,9 @@ app.whenReady().then(async () => {
   // ---- chat (Claude API, streamed from main so the key never enters the renderer) ----
   // Resolved per send so a key added to the shell after boot is picked up on
   // the next message; the SDK client itself is built once (anthropic ??=).
-  function chatProvider() {
-    const reqKey = process.env.REQUESTY_API_KEY || resolveAgentSecrets().REQUESTY_API_KEY
+  async function chatProvider() {
+    const secrets = await resolveAgentSecrets()
+    const reqKey = process.env.REQUESTY_API_KEY || secrets.REQUESTY_API_KEY
     if (reqKey)
       return { opts: { apiKey: reqKey, baseURL: REQUESTY_BASE }, model: REQUESTY_MODEL, beta: false }
     return { opts: {}, model: ANTHROPIC_MODEL, beta: true }
@@ -632,7 +705,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('chat:send', async (e, { id, messages, brainWs }) => {
     try {
-      const provider = chatProvider()
+      const provider = await chatProvider()
       anthropic ??= new Anthropic(provider.opts)
       // conductor system prompt (workspace tools) + the brain vault context
       let system = conductor.SYSTEM
@@ -651,12 +724,30 @@ app.whenReady().then(async () => {
       const authy = err?.status === 401 || /api.key|auth/i.test(msg)
       win?.webContents.send('chat:done', {
         id,
+        aborted: false,
         error: authy
           ? 'No chat credentials found. Set REQUESTY_API_KEY (router) or ANTHROPIC_API_KEY (direct) in your shell and restart Tome.'
           : msg,
       })
     }
   })
+})
+
+// ---- quit handshake ----
+// Give the renderer one beat to persist the dockview layout before the
+// process goes away. Before-quit fires on every quit path (Cmd+Q, menu,
+// window-all-closed below), so this is the single place to hook.
+let quitting = false
+app.on('before-quit', (e) => {
+  if (quitting || !win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed())
+    return
+  e.preventDefault()
+  quitting = true // re-entry from quitNow() must not loop
+  win.webContents.send('app:before-quit')
+  setTimeout(() => app.quit(), 1500) // hard cap: never hang the quit
+})
+ipcMain.on('app:quit-ready', () => {
+  if (quitting) app.quit()
 })
 
 app.on('window-all-closed', () => {
