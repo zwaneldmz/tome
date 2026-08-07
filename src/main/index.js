@@ -22,8 +22,11 @@ const AGENTS = ['claude', 'opencode', 'pi']
 // Assistant provider: the Requesty router by default (REQUESTY_API_KEY, pulled
 // from the login shell like the agent-pane secrets — Finder launches don't see
 // .zshrc). Without a Requesty key, fall back to direct Anthropic.
-const REQUESTY_BASE = process.env.TOME_CHAT_BASE_URL || 'https://router.requesty.ai/v1'
-const REQUESTY_MODEL = process.env.TOME_CHAT_MODEL || 'anthropic/claude-opus-4-8'
+// No /v1 suffix: the SDK appends /v1/messages itself, and /v1/v1/messages 404s.
+const REQUESTY_BASE = process.env.TOME_CHAT_BASE_URL || 'https://router.requesty.ai'
+// Requesty routes Claude via vertex/bedrock; bare anthropic/* ids 403 unless the
+// key's Model Library approves them.
+const REQUESTY_MODEL = process.env.TOME_CHAT_MODEL || 'vertex/claude-opus-4-8@eu'
 const ANTHROPIC_MODEL = process.env.TOME_CHAT_MODEL || 'claude-opus-5'
 const CHAT_SYSTEM =
   'You are the assistant pane inside Tome, a desktop coding harness. ' +
