@@ -381,18 +381,27 @@ app.whenReady().then(async () => {
     // The app login already proved the passphrase (or Touch ID) — this channel
     // is gated, so nobody reaches it locked. Freeing a pane still demands a
     // second factor: the TOTP code when enrolled, the passphrase otherwise.
-    if (authlock.totpActive()) {
-      if (!authlock.verifyTotp(code)) return { ok: false, error: 'Wrong 2FA code.' }
-    } else if (!authlock.verifyPassphrase(passphrase)) {
-      return { ok: false, error: 'Wrong passphrase.' }
+    const wait = authlock.throttleRetryIn('airgap:unlock')
+    if (wait) return { ok: false, error: `Too many attempts — try again in ${Math.ceil(wait / 1000)}s.` }
+    const ok = authlock.totpActive()
+      ? authlock.verifyTotp(code)
+      : authlock.verifyPassphrase(passphrase)
+    if (!ok) {
+      authlock.recordFailure('airgap:unlock')
+      return { ok: false, error: authlock.totpActive() ? 'Wrong 2FA code.' : 'Wrong passphrase.' }
     }
+    authlock.recordSuccess('airgap:unlock')
     airgap.unlockPane(paneId, minutes)
     return { ok: true }
   })
   ipcMain.handle('airgap:relock', (e, paneId) => airgap.relockPane(paneId))
   ipcMain.handle('airgap:setup', async (e, { passphrase }) => {
     if (authlock.authStatus().configured) return { ok: false, error: 'Already configured.' }
-    await authlock.setPassphrase(passphrase)
+    try {
+      await authlock.setPassphrase(passphrase)
+    } catch (err) {
+      return { ok: false, error: err.message }
+    }
     authlock.markUnlocked() // first-run setup happens at the lock screen
     return { ok: true }
   })
@@ -415,9 +424,15 @@ app.whenReady().then(async () => {
     }
   })
   ipcMain.handle('auth:login', (e, { passphrase, code }) => {
-    if (!authlock.verifyPassphrase(passphrase)) return { ok: false, error: 'Wrong passphrase.' }
-    if (authlock.totpActive() && !authlock.verifyTotp(code))
-      return { ok: false, error: 'Wrong 2FA code.' }
+    const wait = authlock.throttleRetryIn('auth:login')
+    if (wait) return { ok: false, error: `Too many attempts — try again in ${Math.ceil(wait / 1000)}s.` }
+    const passOk = authlock.verifyPassphrase(passphrase)
+    const totpOk = !authlock.totpActive() || authlock.verifyTotp(code)
+    if (!passOk || !totpOk) {
+      authlock.recordFailure('auth:login')
+      return { ok: false, error: passOk ? 'Wrong 2FA code.' : 'Wrong passphrase.' }
+    }
+    authlock.recordSuccess('auth:login')
     authlock.markUnlocked()
     return { ok: true }
   })
