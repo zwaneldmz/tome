@@ -208,7 +208,7 @@ export async function runChat(anthropic, { id, model, system, messages, betas, f
       }
       totalTokens += (final.usage?.input_tokens || 0) + (final.usage?.output_tokens || 0)
       if (final.stop_reason === 'refusal') {
-        send('chat:done', { id, error: 'Request declined by safety classifiers.' })
+        send('chat:done', { id, aborted: false, error: 'Request declined by safety classifiers.' })
         return
       }
       if (final.stop_reason !== 'tool_use') {
@@ -231,6 +231,7 @@ export async function runChat(anthropic, { id, model, system, messages, betas, f
       if (totalTokens > TOKEN_BUDGET) {
         send('chat:done', {
           id,
+          aborted: false,
           error: `Token budget reached (~${Math.round(totalTokens / 1000)}k tokens across tool turns) — stopped early. Ask again to continue.`,
         })
         return
@@ -240,7 +241,7 @@ export async function runChat(anthropic, { id, model, system, messages, betas, f
       send('chat:done', { id, aborted: true, error: 'Stopped.' })
       return
     }
-    send('chat:done', { id, error: 'Tool loop limit reached — ask again to continue.' })
+    send('chat:done', { id, aborted: false, error: 'Tool loop limit reached — ask again to continue.' })
   } finally {
     inflight.delete(id)
   }

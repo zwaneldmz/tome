@@ -587,6 +587,7 @@ app.whenReady().then(async () => {
       const authy = err?.status === 401 || /api.key|auth/i.test(msg)
       win?.webContents.send('chat:done', {
         id,
+        aborted: false,
         error: authy
           ? 'No chat credentials found. Set REQUESTY_API_KEY (router) or ANTHROPIC_API_KEY (direct) in your shell and restart Tome.'
           : msg,
