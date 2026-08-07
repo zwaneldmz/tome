@@ -16,6 +16,7 @@ const DEFAULT_ALLOW = [
   'generativelanguage.googleapis.com',
   'oauth2.googleapis.com',
   'openrouter.ai',
+  'router.requesty.ai',
   'api.deepseek.com',
   'api.moonshot.ai',
   'api.groq.com',
