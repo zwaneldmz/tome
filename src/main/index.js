@@ -19,7 +19,12 @@ let anthropic = null
 
 const SHELL = process.env.SHELL || '/bin/zsh'
 const AGENTS = ['claude', 'opencode', 'pi']
-const CHAT_MODEL = process.env.TOME_CHAT_MODEL || 'claude-opus-5'
+// Assistant provider: the Requesty router by default (REQUESTY_API_KEY, pulled
+// from the login shell like the agent-pane secrets — Finder launches don't see
+// .zshrc). Without a Requesty key, fall back to direct Anthropic.
+const REQUESTY_BASE = process.env.TOME_CHAT_BASE_URL || 'https://router.requesty.ai/v1'
+const REQUESTY_MODEL = process.env.TOME_CHAT_MODEL || 'anthropic/claude-opus-4-8'
+const ANTHROPIC_MODEL = process.env.TOME_CHAT_MODEL || 'claude-opus-5'
 const CHAT_SYSTEM =
   'You are the assistant pane inside Tome, a desktop coding harness. ' +
   'Keep responses focused, brief, and concise. Plain text only — no markdown tables.'
@@ -477,19 +482,30 @@ app.whenReady().then(async () => {
   })
 
   // ---- chat (Claude API, streamed from main so the key never enters the renderer) ----
+  // Resolved per send so a key added to the shell after boot is picked up on
+  // the next message; the SDK client itself is built once (anthropic ??=).
+  function chatProvider() {
+    const reqKey = process.env.REQUESTY_API_KEY || resolveAgentSecrets().REQUESTY_API_KEY
+    if (reqKey)
+      return { opts: { apiKey: reqKey, baseURL: REQUESTY_BASE }, model: REQUESTY_MODEL, beta: false }
+    return { opts: {}, model: ANTHROPIC_MODEL, beta: true }
+  }
+
   ipcMain.handle('chat:send', async (e, { id, messages, brainWs }) => {
     try {
-      anthropic ??= new Anthropic()
+      const provider = chatProvider()
+      anthropic ??= new Anthropic(provider.opts)
       // conductor system prompt (workspace tools) + the brain vault context
       let system = conductor.SYSTEM
       if (brainWs) system += await brain.contextFor(brainWs, messages[messages.length - 1]?.content || '')
       await conductor.runChat(anthropic, {
         id,
-        model: CHAT_MODEL,
+        model: provider.model,
         system,
         messages,
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
+        // server-side fallback betas are Anthropic-only; routers 400 on them
+        betas: provider.beta ? ['server-side-fallback-2026-07-01'] : undefined,
+        fallbacks: provider.beta ? 'default' : undefined,
       })
     } catch (err) {
       const msg = err?.message || String(err)
@@ -497,7 +513,7 @@ app.whenReady().then(async () => {
       win?.webContents.send('chat:done', {
         id,
         error: authy
-          ? 'No Claude API credentials found. Set ANTHROPIC_API_KEY in your shell (or run `ant auth login`) and restart Tome.'
+          ? 'No chat credentials found. Set REQUESTY_API_KEY (router) or ANTHROPIC_API_KEY (direct) in your shell and restart Tome.'
           : msg,
       })
     }
