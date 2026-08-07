@@ -1,6 +1,7 @@
 // Unlock authentication: scrypt-hashed passphrase + optional TOTP (RFC 6238).
 // Stored in userData/airgap-auth.json (0600) — the seatbelt profile denies
 // air-gapped panes read access to this file.
+export const MIN_PASSPHRASE_LEN = 8
 import { randomBytes, scryptSync, createHmac, timingSafeEqual } from 'node:crypto'
 import { readFile, writeFile, chmod } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -33,6 +34,8 @@ export function authStatus() {
 }
 
 export async function setPassphrase(pass) {
+  if (typeof pass !== 'string' || pass.length < MIN_PASSPHRASE_LEN)
+    throw new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LEN} characters.`)
   const salt = randomBytes(16).toString('hex')
   const hash = scryptSync(pass, salt, 32).toString('hex')
   auth = { ...(auth || {}), salt, hash }
@@ -112,4 +115,33 @@ export async function confirmTotp(code) {
 
 export function totpActive() {
   return !!auth?.totp?.active
+}
+
+// ---- login throttling ----
+// scrypt at default cost is ~30 ms — a speed bump, not a wall, against IPC-
+// speed brute force. Back off exponentially after repeated failures
+// (5 → 30 s, doubling, capped at 30 min), per purpose so the lock screen and
+// pane unlock throttle independently. Success resets the counter.
+const BACKOFF_AFTER = 5
+const BACKOFF_BASE_MS = 30_000
+const BACKOFF_MAX_MS = 30 * 60_000
+const attempts = new Map() // purpose -> { fails, nextAt }
+
+export function throttleRetryIn(purpose) {
+  const a = attempts.get(purpose)
+  return Math.max(0, (a?.nextAt || 0) - Date.now())
+}
+
+export function recordFailure(purpose) {
+  const a = attempts.get(purpose) || { fails: 0, nextAt: 0 }
+  a.fails++
+  if (a.fails >= BACKOFF_AFTER)
+    a.nextAt =
+      Date.now() +
+      Math.min(BACKOFF_BASE_MS * 2 ** (a.fails - BACKOFF_AFTER), BACKOFF_MAX_MS)
+  attempts.set(purpose, a)
+}
+
+export function recordSuccess(purpose) {
+  attempts.delete(purpose)
 }
