@@ -3,6 +3,7 @@
 // to the Claude chat loop, and never runs a command unless the user flipped
 // the "assistant may run commands" toggle (allowRun) on.
 import { stripAnsi, stripControlChars } from './lib/terminal-text.js'
+import { AGENTS, OPENABLE_KINDS_DESCRIPTION } from '../shared/pane-kinds.js'
 
 let ptys = null // Map shared with index.js
 let send = () => {} // (channel, payload) -> renderer
@@ -80,8 +81,9 @@ const TOOLS = [
   },
   {
     name: 'open_pane',
-    description:
-      "Open a new pane in the grid. kind is one of: 'terminal', 'claude', 'opencode', 'pi', 'chat', 'brain'.",
+    // shared/pane-kinds.js owns the list — main's AGENTS and the renderer's
+    // conductor:open switch read the same module
+    description: 'Open a new pane in the grid. ' + OPENABLE_KINDS_DESCRIPTION,
     input_schema: {
       type: 'object',
       properties: { kind: { type: 'string' } },
@@ -101,7 +103,7 @@ const TOOLS = [
 
 export const SYSTEM =
   'You are the assistant pane inside Tome, a desktop coding harness whose grid holds ' +
-  'terminal panes, agent CLI panes (claude, opencode, pi), editors, documents, and note vaults. ' +
+  `terminal panes, agent CLI panes (${AGENTS.join(', ')}), editors, documents, and note vaults. ` +
   'You have tools to inspect and drive the workspace: list panes, read a terminal’s recent ' +
   'output, type into a terminal, open new panes or files. Use them whenever the user refers to ' +
   'other panes ("what is claude doing", "run the tests over there", "open a terminal"). ' +

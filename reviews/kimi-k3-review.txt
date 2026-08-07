@@ -1,0 +1,291 @@
+Tome — Code-Review Council Report
+page 1
+TOME
+Code-Review Council Report
+A neon-on-black desktop coding harness — Electron + dockview + xterm + node-pty +
+CodeMirror.
+Reviewed: ~3,300 LOC across main, preload, and renderer processes.
+Project: tome v0.1.0  ·  Author: Lwando Zwane  ·  Date: August 07, 2026
+Scope: Full source review — src/main (index, airgap, authlock, brain, conductor), src/preload, src/renderer (renderer,
+history, lock), build scripts, CI, packaging.
+The Council: five experts, each reviewing from their own discipline, then a synthesized verdict.
+Dr. Ada Okonkwo — Application Security — threat modelling, sandboxing, IPC
+Marcus Feld — Electron & Desktop Platform Engineering
+Priya Raman — Systems & Reliability — processes, PTYs, lifecycle, failure modes
+Jonas Lindqvist — Code Quality & Architecture
+Sofia Marchetti — Product/UX & Developer Experience
+Overall verdict: 8.0 / 10 — an unusually disciplined, security-literate v0.1. The air-gap design and IPC
+lock-gating are genuinely thoughtful. The gaps are the gaps of a young project: no tests, no TypeScript,
+one 1,664-line renderer file, and a handful of sharpenable security edges.
+
+Tome — Code-Review Council Report
+page 2
+1. Dr. Ada Okonkwo — Application Security
+Threat modelling · sandboxing · IPC · cryptography
+This is the strongest part of the codebase. The author clearly thinks like an attacker: the app-lock is enforced in the
+main process by wrapping ipcMain.handle itself — so every handler registered afterwards inherits the guard, and
+the comment says so. The pty command line is built in main from a vetted kind allowlist, so a compromised renderer
+cannot request arbitrary binaries. The air gap widens the proxy, never the sandbox — the correct invariant. These are
+the decisions of someone who has read Electron security postmortems.
+[STRENGTH] Lock-gating via wrapper, not paint. ipcMain.handle = (ch, fn) => rawHandle(...)
+with an OPEN_CHANNELS allowlist means pty/fs/git/chat/brain all refuse pre-login. Fail-closed by construction.
+[STRENGTH] Sandboxed renderer + tight CSP. sandbox: true, contextBridge-only API, and a CSP with
+script-src 'self', object-src 'none', base-uri 'none'. Converted docx/xlsx render in a
+sandbox="" srcdoc iframe — no scripts, no navigation.
+[STRENGTH] Conductor auto-run guard. When auto-run is off, control characters (CR/LF/Ctrl-C/Ctrl-D) are
+stripped from typed text so the model cannot smuggle a submission. Commit b577f31 shows this was a
+found-and-fixed hole.
+[STRENGTH] Seatbelt profile is layered correctly. default-allow, deny network-outbound, re-allow loopback
+only, deny writes to userData, deny reads of the TOTP secret file. Unlocking only widens the proxy.
+[STRENGTH] Path confinement in brain.js. confine() rejects absolute paths, .. segments, and non-.md for
+notes; AGENTS.md is delete-protected. Symlink escape is theoretically possible but acceptable for a local vault.
+[HIGH] Custom tome:// protocol reads ANY local file. protocol.handle('tome', …
+net.fetch(pathToFileURL(p))) takes a path from a query param with no confinement. The scheme is
+privileged (supportFetchAPI, corsEnabled: true), and the renderer can fetch
+tome://local/?p=/Users/…/.ssh/id_rsa. The comment claims "renderer JS cannot read tome:// bodies",
+but corsEnabled: true plus supportFetchAPI undermines exactly that. If any XSS ever lands, this is a full
+local-file-exfiltration primitive. Fix: drop corsEnabled/supportFetchAPI, or confine to workspace folders + an
+extension allowlist.
+[HIGH] Env-var secret harvesting is broad. resolveAgentSecrets() scrapes every
+*_API_KEY|*_KEY|*_TOKEN from an interactive login shell and hands them to agent panes — including
+air-gapped ones. The regex admits it may over-match ("ponytail"). A *_KEY like GITHUB_TOKEN or NPM_TOKEN
+leaks into a sandboxed agent that only needs ANTHROPIC_API_KEY. Fix: explicit per-provider allowlist
+(ANTHROPIC_API_KEY, OPENAI_API_KEY…), not a suffix glob.
+[MEDIUM] scryptSync at default cost + no rate limiting on login. verifyPassphrase uses
+scryptSync(pass, salt, 32) — default N=16384 is fine — but auth:login has no attempt throttling or
+exponential backoff, so an unlocked-session renderer can brute-force the passphrase at IPC speed. Add a failure
+counter with delay.
+[MEDIUM] TOTP secret stored as reversible base32 in a JSON file. 0600 + seatbelt denial is decent, but the
+secret sits unencrypted at rest. Consider Keychain (safeStorage) for the TOTP secret and passphrase hash.
+[MEDIUM] CONNECT proxy trusts the Host header path. The plain-HTTP branch forwards req.headers
+verbatim, including any Host the client supplies — mostly harmless given the hostname allowlist is checked from
+the URL, but the proxy also forwards Proxy-Authorization etc. Strip hop-by-hop and proxy headers.
+[LOW] Wildcard compile allows single-label only. bedrock-runtime.*.amazonaws.com compiles to
+[a-z0-9-]+ — correct and non-greedy, good. But there is no test pinning that *.amazonaws.com does not
+match amazonaws.com.evil.com. It does not (anchored ^$) — but pin it with a unit test.
+
+Tome — Code-Review Council Report
+page 3
+[LOW] shell:openPath and doc:read take unvetted absolute paths from the renderer. Acceptable behind the
+lock (the user can open a terminal anyway), but document the trust boundary: renderer compromise ≈
+user-privileged file read.
+Verdict: 8.5/10. The architecture is right; the tome:// protocol and secret-scraping breadth are the two
+things I would fix before calling this hardened.
+
+Tome — Code-Review Council Report
+page 4
+2. Marcus Feld — Electron & Desktop Platform Engineering
+Process model · packaging · macOS integration
+Solid, idiomatic Electron. electron-vite with externalizeDepsPlugin is the right build; node-pty is correctly
+asarUnpacked; the fix-electron.sh script and the Info.plist rename show real scars from shipping Electron on macOS
+— the launchd PATH problem, the .zshrc blind spot, the Electron-uninstall guard. This is written by someone who has
+actually distributed an Electron app, not just run one in dev.
+[STRENGTH] The login-PATH resolution is a genuinely good hack. Spawning $SHELL -ilc 'echo -n
+$PATH' once at boot, filtering ANSI, and appending well-known bin dirs solves the #1 "works in dev, broken from
+Finder" bug class.
+[STRENGTH] Secrets never enter the renderer. Anthropic streaming lives in main; the preload exposes only
+invoke channels. Chat deltas flow main→renderer as events. Correct.
+[STRENGTH] window-all-closed kills every pty before quit. No orphaned claude/zsh processes. Many apps
+forget this.
+[HIGH] Two synchronous 8-second shell-outs on the boot path. resolveLoginPath() and
+resolveAgentSecrets() each call execFileSync($SHELL -ilc …) with an 8s timeout. A slow .zshrc (nvm,
+pyenv, oh-my-zsh) can stall app launch by up to 16s on the main process. Fix: run once, async, in parallel, cache
+the result; or move secret resolution to first agent spawn.
+[MEDIUM] PTY output is bridged over IPC with no backpressure. Every pty data chunk becomes a
+webContents.send. A yes or a cat of a large file floods the IPC channel and the xterm write queue. xterm.js can
+keep up, but the main→renderer hop cannot batch. Consider a SharedArrayBuffer/ring or at least chunk coalescing
+(node-pty's useConpty/flow control aside, a 4ms coalesce window cuts message count ~10×).
+[MEDIUM] Unsigned, unnotarized distribution. identity: null + "ad-hoc sign if you like" is fine for personal
+use, but Gatekeeper will quarantine the .app for anyone else. If this is shared, budget for a Developer ID cert +
+notarization in CI (the workflow already runs on macos-latest).
+[MEDIUM] CI builds but never packages or tests. The workflow runs electron-vite build only — no npm
+run package, no smoke test, no lint, no typecheck. A broken renderer import fails silently at runtime, not in CI.
+[LOW] sendSync for homedir. app:home via ipcRenderer.sendSync blocks the renderer at module load. It
+resolves instantly, but an invoke is strictly better and costs nothing.
+[LOW] No single-instance lock or window-state persistence. Two Tomes fight over the same ptys/store;
+window opens at 1440×900 every time. requestSingleInstanceLock() and a saved bounds object are ~20
+lines.
+Verdict: 8/10. Platform instincts are excellent; boot-time sync shell-outs and IPC backpressure are the
+two engineering debts to schedule.
+
+Tome — Code-Review Council Report
+page 5
+3. Priya Raman — Systems & Reliability
+Process lifecycle · failure modes · resource management
+The failure handling is better than most v0.1s: pty:create failures are surfaced into the pane as red text instead of a
+blank screen (commit 9188c5c — a fix born of pain), the proxy has clientError/connection error handlers, and the
+brain indexer drops files deleted mid-walk. But there is a class of lifecycle leaks and a total absence of automated
+verification.
+[HIGH] No tests. Zero. No unit, no integration, no smoke. The seatbelt profile string, the TOTP implementation
+(hand-rolled base32 + HOTP), the confine() path guard, the wildcard compiler, the ANSI stripper — these are
+exactly the functions that MUST have pinned behavior, and a regression in any of them is silent. HOTP/TOTP
+especially: hand-rolled crypto without a single RFC 6238 test vector is a coin flip. Start with vitest on the four pure
+modules (authlock, airgap compile, brain confine/parse, conductor stripAnsi).
+[MEDIUM] Proxy servers leak if the pty dies without onExit. closePane is called from onExit and pty:kill — good
+— but if the main process crashes or the pane id is never registered, the http.Server keeps listening on a loopback
+port forever. There is no reaper for panes Map entries vs live ptys. A periodic reconciliation sweep is cheap
+insurance.
+[MEDIUM] Conductor scrollback is unbounded growth per session until 200KB — fine — but never pruned
+for dead panes except on kill/exit. markExited keeps the scroll; forget only on explicit kill. Long session, many
+panes: memory grows linearly. Cap total, not just per-pane.
+[MEDIUM] fs.watch({recursive:true}) is macOS/Windows-only. The code catches the throw and silently never
+reindexes — on Linux the brain pane just goes stale with no signal. Tome is mac-only today (seatbelt, Touch ID),
+so this is latent, but say so in the README or gate the feature.
+[MEDIUM] Chat tool loop caps at 8 turns but max_tokens is 64000 per turn with streaming — a runaway
+model can stream 512K tokens of cost before the loop limit bites. Add a cumulative token/character budget
+across turns.
+[LOW] git:info shells out 3× every 5 seconds per refresh. rev-parse + status + rev-list on a 5s interval — fine for
+small repos, noticeable on a monorepo. Use git status --porcelain=v2 --branch once (it reports
+ahead/behind and branch in a single invocation).
+[LOW] Debounce timers and watchers are cleaned on close, but brain.close is only called from the panel
+dispose — workspace deletion leaves the watcher running until app exit.
+Verdict: 7/10. Failure modes are considered and mostly handled; the missing test floor is the single
+largest reliability risk in the project.
+
+Tome — Code-Review Council Report
+page 6
+4. Jonas Lindqvist — Code Quality & Architecture
+Structure · maintainability · consistency
+The code reads beautifully. The comments are the best I have seen in a personal project — they explain why, they
+admit trade-offs ("Collisions share a vault; accepted"), they mark future work ("If workspace rename is ever
+added…"). The main-process modules (airgap, authlock, brain, conductor) are small, single-purpose, and shaped
+identically: pure functions + module state + an event sink. That consistency is a hallmark of taste.
+[STRENGTH] Uniform module shape in main. Every service module: state Maps, setEventSink, exported verbs.
+Predictable, greppable, easy to hold in your head.
+[STRENGTH] Comments as design docs. The ponytail comment, the seatbelt layering rationale, the conductor
+control-char explanation — these preserve intent across time. Keep this standard.
+[HIGH] renderer.js is 1,664 lines and seven responsibilities. Workspaces, toasts, pty fan-out, air-gap UI, five
+panel classes, dock wiring, menus, git widget, modals, file tree, boot. It is well-organized internally, but it is one
+careless edit from spaghetti, and it is where every new feature lands. Split along the existing seams: panels/
+(terminal, editor, doc, chat, brain), menus.js, tree.js, git.js, modals.js. The panel classes are already de-facto
+modules.
+[MEDIUM] No TypeScript. The IPC surface is ~40 channels with ad-hoc payload shapes passed as anonymous
+objects. Every refactor of a payload is a grep-and-pray. Even JSDoc + checkJs, or a shared types.d.ts for the
+preload API, would catch the most common breakage. The main-process modules are pure enough to port
+incrementally.
+[MEDIUM] Duplicate modal/menu logic. modalShell in renderer.js and overlay() in lock.js are the same
+component twice; airgapModal/setupModal/totpModal overlap heavily. Extract one modal primitive.
+[MEDIUM] Magic strings for pane kinds in three places. AGENTS in main, the conductor open_pane
+description, and the onOpen switch in the renderer must stay in sync by hand. A shared constants module (or at
+least one exported list imported by both sides) removes a drift class.
+[LOW] Mutable shared module state. ptys Map shared by reference between index.js and conductor.js via init()
+works, but a tiny explicit context object would make the dependency visible and testable.
+[LOW] Inconsistent error surfaces. Some IPC returns {ok, error}, some throws, some returns null. Pick one
+convention (throw for exceptional, {{ok:false}} for expected) and apply it — the renderer already handles both.
+Verdict: 8/10. Taste and documentation are top-tier; the monolithic renderer and absent type floor are
+the structural debts.
+
+Tome — Code-Review Council Report
+page 7
+5. Sofia Marchetti — Product, UX & Developer Experience
+Interaction design · onboarding · coherence
+Tome knows exactly what it is: one grid, your agents, zero config. The README is a model of the genre — every
+feature described in one sentence with its keybinding, its default, and its escape hatch. The neon-grimoire identity
+(hand-authored 16×16 sprite rendered to every macOS size!) is coherent from icon to xterm palette to graph view.
+The details delight: agents light up when their CLI appears on PATH, the air-gap strip flashes blocked hosts, the
+graph respects prefers-reduced-motion, dirty dots in tabs, IntelliJ-style branch chip.
+[STRENGTH] Progressive security UX. Lock screen offers Touch ID first and auto-prompts it; air-gap unlock
+asks only for the second factor since login already proved the first; 2FA enrollment is offered contextually from the
+unlock modal. Security features that do not punish the user get left on.
+[STRENGTH] Fail-visible. Pane spawn failures print red text into the pane; blocked hosts toast and flash on the
+strip; missing API key gets a human setup hint, not a stack trace.
+[MEDIUM] Discovery depends entirely on the README. No in-app onboarding beyond the lock screen, no
+keyboard shortcut palette, no tooltips on the I toggles until you hover. A first-run "what is this grid" splash or a IK
+command palette would flatten the learning curve for anyone but the author.
+[MEDIUM] No pane persistence. Layout, open files, chat history, and terminal sessions vanish on quit. dockview
+serializes layouts for free (toJSON/fromJSON) — persisting the grid per workspace would be the single biggest
+daily-use quality win.
+[MEDIUM] Error toasts disappear in 4.8s with no history. A missed "airgap blocked" or a failed checkout is
+gone forever. A minimal notification drawer (or just a longer, dismissible error toast) respects the user's attention.
+[LOW] Accessibility is thin. Menus have role=menu but no keyboard navigation; the graph canvas is mouse-only;
+contrast of muted-on-void (#566179 on #060609) is below WCAG AA for body text. Fine for a personal tool, a
+blocker for a shared one.
+[LOW] Chat has no stop button and no retry. A 64K-token stream you cannot cancel, and a failed send drops
+the message (history.pop) with no resend affordance.
+Verdict: 8/10. Opinionated, coherent, and honest about its scope. Pane persistence and a command
+palette are the two features that would most change daily life.
+
+Tome — Code-Review Council Report
+page 8
+Council Synthesis
+Where the council agrees, and what to do first.
+Unanimous strengths — the things to protect as the project grows:
+• Fail-closed security architecture. The lock-gate wraps ipcMain.handle itself; the air gap widens the proxy,
+never the sandbox; the conductor strips control chars when auto-run is off. This is a coherent security posture, not
+a pile of features.
+• Comments that preserve intent. Design rationale, admitted trade-offs, and marked future work — the
+highest-leverage documentation habit a solo project can have.
+• Real platform scars. login-PATH resolution, the .zshrc secret blind spot, fix-electron.sh, node-pty asarUnpack —
+evidence of an app that has actually shipped on macOS.
+• Coherent identity. Icon, palette, graph view, README — one aesthetic, executed everywhere.
+Priority actions — ranked by (risk × effort):
+#
+Action
+Why
+Effort
+1
+Add a test floor: vitest on authlock (RFC 6238 vectors),
+airgap wildcard compile, brain confine(), conductor
+stripAnsi. Wire into CI.
+Hand-rolled crypto + path guards with zero
+pinned behavior is the largest silent-regression
+risk.
+S
+2
+Fix the tome:// protocol: drop
+corsEnabled/supportFetchAPI or confine paths to
+workspace folders + extension allowlist.
+Currently a read-any-file primitive one XSS
+away from exfiltration.
+S
+3
+Narrow resolveAgentSecrets() to an explicit
+per-provider allowlist.
+GITHUB_TOKEN et al. should never enter an
+air-gapped agent pane.
+S
+4
+Make boot shell-outs async + parallel; never
+execFileSync on the launch path.
+Up to 16s launch stall on heavy .zshrc setups.
+S
+5
+Split renderer.js along existing seams (panels/, menus,
+tree, git, modals).
+1,664 lines is where every feature lands; split
+before it ossifies.
+M
+6
+Persist dockview layout per workspace
+(toJSON/fromJSON) + single-instance lock.
+Biggest daily-use quality win; ~30 lines.
+S
+7
+Add login attempt throttling; move TOTP secret to
+safeStorage/Keychain.
+Brute-force at IPC speed; plaintext secret at
+rest.
+S
+8
+CI: lint + build renderer smoke test + npm run package;
+consider notarization if distributing.
+A broken renderer import currently fails at
+runtime, not in CI.
+M
+9
+Coalesce pty data events (4ms window) before the IPC
+hop.
+yes/cat-of-big-file floods main→renderer.
+S
+10
+Adopt JSDoc+checkJs or a shared types.d.ts for the
+~40-channel IPC surface.
+Payload refactors are grep-and-pray today.
+M
+Final word. Tome is a rare v0.1: small, opinionated, and security-literate, with comments that will age well. The
+council's consensus is that nothing here is broken — but the project is one renderer-file and zero-tests away from
+becoming hard to change safely. Buy the test floor and the renderer split now, while the codebase is still small
+enough to hold in one head. The air-gap and lock architecture deserve to survive contact with contributors.
+Scorecard — Security 8.5 · Platform 8.0 · Reliability 7.0 · Code Quality 8.0 · Product/UX 8.0 · Overall 8.0/10
+Report generated by a five-expert review council · Tome v0.1.0 · 2026-08-07
+

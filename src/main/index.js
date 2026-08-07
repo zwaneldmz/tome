@@ -15,6 +15,7 @@ import * as airgap from './airgap'
 import * as authlock from './authlock'
 import * as brain from './brain'
 import * as conductor from './conductor'
+import { AGENTS } from '../shared/pane-kinds.js'
 
 const ptys = new Map()
 
@@ -85,7 +86,6 @@ async function confinedRealPath(p) {
 }
 
 const SHELL = process.env.SHELL || '/bin/zsh'
-const AGENTS = ['claude', 'opencode', 'pi']
 // Assistant provider: the Requesty router by default (REQUESTY_API_KEY, pulled
 // from the login shell like the agent-pane secrets — Finder launches don't see
 // .zshrc). Without a Requesty key, fall back to direct Anthropic.
