@@ -187,6 +187,24 @@ app.whenReady().then(async () => {
   // The renderer names a vetted pane kind; the command line is built HERE so a
   // compromised renderer can't request arbitrary binaries or arguments.
   ipcMain.handle('pty:create', async (e, { id, kind, cwd, airgap: gapped, ws }) => {
+    try {
+      return await createPty({ id, kind, cwd, gapped, ws })
+    } catch (err) {
+      // The renderer fires this without awaiting, so a throw here used to
+      // surface as nothing but a blank pane. Say what broke.
+      console.error(
+        `pty:create failed (kind=${kind}, airgap=${!!gapped}, cwd=${cwd}, ws=${ws}):`,
+        err
+      )
+      win?.webContents.send('pty:data', {
+        id,
+        data: `\r\n\x1b[31mpane failed to start: ${String(err?.message || err)}\x1b[0m\r\n`,
+      })
+      throw err
+    }
+  })
+
+  async function createPty({ id, kind, cwd, gapped, ws }) {
     const isAgent = AGENTS.includes(kind)
     if (!isAgent && kind !== 'terminal') return
     let spawnCmd = SHELL
@@ -226,7 +244,7 @@ app.whenReady().then(async () => {
       airgap.closePane(id)
       win?.webContents.send('pty:exit', { id, exitCode })
     })
-  })
+  }
   ipcMain.on('pty:write', (e, { id, data }) => ptys.get(id)?.write(data))
   ipcMain.on('pty:resize', (e, { id, cols, rows }) => ptys.get(id)?.resize(cols, rows))
   ipcMain.on('pty:kill', (e, { id }) => {
