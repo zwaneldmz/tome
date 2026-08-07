@@ -42,6 +42,25 @@ export function seatbeltProfile(userData) {
   ].join('\n')
 }
 
+// RFC 9110 hop-by-hop headers must not be forwarded verbatim: a pane could
+// otherwise smuggle Proxy-Authorization or abuse Connection/Upgrade
+// semantics through the proxy. Node lowercases incoming header names.
+const HOP_BY_HOP = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailers',
+  'transfer-encoding',
+  'upgrade',
+])
+function forwardHeaders(headers) {
+  const out = {}
+  for (const [k, v] of Object.entries(headers)) if (!HOP_BY_HOP.has(k)) out[k] = v
+  return out
+}
+
 function hostAllowed(paneId, host) {
   if (panes.get(paneId)?.mode === 'open') return true
   return allowMatchers.some((re) => re.test(host))
@@ -78,7 +97,7 @@ export function createPaneProxy(paneId) {
         port: u.port || 80,
         path: u.pathname + u.search,
         method: req.method,
-        headers: req.headers,
+        headers: forwardHeaders(req.headers),
       },
       (ur) => {
         res.writeHead(ur.statusCode, ur.headers)

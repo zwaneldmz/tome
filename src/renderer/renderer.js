@@ -22,7 +22,11 @@ let ws = { workspaces: [], active: -1 }
 let activeRoot = null // folder whose git repo the branch widget follows
 
 const activeWorkspace = () => ws.workspaces[ws.active] || null
-const saveWs = () => tome.store.set('workspaces', ws)
+const saveWs = () => {
+  tome.store.set('workspaces', ws)
+  // main confines conductor open_file / doc:read / tome:// to these folders
+  tome.ws.syncFolders(ws.workspaces.flatMap((w) => w.folders))
+}
 const paneCwd = () => activeRoot || activeWorkspace()?.folders[0] || tome.home
 
 // ---------- toasts ----------
@@ -1493,7 +1497,7 @@ function setupModal(paneId) {
   const p1 = m.input('passphrase')
   const p2 = m.input('repeat passphrase')
   m.button('Set passphrase', async () => {
-    if (p1.value.length < 4) return (m.err.textContent = 'Too short.')
+    if (p1.value.length < 8) return (m.err.textContent = 'Too short — 8 characters minimum.')
     if (p1.value !== p2.value) return (m.err.textContent = 'Passphrases differ.')
     const r = await tome.airgap.setup(p1.value)
     if (!r.ok) return (m.err.textContent = r.error)
@@ -1641,6 +1645,7 @@ function renderAll() {
   }
   const agPref = await tome.store.get('airgap-default')
   if (agPref !== null) airgapDefault = !!agPref
+  tome.ws.syncFolders(ws.workspaces.flatMap((w) => w.folders))
   if (await tome.store.get('conductor-run')) {
     conductorRun = true
     tome.conductor.allowRun(true)

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, systemPreferences } from 'electron'
-import { join, extname } from 'node:path'
-import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises'
+import { join, resolve, extname, sep } from 'node:path'
+import { readdir, readFile, writeFile, mkdir, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { execFile, execFileSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
@@ -16,6 +16,39 @@ import * as conductor from './conductor'
 const ptys = new Map()
 let win = null
 let anthropic = null
+
+// ---- file-open confinement ----
+// Anything that opens or parses a file in main on behalf of the renderer —
+// the conductor's open_file tool (model-driven!) and doc:read's
+// mammoth/SheetJS parsers — stays inside the open workspace folders, or a
+// brain vault. Otherwise a prompt-injected chat reply could make the main
+// process parse ~/.ssh/… with libraries that have CVE histories.
+// (fs:readFile/fs:writeFile/shell:openPath stay unvetted by design: the
+// editor and tree are user-driven; the trust boundary is documented in the
+// review — renderer compromise ≈ user-privileged file access.)
+let openFolders = [] // absolute paths of open workspace folders
+function setOpenFolders(list) {
+  openFolders = Array.isArray(list) ? list.filter((f) => typeof f === 'string' && f) : []
+}
+function isBrainPath(p) {
+  return p.startsWith(brain.BRAINS_ROOT + sep)
+}
+function isConfinedPath(p) {
+  if (typeof p !== 'string' || !p) return false
+  const abs = resolve(p)
+  return openFolders.some((f) => abs === f || abs.startsWith(f + sep)) || isBrainPath(abs)
+}
+// Symlink-aware variant for main-process parsing: resolve the real path so a
+// symlink inside a workspace can't aim the parser outside it.
+async function confinedRealPath(p) {
+  if (!isConfinedPath(p)) return null
+  try {
+    const real = await realpath(p)
+    return isConfinedPath(real) ? real : null
+  } catch {
+    return null
+  }
+}
 
 const SHELL = process.env.SHELL || '/bin/zsh'
 const AGENTS = ['claude', 'opencode', 'pi']
@@ -68,28 +101,98 @@ resolveLoginPath()
 // once, and hand them only to agent panes — a plain terminal pane inherits
 // nothing, and tome's own process env is left untouched.
 let agentSecrets = null
+// Least-privilege forwarding: the old suffix match handed EVERY
+// *_API_KEY/*_KEY/*_TOKEN in the login shell (GITHUB_TOKEN, NPM_TOKEN,
+// DIGITALOCEAN_TOKEN, …) to every agent pane — air-gapped ones included —
+// when a pane needs exactly its provider's key. Forward only the credentials
+// the supported providers actually consume. New provider? Add its key here.
+const AGENT_SECRET_KEYS = new Set([
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'REQUESTY_API_KEY',
+  'OPENROUTER_API_KEY',
+  'DEEPSEEK_API_KEY',
+  'MOONSHOT_API_KEY',
+  'GROQ_API_KEY',
+  'MISTRAL_API_KEY',
+  'XAI_API_KEY',
+  'GOOGLE_API_KEY',
+  'GEMINI_API_KEY',
+  // bedrock
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_REGION',
+  'AWS_DEFAULT_REGION',
+])
 function resolveAgentSecrets() {
   if (agentSecrets) return agentSecrets
   agentSecrets = {}
   try {
     const out = execFileSync(SHELL, ['-ilc', 'env'], { timeout: 8000, encoding: 'utf8' })
     for (const line of out.split('\n')) {
-      // ponytail: suffix match over a provider allowlist — no edit needed for a
-      // new provider. Narrow it if a non-secret var ever collides.
-      const m = line.match(/^([A-Z][A-Z0-9_]*_(?:API_KEY|KEY|TOKEN))=(.*)$/)
-      if (m && m[2]) agentSecrets[m[1]] = m[2]
+      const i = line.indexOf('=')
+      if (i < 1) continue
+      const key = line.slice(0, i)
+      const val = line.slice(i + 1)
+      if (AGENT_SECRET_KEYS.has(key) && val) agentSecrets[key] = val
     }
   } catch {}
   return agentSecrets
 }
 
 // local-file protocol so panes can embed PDFs/images without file:// cross-origin blocks.
-// corsEnabled: embedding (img/iframe) works; renderer JS cannot *read* tome:// bodies.
+// Embedding (img/iframe) is all this scheme is for, so it gets no fetch/CORS
+// privileges — renderer JS cannot read tome:// bodies by design, not by CSP
+// accident (today's CSP omits tome: from connect-src, but one CSP edit used
+// to silently turn this into a read-any-file primitive). The handler itself
+// is confined to workspace folders / brain vaults + an extension allowlist.
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'tome',
-    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true },
+    privileges: { standard: true, secure: true, stream: true },
   },
+])
+
+// tome:// serves displayable content only: images, pdf, plain text/markdown,
+// and common source files. Executables/archives/documents that parse in main
+// (docx/xlsx go through doc:read instead) stay out.
+const TOME_SERVE_EXT = new Set([
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'svg',
+  'bmp',
+  'ico',
+  'avif',
+  'pdf',
+  'md',
+  'markdown',
+  'txt',
+  'json',
+  'js',
+  'mjs',
+  'cjs',
+  'ts',
+  'tsx',
+  'jsx',
+  'css',
+  'html',
+  'py',
+  'rb',
+  'go',
+  'rs',
+  'c',
+  'h',
+  'cpp',
+  'java',
+  'sh',
+  'yml',
+  'yaml',
+  'toml',
+  'xml',
+  'csv',
 ])
 
 const git = (dir, args) =>
@@ -129,7 +232,7 @@ function createWindow() {
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
-  if (process.env.TOME_SHOT) {
+  if (!app.isPackaged && process.env.TOME_SHOT) {
     win.webContents.once('did-finish-load', () => {
       setTimeout(async () => {
         const img = await win.webContents.capturePage()
@@ -156,8 +259,11 @@ app.whenReady().then(async () => {
     'store:get',
     'store:set',
   ])
+  // TOME_SHOT is a dev/screenshot affordance — an env var that bypasses the
+  // lock gate must never ship in packaged builds.
+  const shotMode = !!process.env.TOME_SHOT && !app.isPackaged
   const isLockedNow = () =>
-    authlock.authStatus().configured && !authlock.isUnlocked() && !process.env.TOME_SHOT
+    authlock.authStatus().configured && !authlock.isUnlocked() && !shotMode
   const rawHandle = ipcMain.handle.bind(ipcMain)
   ipcMain.handle = (channel, fn) =>
     rawHandle(channel, (e, ...args) => {
@@ -165,9 +271,14 @@ app.whenReady().then(async () => {
       return fn(e, ...args)
     })
 
-  protocol.handle('tome', (req) => {
+  protocol.handle('tome', async (req) => {
     const p = decodeURIComponent(new URL(req.url).searchParams.get('p') || '')
-    return net.fetch(pathToFileURL(p).toString())
+    const deny = () => new Response('tome: path not allowed', { status: 403 })
+    const ext = extname(p).slice(1).toLowerCase()
+    if (!TOME_SERVE_EXT.has(ext)) return deny()
+    const real = await confinedRealPath(p)
+    if (!real) return deny()
+    return net.fetch(pathToFileURL(real).toString())
   })
 
   if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
@@ -187,8 +298,13 @@ app.whenReady().then(async () => {
   brain.setEventSink((ws, index) => win?.webContents.send('brain:changed', { ws, index }))
 
   createWindow()
-  conductor.init({ ptys, send: (channel, payload) => win?.webContents.send(channel, payload) })
+  conductor.init({
+    ptys,
+    send: (channel, payload) => win?.webContents.send(channel, payload),
+    canOpenFile: isConfinedPath,
+  })
   ipcMain.on('panes:sync', (e, list) => conductor.setPanes(list))
+  ipcMain.on('ws:sync', (e, folders) => setOpenFolders(folders))
   ipcMain.on('conductor:allowRun', (e, v) => conductor.setAllowRun(v))
 
   // ---- pty ----
@@ -268,18 +384,27 @@ app.whenReady().then(async () => {
     // The app login already proved the passphrase (or Touch ID) — this channel
     // is gated, so nobody reaches it locked. Freeing a pane still demands a
     // second factor: the TOTP code when enrolled, the passphrase otherwise.
-    if (authlock.totpActive()) {
-      if (!authlock.verifyTotp(code)) return { ok: false, error: 'Wrong 2FA code.' }
-    } else if (!authlock.verifyPassphrase(passphrase)) {
-      return { ok: false, error: 'Wrong passphrase.' }
+    const wait = authlock.throttleRetryIn('airgap:unlock')
+    if (wait) return { ok: false, error: `Too many attempts — try again in ${Math.ceil(wait / 1000)}s.` }
+    const ok = authlock.totpActive()
+      ? authlock.verifyTotp(code)
+      : authlock.verifyPassphrase(passphrase)
+    if (!ok) {
+      authlock.recordFailure('airgap:unlock')
+      return { ok: false, error: authlock.totpActive() ? 'Wrong 2FA code.' : 'Wrong passphrase.' }
     }
+    authlock.recordSuccess('airgap:unlock')
     airgap.unlockPane(paneId, minutes)
     return { ok: true }
   })
   ipcMain.handle('airgap:relock', (e, paneId) => airgap.relockPane(paneId))
   ipcMain.handle('airgap:setup', async (e, { passphrase }) => {
     if (authlock.authStatus().configured) return { ok: false, error: 'Already configured.' }
-    await authlock.setPassphrase(passphrase)
+    try {
+      await authlock.setPassphrase(passphrase)
+    } catch (err) {
+      return { ok: false, error: err.message }
+    }
     authlock.markUnlocked() // first-run setup happens at the lock screen
     return { ok: true }
   })
@@ -302,9 +427,15 @@ app.whenReady().then(async () => {
     }
   })
   ipcMain.handle('auth:login', (e, { passphrase, code }) => {
-    if (!authlock.verifyPassphrase(passphrase)) return { ok: false, error: 'Wrong passphrase.' }
-    if (authlock.totpActive() && !authlock.verifyTotp(code))
-      return { ok: false, error: 'Wrong 2FA code.' }
+    const wait = authlock.throttleRetryIn('auth:login')
+    if (wait) return { ok: false, error: `Too many attempts — try again in ${Math.ceil(wait / 1000)}s.` }
+    const passOk = authlock.verifyPassphrase(passphrase)
+    const totpOk = !authlock.totpActive() || authlock.verifyTotp(code)
+    if (!passOk || !totpOk) {
+      authlock.recordFailure('auth:login')
+      return { ok: false, error: passOk ? 'Wrong 2FA code.' : 'Wrong passphrase.' }
+    }
+    authlock.recordSuccess('auth:login')
     authlock.markUnlocked()
     return { ok: true }
   })
@@ -446,6 +577,11 @@ app.whenReady().then(async () => {
 
   // ---- document conversion (docx/xlsx → sandboxed html) ----
   ipcMain.handle('doc:read', async (e, path) => {
+    // Parsing is the dangerous part (mammoth/SheetJS CVE histories) — only
+    // parse files inside the open workspace folders or a brain vault.
+    const real = await confinedRealPath(path)
+    if (!real) throw new Error('doc:read: path is outside the open workspace folders')
+    path = real
     const ext = extname(path).toLowerCase()
     if (ext === '.docx') {
       const { value } = await mammoth.convertToHtml({ path })
