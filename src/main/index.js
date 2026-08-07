@@ -232,7 +232,7 @@ function createWindow() {
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
-  if (process.env.TOME_SHOT) {
+  if (!app.isPackaged && process.env.TOME_SHOT) {
     win.webContents.once('did-finish-load', () => {
       setTimeout(async () => {
         const img = await win.webContents.capturePage()
@@ -259,8 +259,11 @@ app.whenReady().then(async () => {
     'store:get',
     'store:set',
   ])
+  // TOME_SHOT is a dev/screenshot affordance — an env var that bypasses the
+  // lock gate must never ship in packaged builds.
+  const shotMode = !!process.env.TOME_SHOT && !app.isPackaged
   const isLockedNow = () =>
-    authlock.authStatus().configured && !authlock.isUnlocked() && !process.env.TOME_SHOT
+    authlock.authStatus().configured && !authlock.isUnlocked() && !shotMode
   const rawHandle = ipcMain.handle.bind(ipcMain)
   ipcMain.handle = (channel, fn) =>
     rawHandle(channel, (e, ...args) => {
