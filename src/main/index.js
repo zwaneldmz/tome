@@ -68,16 +68,40 @@ resolveLoginPath()
 // once, and hand them only to agent panes — a plain terminal pane inherits
 // nothing, and tome's own process env is left untouched.
 let agentSecrets = null
+// Least-privilege forwarding: the old suffix match handed EVERY
+// *_API_KEY/*_KEY/*_TOKEN in the login shell (GITHUB_TOKEN, NPM_TOKEN,
+// DIGITALOCEAN_TOKEN, …) to every agent pane — air-gapped ones included —
+// when a pane needs exactly its provider's key. Forward only the credentials
+// the supported providers actually consume. New provider? Add its key here.
+const AGENT_SECRET_KEYS = new Set([
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'REQUESTY_API_KEY',
+  'OPENROUTER_API_KEY',
+  'DEEPSEEK_API_KEY',
+  'MOONSHOT_API_KEY',
+  'GROQ_API_KEY',
+  'MISTRAL_API_KEY',
+  'XAI_API_KEY',
+  'GOOGLE_API_KEY',
+  'GEMINI_API_KEY',
+  // bedrock
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_REGION',
+  'AWS_DEFAULT_REGION',
+])
 function resolveAgentSecrets() {
   if (agentSecrets) return agentSecrets
   agentSecrets = {}
   try {
     const out = execFileSync(SHELL, ['-ilc', 'env'], { timeout: 8000, encoding: 'utf8' })
     for (const line of out.split('\n')) {
-      // ponytail: suffix match over a provider allowlist — no edit needed for a
-      // new provider. Narrow it if a non-secret var ever collides.
-      const m = line.match(/^([A-Z][A-Z0-9_]*_(?:API_KEY|KEY|TOKEN))=(.*)$/)
-      if (m && m[2]) agentSecrets[m[1]] = m[2]
+      const i = line.indexOf('=')
+      if (i < 1) continue
+      const key = line.slice(0, i)
+      const val = line.slice(i + 1)
+      if (AGENT_SECRET_KEYS.has(key) && val) agentSecrets[key] = val
     }
   } catch {}
   return agentSecrets
