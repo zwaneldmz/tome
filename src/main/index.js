@@ -145,27 +145,6 @@ async function resolveAgentSecrets() {
   return secrets
 }
 
-// Same .zshrc blind spot as PATH, for provider credentials: agent CLIs are
-// spawned with `-l -c`, which never reads .zshrc, so keys exported there are
-// invisible and the CLI fails auth. Read them from an interactive login shell
-// once, and hand them only to agent panes — a plain terminal pane inherits
-// nothing, and tome's own process env is left untouched.
-let agentSecrets = null
-function resolveAgentSecrets() {
-  if (agentSecrets) return agentSecrets
-  agentSecrets = {}
-  try {
-    const out = execFileSync(SHELL, ['-ilc', 'env'], { timeout: 8000, encoding: 'utf8' })
-    for (const line of out.split('\n')) {
-      // ponytail: suffix match over a provider allowlist — no edit needed for a
-      // new provider. Narrow it if a non-secret var ever collides.
-      const m = line.match(/^([A-Z][A-Z0-9_]*_(?:API_KEY|KEY|TOKEN))=(.*)$/)
-      if (m && m[2]) agentSecrets[m[1]] = m[2]
-    }
-  } catch {}
-  return agentSecrets
-}
-
 // local-file protocol so panes can embed PDFs/images without file:// cross-origin blocks.
 // corsEnabled: embedding (img/iframe) works; renderer JS cannot *read* tome:// bodies.
 protocol.registerSchemesAsPrivileged([
