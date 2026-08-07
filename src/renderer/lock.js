@@ -104,7 +104,7 @@ function setupScreen(tome, toast, resolve) {
   const set = el('button', 'ag-btn primary', 'Set passphrase')
   const skip = el('button', 'ag-btn ghost', 'Skip for now')
   set.addEventListener('click', async () => {
-    if (p1.value.length < 4) return (err.textContent = 'Too short.')
+    if (p1.value.length < 8) return (err.textContent = 'Too short — 8 characters minimum.')
     if (p1.value !== p2.value) return (err.textContent = 'Passphrases differ.')
     const r = await tome.airgap.setup(p1.value)
     if (!r.ok) return (err.textContent = r.error)
