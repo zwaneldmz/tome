@@ -136,7 +136,11 @@ function runTool(name, input) {
       const p = ptys.get(input.pane_id)
       if (!p) return 'No such live terminal pane. Use list_panes.'
       const enter = !!input.press_enter && allowRun
-      p.write(String(input.text) + (enter ? '\r' : ''))
+      // With auto-run off the text must stay un-submitted, so strip the control
+      // chars that would submit or signal on their own (CR/LF, Ctrl-C, Ctrl-D…).
+      // Otherwise `text: "ls\r"` runs a command the user never approved.
+      const text = allowRun ? String(input.text) : String(input.text).replace(/[\x00-\x08\x0a-\x1f\x7f]/g, '')
+      p.write(text + (enter ? '\r' : ''))
       send('conductor:acted', { pane: input.pane_id, ran: enter })
       if (enter) return 'Typed and submitted.'
       return input.press_enter
