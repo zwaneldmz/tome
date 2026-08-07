@@ -160,42 +160,88 @@ function runTool(name, input) {
 
 // Streamed chat with a bounded tool loop. Text deltas stream to the renderer
 // as they arrive; tool calls surface as chat:tool events between segments.
+//
+// Budget: each tool turn re-sends the whole transcript, so 8 turns at
+// max_tokens 64000 is a worst-case ~1M output tokens for one user message.
+// TOKEN_BUDGET caps the cumulative usage across the loop; when exceeded we
+// stop gracefully with a visible note instead of burning on silently.
+//
+// Abort: the renderer's stop button lands here via chat:abort; we abort the
+// in-flight stream and end the loop after the current turn, flagging the
+// done event so the renderer knows it was cancelled, not completed.
+const TOKEN_BUDGET = 400_000
+const inflight = new Map() // chatId -> AbortController
+
+export function abortChat(id) {
+  inflight.get(id)?.abort()
+}
+
 export async function runChat(anthropic, { id, model, system, messages, betas, fallbacks }) {
   const msgs = [...messages]
-  for (let turn = 0; turn < 8; turn++) {
-    const args = {
-      model,
-      max_tokens: 64000,
-      system: system || SYSTEM,
-      messages: msgs,
-      tools: TOOLS,
-    }
-    if (betas) args.betas = betas
-    if (fallbacks) args.fallbacks = fallbacks
-    const stream = anthropic.beta.messages.stream(args)
-    stream.on('text', (text) => send('chat:delta', { id, text }))
-    const final = await stream.finalMessage()
-    if (final.stop_reason === 'refusal') {
-      send('chat:done', { id, error: 'Request declined by safety classifiers.' })
-      return
-    }
-    if (final.stop_reason !== 'tool_use') {
-      send('chat:done', { id })
-      return
-    }
-    msgs.push({ role: 'assistant', content: final.content })
-    const results = []
-    for (const block of final.content.filter((b) => b.type === 'tool_use')) {
-      send('chat:tool', { id, tool: block.name, hint: block.input?.pane_id || block.input?.kind || block.input?.path || '' })
-      let out
-      try {
-        out = runTool(block.name, block.input || {})
-      } catch (err) {
-        out = 'Tool error: ' + err.message
+  const controller = new AbortController()
+  inflight.set(id, controller)
+  let aborted = false
+  let totalTokens = 0
+  try {
+    for (let turn = 0; turn < 8; turn++) {
+      if (controller.signal.aborted) break
+      const args = {
+        model,
+        max_tokens: 64000,
+        system: system || SYSTEM,
+        messages: msgs,
+        tools: TOOLS,
       }
-      results.push({ type: 'tool_result', tool_use_id: block.id, content: String(out) })
+      if (betas) args.betas = betas
+      if (fallbacks) args.fallbacks = fallbacks
+      const stream = anthropic.beta.messages.stream(args, { signal: controller.signal })
+      stream.on('text', (text) => send('chat:delta', { id, text }))
+      let final
+      try {
+        final = await stream.finalMessage()
+      } catch (err) {
+        if (controller.signal.aborted || err?.name === 'AbortError' || err?.name === 'APIUserAbortError') {
+          aborted = true
+          break
+        }
+        throw err
+      }
+      totalTokens += (final.usage?.input_tokens || 0) + (final.usage?.output_tokens || 0)
+      if (final.stop_reason === 'refusal') {
+        send('chat:done', { id, error: 'Request declined by safety classifiers.' })
+        return
+      }
+      if (final.stop_reason !== 'tool_use') {
+        send('chat:done', { id })
+        return
+      }
+      msgs.push({ role: 'assistant', content: final.content })
+      const results = []
+      for (const block of final.content.filter((b) => b.type === 'tool_use')) {
+        send('chat:tool', { id, tool: block.name, hint: block.input?.pane_id || block.input?.kind || block.input?.path || '' })
+        let out
+        try {
+          out = runTool(block.name, block.input || {})
+        } catch (err) {
+          out = 'Tool error: ' + err.message
+        }
+        results.push({ type: 'tool_result', tool_use_id: block.id, content: String(out) })
+      }
+      msgs.push({ role: 'user', content: results })
+      if (totalTokens > TOKEN_BUDGET) {
+        send('chat:done', {
+          id,
+          error: `Token budget reached (~${Math.round(totalTokens / 1000)}k tokens across tool turns) — stopped early. Ask again to continue.`,
+        })
+        return
+      }
     }
-    msgs.push({ role: 'user', content: results })
+    if (aborted || controller.signal.aborted) {
+      send('chat:done', { id, aborted: true, error: 'Stopped.' })
+      return
+    }
+    send('chat:done', { id, error: 'Tool loop limit reached — ask again to continue.' })
+  } finally {
+    inflight.delete(id)
   }
-  send('chat:done', { id, error: 'Tool loop limit reached — ask again to continue.' })
 }

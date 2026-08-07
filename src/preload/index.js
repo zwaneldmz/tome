@@ -60,6 +60,7 @@ contextBridge.exposeInMainWorld('tome', {
   },
   chat: {
     send: (id, messages, brainWs) => ipcRenderer.invoke('chat:send', { id, messages, brainWs }),
+    abort: (id) => ipcRenderer.send('chat:abort', id),
     onDelta: (cb) => ipcRenderer.on('chat:delta', (e, m) => cb(m)),
     onDone: (cb) => ipcRenderer.on('chat:done', (e, m) => cb(m)),
     onTool: (cb) => ipcRenderer.on('chat:tool', (e, m) => cb(m)),
@@ -79,4 +80,8 @@ contextBridge.exposeInMainWorld('tome', {
   },
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
   pickFile: () => ipcRenderer.invoke('dialog:pickFile'),
+  app: {
+    onBeforeQuit: (cb) => ipcRenderer.on('app:before-quit', () => cb()),
+    quitReady: () => ipcRenderer.send('app:quit-ready'),
+  },
 })
