@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Tome Was Made — an interactive tour</title>
+<style>
+:root {
+  --void: #060609; --panel: #0c0d15; --panel-2: #12141f;
+  --line: #1b1e2f; --line-2: #262b42;
+  --text: #c9d4e3; --bright: #eef4fb; --muted: #566179;
+  --cyan: #00e5ff; --cyan-dim: rgba(0,229,255,.14);
+  --magenta: #ff2ea6; --magenta-dim: rgba(255,46,166,.14);
+  --green: #3dff9e; --yellow: #ffd23e; --red: #ff3b5c;
+  --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  --sans: system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; }
+html { scroll-behavior: smooth; }
+body { background: var(--void); color: var(--text); font-family: var(--sans); line-height: 1.6; }
+h1, h2, h3 { color: var(--bright); font-weight: 650; letter-spacing: .01em; }
+code, kbd { font-family: var(--mono); font-size: .88em; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: .1em .4em; color: var(--cyan); }
+kbd { color: var(--yellow); }
+a { color: var(--cyan); }
+
+/* ---------- layout ---------- */
+nav#top {
+  position: sticky; top: 0; z-index: 50; display: flex; gap: 4px; align-items: center;
+  padding: 10px 18px; background: rgba(6,6,9,.92); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line); overflow-x: auto;
+}
+nav#top .brand { color: var(--bright); font-weight: 700; margin-right: 14px; white-space: nowrap; }
+nav#top .brand span { color: var(--cyan); }
+nav#top a {
+  color: var(--muted); text-decoration: none; font-size: 13px; padding: 4px 10px;
+  border-radius: 6px; white-space: nowrap; border: 1px solid transparent;
+}
+nav#top a:hover { color: var(--cyan); border-color: var(--line-2); }
+nav#top a.active { color: var(--cyan); background: var(--cyan-dim); }
+main { max-width: 1060px; margin: 0 auto; padding: 0 22px 120px; }
+section.chapter { padding-top: 70px; margin-top: -40px; }
+.lede { color: var(--muted); font-size: 15px; max-width: 70ch; }
+.lede b, .lede strong { color: var(--text); }
+
+/* ---------- hero ---------- */
+header.hero { padding: 90px 0 50px; text-align: center; }
+header.hero h1 { font-size: clamp(30px, 5vw, 52px); }
+header.hero h1 em { font-style: normal; color: var(--cyan); text-shadow: 0 0 24px var(--cyan-dim); }
+header.hero p { color: var(--muted); margin: 14px auto 0; max-width: 62ch; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 26px; }
+.pill { font-family: var(--mono); font-size: 12px; color: var(--cyan); background: var(--cyan-dim); border: 1px solid var(--line-2); border-radius: 99px; padding: 4px 12px; }
+.pill.m { color: var(--magenta); background: var(--magenta-dim); }
+
+/* ---------- generic blocks ---------- */
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; margin: 18px 0; }
+.card h3 { margin-bottom: 8px; }
+.card h3 .num { color: var(--magenta); font-family: var(--mono); font-size: .8em; margin-right: 8px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+.note { border-left: 3px solid var(--cyan); background: var(--cyan-dim); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
+.note.warn { border-color: var(--yellow); background: rgba(255,210,62,.08); }
+.note.mag { border-color: var(--magenta); background: var(--magenta-dim); }
+pre {
+  background: #08090f; border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px 18px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; margin: 14px 0;
+}
+pre .c { color: var(--muted); } pre .k { color: var(--magenta); } pre .s { color: var(--green); } pre .f { color: var(--cyan); }
+.filetag { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: -8px; }
+.filetag b { color: var(--yellow); font-weight: 500; }
+
+/* ---------- architecture diagram ---------- */
+.arch { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin: 20px 0; }
+@media (max-width: 800px) { .arch { grid-template-columns: 1fr; } }
+.proc { background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; padding: 16px; position: relative; }
+.proc h4 { color: var(--bright); font-size: 14px; margin-bottom: 4px; }
+.proc .badge { font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 99px; position: absolute; top: 14px; right: 14px; }
+.proc ul { margin: 10px 0 0 18px; font-size: 13px; color: var(--muted); }
+.proc ul b { color: var(--text); font-weight: 550; }
+.badge.danger { color: var(--red); background: rgba(255,59,92,.12); }
+.badge.bridge { color: var(--yellow); background: rgba(255,210,62,.1); }
+.badge.safe  { color: var(--green); background: rgba(61,255,158,.1); }
+.flow { text-align: center; color: var(--muted); font-family: var(--mono); font-size: 12px; margin: 6px 0; }
+
+/* ---------- interactive: IPC simulator ---------- */
+.ipc-sim { display: grid; grid-template-columns: 1fr auto 1fr; gap: 0; align-items: stretch; margin: 16px 0; }
+.ipc-side { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.ipc-side h5 { font-size: 12px; font-family: var(--mono); color: var(--muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.ipc-mid { display: flex; flex-direction: column; justify-content: center; padding: 0 14px; min-width: 160px; }
+#ipc-packet {
+  font-family: var(--mono); font-size: 11px; text-align: center; color: var(--cyan);
+  border: 1px dashed var(--cyan); border-radius: 8px; padding: 8px 6px;
+  opacity: 0; transform: translateX(-14px); transition: all .35s ease;
+}
+#ipc-packet.fly { opacity: 1; transform: translateX(0); }
+#ipc-packet.denied { color: var(--red); border-color: var(--red); }
+.chan-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.chan-btns button {
+  font-family: var(--mono); font-size: 11px; background: var(--panel); color: var(--cyan);
+  border: 1px solid var(--line-2); border-radius: 6px; padding: 5px 10px; cursor: pointer;
+}
+.chan-btns button:hover { border-color: var(--cyan); }
+.chan-btns button.evil { color: var(--red); }
+.chan-btns button.evil:hover { border-color: var(--red); }
+#ipc-verdict { font-family: var(--mono); font-size: 12px; min-height: 20px; margin-top: 10px; }
+#ipc-verdict.ok { color: var(--green); } #ipc-verdict.no { color: var(--red); }
+.toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-size: 13px; }
+.switch { position: relative; width: 40px; height: 22px; background: var(--line-2); border-radius: 99px; cursor: pointer; transition: background .2s; flex: none; }
+.switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--text); transition: left .2s; }
+.switch.on { background: var(--cyan); }
+.switch.on::after { left: 21px; background: var(--void); }
+
+/* ---------- interactive: airgap ---------- */
+.netplay { background: #08090f; border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+.net-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
+.net-row .who { font-family: var(--mono); font-size: 12px; width: 210px; color: var(--text); flex: none; }
+.net-track { flex: 1; min-width: 200px; height: 8px; background: var(--panel-2); border-radius: 99px; position: relative; overflow: visible; }
+.net-dot { position: absolute; top: -4px; left: 0; width: 16px; height: 16px; border-radius: 50%; background: var(--cyan); transition: left .9s cubic-bezier(.4,0,.2,1), background .3s; }
+.net-dot.blocked { background: var(--red); }
+.net-verdict { font-family: var(--mono); font-size: 11px; width: 190px; flex: none; min-height: 16px; }
+.net-verdict.ok { color: var(--green); } .net-verdict.no { color: var(--red); }
+.proxy-label { font-family: var(--mono); font-size: 11px; color: var(--yellow); }
+
+/* ---------- interactive: hotp ---------- */
+.hotp-out { font-family: var(--mono); font-size: 26px; letter-spacing: .35em; color: var(--green); text-align: center; padding: 14px; background: #08090f; border: 1px solid var(--line); border-radius: 10px; }
+.hotp-row { display: flex; gap: 10px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
+button.btn {
+  font-family: var(--mono); font-size: 12px; background: var(--cyan-dim); color: var(--cyan);
+  border: 1px solid var(--cyan); border-radius: 8px; padding: 8px 16px; cursor: pointer;
+}
+button.btn:hover { background: var(--cyan); color: var(--void); }
+button.btn.ghost { background: transparent; border-color: var(--line-2); color: var(--muted); }
+button.btn.ghost:hover { color: var(--cyan); border-color: var(--cyan); }
+input.txt {
+  font-family: var(--mono); font-size: 13px; background: #08090f; color: var(--text);
+  border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 12px; width: 100%;
+}
+input.txt:focus { outline: none; border-color: var(--cyan); }
+
+/* ---------- pipeline / steps ---------- */
+.steps { counter-reset: step; margin: 16px 0; }
+.step { display: flex; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.step:last-child { border-bottom: 0; }
+.step::before {
+  counter-increment: step; content: counter(step);
+  font-family: var(--mono); font-size: 12px; color: var(--magenta);
+  border: 1px solid var(--magenta); border-radius: 50%; width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center; flex: none; margin-top: 2px;
+}
+.step div b { color: var(--bright); }
+.step div p { font-size: 14px; color: var(--muted); margin-top: 2px; }
+
+/* ---------- stack table ---------- */
+table.stack { width: 100%; border-collapse: collapse; font-size: 14px; margin: 14px 0; }
+table.stack th { text-align: left; font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding: 8px 12px; border-bottom: 1px solid var(--line-2); }
+table.stack td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.stack td:first-child { font-family: var(--mono); font-size: 12.5px; color: var(--cyan); white-space: nowrap; }
+table.stack tr:hover td { background: var(--panel); }
+
+/* ---------- conductor sim ---------- */
+.loop-log { background: #08090f; border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; font-family: var(--mono); font-size: 12px; min-height: 300px; max-height: 420px; overflow-y: auto; }
+.loop-log .ln { padding: 3px 0; opacity: 0; animation: lnfade .25s forwards; }
+@keyframes lnfade { to { opacity: 1; } }
+.ln .t { color: var(--muted); margin-right: 8px; }
+.ln.user { color: var(--bright); }
+.ln.model { color: var(--cyan); }
+.ln.tool { color: var(--yellow); }
+.ln.result { color: var(--muted); padding-left: 18px; }
+.ln.guard { color: var(--magenta); }
+.ln.err { color: var(--red); }
+.token-meter { height: 10px; background: var(--panel-2); border-radius: 99px; overflow: hidden; margin: 8px 0 4px; }
+.token-meter i { display: block; height: 100%; width: 0; background: var(--cyan); transition: width .5s ease; }
+.token-meter.hot i { background: var(--red); }
+.token-label { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+/* ---------- layout persistence lab ---------- */
+.lay { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 800px) { .lay { grid-template-columns: 1fr; } }
+#dock-sim { position: relative; height: 300px; background: #08090f; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.sim-pane {
+  position: absolute; border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel);
+  font-family: var(--mono); font-size: 11.5px; color: var(--text); padding: 8px 10px; cursor: grab;
+  display: flex; flex-direction: column; gap: 4px; user-select: none; transition: box-shadow .2s;
+}
+.sim-pane:hover { border-color: var(--cyan); box-shadow: 0 0 18px rgba(0,229,255,.08); }
+.sim-pane .pt { color: var(--cyan); }
+.sim-pane .pk { color: var(--muted); font-size: 10px; }
+.sim-pane.term .pt { color: var(--yellow); }
+#layout-json { font-family: var(--mono); font-size: 10.5px; white-space: pre-wrap; word-break: break-all; background: #08090f; border: 1px solid var(--line); border-radius: 10px; padding: 12px; max-height: 300px; overflow-y: auto; color: var(--green); }
+.lay-btns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+
+/* ---------- quiz ---------- */
+.quiz-q { margin: 18px 0; }
+.quiz-q p { color: var(--bright); margin-bottom: 10px; font-size: 15px; }
+.quiz-opts { display: grid; gap: 8px; }
+.quiz-opts button {
+  text-align: left; background: var(--panel); border: 1px solid var(--line-2); color: var(--text);
+  border-radius: 8px; padding: 10px 14px; font-size: 13.5px; cursor: pointer; font-family: var(--sans);
+}
+.quiz-opts button:hover { border-color: var(--cyan); }
+.quiz-opts button.right { border-color: var(--green); background: rgba(61,255,158,.08); }
+.quiz-opts button.wrong { border-color: var(--red); background: rgba(255,59,92,.08); }
+.quiz-why { font-size: 13px; color: var(--muted); margin-top: 8px; display: none; }
+.quiz-why.show { display: block; }
+#quiz-score { font-family: var(--mono); color: var(--yellow); }
+
+footer { text-align: center; color: var(--muted); font-size: 12px; padding: 60px 0 20px; font-family: var(--mono); }
+</style>
+</head>
+<body>
+
+<nav id="top">
+  <div class="brand">⛨ tome<span>://</span>how-it-works</div>
+  <a href="#what">What it is</a>
+  <a href="#arch">Three processes</a>
+  <a href="#stack">The stack</a>
+  <a href="#security">Security</a>
+  <a href="#airgap">Air gap lab</a>
+  <a href="#crypto">Crypto lab</a>
+  <a href="#build">Build pipeline</a>
+  <a href="#quiz">Quiz</a>
+</nav>
+
+<main>
+
+<header class="hero">
+  <h1>How <em>Tome</em> was made</h1>
+  <p>An interactive tour of a desktop "coding harness" — an Electron app that puts AI agents,
+     terminals, editors and a chat assistant in one tiled, sandboxed workspace.
+     ~3,900 lines of JavaScript across three processes. Click everything.</p>
+  <div class="pills">
+    <span class="pill">Electron 43</span>
+    <span class="pill">node-pty</span>
+    <span class="pill">xterm.js</span>
+    <span class="pill">dockview</span>
+    <span class="pill">CodeMirror 6</span>
+    <span class="pill m">macOS seatbelt sandbox</span>
+    <span class="pill m">scrypt + TOTP</span>
+    <span class="pill">vitest</span>
+  </div>
+</header>
+
+<!-- ==================== WHAT ==================== -->
+<section class="chapter" id="what">
+  <h2>1 · What it is</h2>
+  <p class="lede">Tome is a <b>desktop app that hosts other coding tools</b>. Instead of alt-tabbing
+  between a terminal running Claude Code, an editor, a PDF spec, and a chat window, Tome tiles them
+  all in one grid — and wraps the AI agent terminals in a <b>network sandbox</b> so they can talk to
+  their model provider but nowhere else.</p>
+
+  <div class="card">
+    <h3>The panes in the grid</h3>
+    <table class="stack">
+      <tr><th>pane</th><th>what it actually is</th></tr>
+      <tr><td>agent (claude / opencode / pi)</td><td>A real pseudo-terminal (PTY) running the real CLI, rendered by xterm.js — your prompt, your keybindings</td></tr>
+      <tr><td>terminal</td><td>Same thing, plain zsh</td></tr>
+      <tr><td>editor</td><td>CodeMirror 6 with language auto-detect, ⌘S saves</td></tr>
+      <tr><td>doc</td><td>PDFs via Chromium's viewer, images inline, .docx/.xlsx converted in the main process</td></tr>
+      <tr><td>chat</td><td>Streaming assistant (Claude via Requesty/Anthropic) that can <i>see and act on the other panes</i></td></tr>
+      <tr><td>brain</td><td>A markdown note vault with [[wikilinks]] and a force-directed graph view</td></tr>
+      <tr><td>history</td><td>IntelliJ-style git log with per-file diffs</td></tr>
+    </table>
+  </div>
+
+  <div class="note mag"><b>The idea that makes it interesting:</b> the chat assistant is a <b>conductor</b>.
+  It can list panes, read a terminal's scrollback, type into terminals, and open files — so you can ask
+  <i>"what is claude doing in the other pane?"</i> or <i>"run the tests over there"</i>. Untrusted terminal
+  output flows into the model, and the model's tool calls act on your machine — which is exactly why the
+  security chapters below exist.</div>
+</section>
+
+<!-- ==================== ARCH ==================== -->
+<section class="chapter" id="arch">
+  <h2>2 · Three processes, one trust boundary</h2>
+  <p class="lede">Every Electron app is at least two programs: a <b>Node.js "main" process</b> with full OS
+  powers, and a <b>Chromium "renderer"</b> that draws the UI. Tome's entire security design is one rule:
+  <b>the renderer holds no secrets and no powers</b>. Everything dangerous lives in main; a tiny
+  <b>preload bridge</b> decides exactly what the renderer may ask for.</p>
+
+  <div class="arch">
+    <div class="proc">
+      <span class="badge danger">full OS power</span>
+      <h4>MAIN — <code>src/main/</code></h4>
+      <ul>
+        <li><b>index.js</b> — window, IPC handlers, seatbelt profiles, proxies, git shell-outs</li>
+        <li><b>authlock.js</b> — scrypt passphrase + TOTP login gate</li>
+        <li><b>airgap.js</b> — per-pane CONNECT proxies + host allowlist</li>
+        <li><b>conductor.js</b> — the assistant's tool loop</li>
+        <li><b>brain.js</b> — note vault, path-confined</li>
+      </ul>
+    </div>
+    <div class="proc">
+      <span class="badge bridge">allowlist only</span>
+      <h4>PRELOAD — <code>src/preload/</code></h4>
+      <ul>
+        <li>Runs in a <b>bridge context</b> between the two</li>
+        <li>Exposes ~40 named channels via <code>contextBridge</code></li>
+        <li><b>No generic <code>invoke</code></b> — you can only call channels that were explicitly written down</li>
+        <li>The renderer never sees <code>ipcRenderer</code> itself</li>
+      </ul>
+    </div>
+    <div class="proc">
+      <span class="badge safe">sandboxed</span>
+      <h4>RENDERER — <code>src/renderer/</code></h4>
+      <ul>
+        <li>The UI: dockview grid, xterm terminals, CodeMirror, menus</li>
+        <li>Chromium sandbox on, Node integration off</li>
+        <li>No API keys, no file access, no process spawning</li>
+        <li>If compromised, it can only ask main for things main already allows</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="num">2.1</span>Try it: the IPC gate</h3>
+    <p class="lede">The renderer talks to main over <b>IPC channels</b> like <code>pty:create</code>. Tome wraps
+    <code>ipcMain.handle</code> itself so <b>every channel refuses while the app is locked</b> — the lock isn't
+    painted over the UI, it's enforced in main. Toggle the lock, then fire some channels — including two a
+    compromised renderer might try.</p>
+    <div class="toggle-row">
+      <div class="switch on" id="lock-switch"></div>
+      <span id="lock-label">🔒 app is locked (pre-login)</span>
+    </div>
+    <div class="ipc-sim">
+      <div class="ipc-side">
+        <h5>Renderer (sandboxed)</h5>
+        <div class="chan-btns" id="chan-btns">
+          <button data-ch="store:get">store:get</button>
+          <button data-ch="pty:create">pty:create</button>
+          <button data-ch="chat:send">chat:send</button>
+          <button data-ch="fs:readFile">fs:readFile</button>
+          <button data-ch="auth:login">auth:login</button>
+          <button class="evil" data-ch="airgap-auth.json">read airgap-auth.json</button>
+          <button class="evil" data-ch="spawn:sh">spawn /bin/sh</button>
+        </div>
+      </div>
+      <div class="ipc-mid"><div id="ipc-packet">ipc</div></div>
+      <div class="ipc-side">
+        <h5>Main process</h5>
+        <div id="ipc-verdict">— send a channel —</div>
+      </div>
+    </div>
+    <div class="note">Even unlocked, the last two can never work: <b>there is no channel for them</b>.
+    The renderer can't ask for a file by absolute path outside the vetted channels, and the pty command line
+    is built in main from a vetted <i>kind</i> (<code>claude</code>, <code>terminal</code>…) — never from a
+    renderer-supplied binary. That's the single most important design decision in the app.</div>
+  </div>
+</section>
+
+<!-- ==================== STACK ==================== -->
+<section class="chapter" id="stack">
+  <h2>3 · The technology stack</h2>
+  <p class="lede">Each library earns its place. Here's what each one does and why it was chosen:</p>
+
+  <table class="stack">
+    <tr><th>piece</th><th>role in Tome</th></tr>
+    <tr><td>Electron 43</td><td>The shell: Chromium for UI + Node.js for OS access in one app. Tome uses it with the renderer sandbox <i>on</i> and Node integration <i>off</i> — the opposite of most Electron tutorials.</td></tr>
+    <tr><td>electron-vite + Vite</td><td>Builds all three processes (main/preload/renderer) with hot-reload in dev. The renderer is plain JS modules bundled by Vite — no framework, no TypeScript, deliberately.</td></tr>
+    <tr><td>node-pty</td><td>Spawns <b>real pseudo-terminals</b> — the kernel feature that makes a program believe it's talking to a teletype. This is why agent CLIs show their true interactive UI, spinners and all.</td></tr>
+    <tr><td>@xterm/xterm</td><td>The terminal emulator in the browser side: turns the PTY's byte stream (ANSI colors, cursor moves) into pixels. Main coalesces output into 4 ms / 64 KB batches before the IPC hop so <code>yes</code> doesn't flood it.</td></tr>
+    <tr><td>dockview-core</td><td>The tiling pane grid: drag to rearrange, stack panes as tabs. Layouts serialize to JSON — Tome saves them per workspace and restores editors/docs/chat on reopen (terminals respawn as fresh shells).</td></tr>
+    <tr><td>CodeMirror 6</td><td>The editor. Modular: language packs load on demand, and the brain vault adds a custom [[wikilink]] highlighter as a ViewPlugin.</td></tr>
+    <tr><td>@anthropic-ai/sdk</td><td>Streams the assistant's replies <b>in the main process</b> — the API key never enters the renderer. Deltas hop over IPC to the chat pane.</td></tr>
+    <tr><td>mammoth + SheetJS</td><td>Convert .docx / .xlsx to HTML for sandboxed display. Parsing hostile file formats is dangerous, so this runs only on workspace-confined paths (a hard-won lesson — see the quiz).</td></tr>
+    <tr><td>vitest</td><td>The test floor: 76 tests pinning the crypto (RFC 4226 vectors), the wildcard allowlist compiler, path confinement, and the control-char stripper — so the next edit owns any regression.</td></tr>
+  </table>
+</section>
+
+<!-- ==================== SECURITY ==================== -->
+<section class="chapter" id="security">
+  <h2>4 · Security: the app assumes its own UI can be compromised</h2>
+  <p class="lede">Tome runs AI agents that execute code — so it treats <b>its own renderer and its own agents</b>
+  as potentially hostile. Four mechanisms do the heavy lifting:</p>
+
+  <div class="steps">
+    <div class="step"><div><b>The login gate wraps <code>ipcMain.handle</code> itself.</b>
+      <p>Every handler registered after the wrapper inherits the guard automatically — fail-closed by
+      construction, not by per-handler discipline. Unlock is Touch ID or a scrypt-hashed passphrase,
+      with optional TOTP second factor, plus exponential backoff on failures (5 misses → 30 s, doubling).</p></div></div>
+    <div class="step"><div><b>LOGIN SHELL SECRETS ARE ALLOWLISTED, NOT SCRAPED.</b>
+      <p>Agent CLIs spawned from a GUI app can't see keys exported in <code>.zshrc</code>, so Tome reads the
+      login shell's environment once, async, at first agent spawn — but forwards <b>only known provider keys</b>
+      (<code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>…). Your <code>GITHUB_TOKEN</code> never enters
+      a sandboxed agent pane.</p></div></div>
+    <div class="step"><div><b>The auto-run guard strips control characters in main.</b>
+      <p>When "assistant may run commands" is off, the conductor's type-into-terminal tool strips
+      CR, LF, Ctrl-C, Ctrl-D and ESC from model output — the model can type text but cannot
+      <i>submit</i> it. Tab survives deliberately (completion text). The regex is pinned by tests.</p></div></div>
+    <div class="step"><div><b>Confinement everywhere a path crosses a boundary.</b>
+      <p>The brain vault, the <code>tome://</code> protocol, the doc converter, and the conductor's
+      open-file tool all resolve paths (including symlinks, via <code>realpath</code>) and refuse anything
+      outside workspace folders. The TOTP secret is encrypted at rest with the OS keychain
+      (Electron <code>safeStorage</code>).</p></div></div>
+  </div>
+
+  <div class="note">These invariants used to live only in code comments; they're now collected in
+  <code>docs/THREATMODEL.md</code> — written so a future refactor can't silently break an assumption
+  three files away.</div>
+</section>
+
+<!-- ==================== AIRGAP ==================== -->
+<section class="chapter" id="airgap">
+  <h2>5 · The air gap, interactively</h2>
+  <p class="lede">Agent panes spawn inside the <b>macOS seatbelt sandbox</b> (<code>sandbox-exec</code>) with
+  all direct network egress denied — DNS included. The only way out is a <b>per-pane loopback proxy</b>
+  that allows model-provider domains only. Unlocking a pane widens the <i>proxy</i>, never the sandbox —
+  there's no code path that weakens the sandbox after spawn, so there's nothing to forget to re-harden.</p>
+
+  <div class="card netplay">
+    <h3><span class="num">5.1</span>Fire some requests from inside an agent pane</h3>
+    <div class="toggle-row">
+      <div class="switch" id="ag-switch"></div>
+      <span id="ag-label">⛨ pane is air-gapped (provider allowlist only)</span>
+    </div>
+    <div id="net-rows"></div>
+    <div class="note warn" style="margin-top:16px"><b>Wildcard anchoring matters:</b> the allowlist entry
+    <code>bedrock-runtime.*.amazonaws.com</code> must match <code>…us-east-1.amazonaws.com</code> but reject
+    <code>….amazonaws.com.evil.com</code>. Tome compiles wildcards to anchored regexes — and the test suite
+    pins the evil.com case so nobody "simplifies" it into a suffix match later.</div>
+  </div>
+</section>
+
+<!-- ==================== CRYPTO ==================== -->
+<section class="chapter" id="crypto">
+  <h2>6 · Crypto lab: the authenticator code, by hand</h2>
+  <p class="lede">Tome's second factor is <b>TOTP</b> — the 6-digit code in your authenticator app. It's
+  <b>HOTP</b> (RFC 4226) where the "counter" is the current 30-second time step (RFC 6238). Tome implements
+  it by hand in ~40 lines — and pins it against all ten RFC test vectors. This is the real algorithm,
+  running in your browser right now:</p>
+
+  <div class="card">
+    <h3><span class="num">6.1</span>HOTP(secret, counter) = truncate(HMAC-SHA1(secret, counter))</h3>
+    <div class="hotp-row">
+      <button class="btn" id="hotp-gen">compute HOTP</button>
+      <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">
+        secret = <span class="s" style="color:var(--green)">"12345678901234567890"</span> · counter = <span id="hotp-counter" style="color:var(--yellow)">0</span>
+      </span>
+    </div>
+    <div class="hotp-out" id="hotp-out">······</div>
+    <div class="hotp-row" style="justify-content:space-between">
+      <div>
+        <button class="btn ghost" id="hotp-prev">← counter−1</button>
+        <button class="btn ghost" id="hotp-next">counter+1 →</button>
+      </div>
+      <span id="hotp-check" style="font-family:var(--mono);font-size:12px"></span>
+    </div>
+    <p class="lede" style="margin-top:10px">Counters 0–9 against the RFC's published vectors:
+    755224, 287082, 359152, 969429, 338314, 254676, 287922, 162583, 399871, 520489.
+    Step through them and watch each one verify. ✓</p>
+  </div>
+
+  <div class="filetag">the actual implementation — <b>src/main/lib/totp.js</b></div>
+  <pre><span class="k">export function</span> <span class="f">hotp</span>(secret, counter) {
+  <span class="k">const</span> buf = Buffer.<span class="f">alloc</span>(<span class="s">8</span>)
+  buf.<span class="f">writeBigUInt64BE</span>(<span class="f">BigInt</span>(counter))        <span class="c">// counter as 8 bytes, big-endian</span>
+  <span class="k">const</span> h = <span class="f">createHmac</span>(<span class="s">'sha1'</span>, secret).<span class="f">update</span>(buf).<span class="f">digest</span>()
+  <span class="k">const</span> o = h[<span class="s">19</span>] &amp; <span class="s">0xf</span>                          <span class="c">// last nibble picks the offset…</span>
+  <span class="k">return</span> <span class="f">String</span>((h.<span class="f">readUInt32BE</span>(o) &amp; <span class="s">0x7fffffff</span>) % <span class="s">1e6</span>).<span class="f">padStart</span>(<span class="s">6</span>, <span class="s">'0'</span>)
+}                                                   <span class="c">// …dynamic truncation → 6 digits</span></pre>
+
+  <div class="note">The passphrase side uses <b>scrypt</b> (memory-hard, so brute force is expensive) with
+  <code>timingSafeEqual</code> for comparison (no timing side-channel). The base32 encoder is hand-rolled too —
+  and round-trip-tested, because hand-rolled crypto without pinned tests is a coin flip.</div>
+</section>
+
+<!-- ==================== CONDUCTOR ==================== -->
+<section class="chapter" id="conductor">
+  <h2>7 · The conductor: a model with its hands on the grid</h2>
+  <p class="lede">The chat pane is not a bolted-on chatbot — it's a <b>conductor</b> with five tools:
+  <code>list_panes</code>, <code>read_terminal</code>, <code>type_in_terminal</code>, <code>open_pane</code>,
+  <code>open_file</code>. The model runs in a <b>bounded tool loop</b>: it replies, calls tools, reads the
+  results, replies again — up to 8 turns per message, with a 400k cumulative token budget and a stop button
+  wired to an <code>AbortController</code>.</p>
+
+  <div class="note mag"><b>The confused-deputy loop, named:</b> the conductor reads terminal scrollback
+  (untrusted — a repo's build script can print anything) and the model's tool calls act on your filesystem.
+  Hostile output can steer the model. That's why the guards live <b>in main, not in the prompt</b>:
+  <code>open_file</code> is confined to workspace folders, and <code>type_in_terminal</code> can't submit
+  unless you flip the auto-run toggle.</div>
+
+  <div class="card">
+    <h3><span class="num">7.1</span>Run a simulated tool loop</h3>
+    <p class="lede">A scripted but faithful simulation of one user message flowing through the loop.
+    Auto-run is <b>off</b> — watch what happens to the model's <code>npm test\r</code> (note the trailing
+    carriage return it snuck in).</p>
+    <div class="hotp-row">
+      <button class="btn" id="loop-run">▶ run: “what's claude doing? run the tests there”</button>
+      <button class="btn ghost" id="loop-reset">reset</button>
+    </div>
+    <div class="token-meter" id="token-meter"><i></i></div>
+    <div class="token-label" id="token-label">0 / 400,000 tokens (cumulative across tool turns)</div>
+    <div class="loop-log" id="loop-log" style="margin-top:12px"></div>
+  </div>
+
+  <div class="filetag">the guard, verbatim — <b>src/main/conductor.js</b></div>
+  <pre><span class="c">// With auto-run off the text must stay un-submitted, so strip the control</span>
+<span class="c">// chars that would submit or signal on their own (CR/LF, Ctrl-C, Ctrl-D…).</span>
+<span class="c">// Otherwise `text: "ls\r"` runs a command the user never approved.</span>
+<span class="k">const</span> text = allowRun ? <span class="f">String</span>(input.text) : <span class="f">stripControlChars</span>(input.text)
+p.<span class="f">write</span>(text + (enter ? <span class="s">'\r'</span> : <span class="s">''</span>))  <span class="c">// enter only exists when allowRun is on</span></pre>
+
+  <div class="note">Each tool turn re-sends the whole transcript, so 8 turns at
+  <code>max_tokens: 64000</code> is a worst-case ~1M output tokens for one user message. The cumulative
+  budget check runs between turns (usage only exists per completed turn) and ends the loop gracefully
+  with a visible note instead of a surprise bill.</div>
+</section>
+
+<!-- ==================== BUILD ==================== -->
+<section class="chapter" id="build">
+  <h2>8 · From source to a double-clickable app</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>Dev loop</h3>
+      <pre><span class="c"># rebuild node-pty for Electron's ABI, then hot-reload dev</span>
+npm install        <span class="c"># postinstall: electron-rebuild -f -w node-pty</span>
+npm run dev        <span class="c"># electron-vite dev</span></pre>
+      <p class="lede">electron-vite watches all three processes; the renderer hot-reloads, main restarts.
+      <code>TOME_SHOT=/tmp/shot.png npm run dev</code> boots into demo panes and writes a screenshot
+      (dev-only — the lock bypass is compiled out of packaged builds).</p>
+    </div>
+    <div class="card">
+      <h3>Shipping</h3>
+      <pre><span class="c"># bundle + package a macOS .app</span>
+npm run package    <span class="c"># electron-vite build && electron-builder --mac --dir</span>
+ditto dist/mac-arm64/Tome.app /Applications/Tome.app</pre>
+      <p class="lede">electron-builder assembles <code>Tome.app</code> with node-pty unpacked from the asar
+      (native module). The icon is a hand-authored 16×16 pixel sprite rendered to every macOS size
+      by <code>scripts/gen-icon.mjs</code>.</p>
+    </div>
+  </div>
+  <div class="card">
+    <h3>CI gate (every push)</h3>
+    <div class="steps">
+      <div class="step"><div><b><code>npm ci</code></b><p>Clean install, Electron binary skipped (not needed to build).</p></div></div>
+      <div class="step"><div><b><code>npm run lint</code></b><p>Hygiene-only eslint: undef vars, unreachable code, dupe keys — no style wars.</p></div></div>
+      <div class="step"><div><b><code>npm test</code></b><p>The 76-test vitest floor: crypto vectors, wildcard anchoring, confinement, control-char stripping.</p></div></div>
+      <div class="step"><div><b><code>npm run build</code> + smoke check</b><p>A broken renderer import fails here, in CI — not at runtime on a user's machine. The smoke check parses every emitted bundle with <code>node --check</code>.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== PERSISTENCE ==================== -->
+<section class="chapter" id="persistence">
+  <h2>9 · Layout persistence: the grid remembers</h2>
+  <p class="lede">dockview serializes its whole grid with <code>toJSON()</code> — panel ids, titles, params,
+  positions. Tome saves that blob <b>per workspace</b> (debounced on every layout change, and once more on
+  quit via a main-process handshake) and restores it on reopen. The store key is derived from the
+  workspace's <b>folder list</b>, so renaming a workspace keeps its layout.</p>
+
+  <div class="card">
+    <h3><span class="num">9.1</span>Play with a miniature grid</h3>
+    <p class="lede">Drag panes to rearrange, then <b>Save layout</b> (it writes to this page's localStorage,
+    like Tome writes to its vetted store). <b>Reset</b> scrambles the grid; <b>Restore</b> brings your saved
+    arrangement back. Notice the serialized JSON on the right — that's the real shape of the data.</p>
+    <div class="lay">
+      <div>
+        <div id="dock-sim"></div>
+        <div class="lay-btns">
+          <button class="btn" id="lay-save">💾 save layout</button>
+          <button class="btn ghost" id="lay-restore">↩ restore</button>
+          <button class="btn ghost" id="lay-reset">✕ reset / scramble</button>
+        </div>
+      </div>
+      <div>
+        <div class="filetag">dock.<b>toJSON()</b> — what gets stored under <b>layout-&lt;slug&gt;</b></div>
+        <div id="layout-json"></div>
+      </div>
+    </div>
+    <div class="note warn" style="margin-top:16px"><b>The one pane that can't come back:</b> a terminal is a
+    live OS process — its scrollback and running programs die with it. On restore, Tome recreates each
+    terminal/agent pane as a <b>fresh shell in its saved position</b> (same kind, cwd, air-gap state).
+    Editors, docs, chat and brain panes restore for real. Stale entries — deleted files, removed workspaces,
+    panels from older builds — are skipped silently instead of breaking the whole restore.</div>
+  </div>
+
+  <div class="filetag">the quit handshake — <b>src/main/index.js</b> ↔ <b>src/renderer/panes.js</b></div>
+  <pre><span class="c">// main: before quitting, give the renderer a beat to persist the grid…</span>
+win.webContents.<span class="f">send</span>(<span class="s">'app:before-quit'</span>)
+<span class="c">// …renderer saves, then replies; main force-quits after 1.5 s regardless</span>
+tome.app.<span class="f">onBeforeQuit</span>(() => {
+  <span class="f">saveLayoutNow</span>().<span class="f">finally</span>(() => tome.app.<span class="f">quitReady</span>())
+})</pre>
+</section>
+
+<!-- ==================== QUIZ ==================== -->
+<section class="chapter" id="quiz">
+  <h2>10 · Check your understanding</h2>
+  <p class="lede">Five questions. Score: <span id="quiz-score">0 / 0</span></p>
+  <div id="quiz-root"></div>
+</section>
+
+<footer>
+  built from the real source of tome v0.1.0 · ~3,900 LOC · MIT · neon-on-black, like the app
+</footer>
+</main>
+
+<script>
+/* ---------- nav highlight ---------- */
+const links = [...document.querySelectorAll('nav#top a')]
+const secs = links.map(a => document.querySelector(a.hash))
+addEventListener('scroll', () => {
+  let cur = 0
+  secs.forEach((s, i) => { if (s && s.getBoundingClientRect().top < 120) cur = i })
+  links.forEach((a, i) => a.classList.toggle('active', i === cur))
+}, { passive: true })
+
+/* ---------- IPC simulator ---------- */
+let locked = true
+const lockSwitch = document.getElementById('lock-switch')
+const lockLabel = document.getElementById('lock-label')
+lockSwitch.onclick = () => {
+  locked = !locked
+  lockSwitch.classList.toggle('on', locked)
+  lockLabel.textContent = locked ? '🔒 app is locked (pre-login)' : '🔓 app is unlocked'
+}
+const OPEN = new Set(['store:get', 'auth:login']) // the door + the store, like the real OPEN_CHANNELS
+const KNOWN = new Set(['store:get', 'pty:create', 'chat:send', 'fs:readFile', 'auth:login'])
+const packet = document.getElementById('ipc-packet')
+const verdict = document.getElementById('ipc-verdict')
+document.getElementById('chan-btns').addEventListener('click', (e) => {
+  const ch = e.target.dataset?.ch
+  if (!ch) return
+  packet.textContent = `invoke("${ch}")`
+  packet.classList.remove('fly', 'denied'); void packet.offsetWidth
+  packet.classList.add('fly')
+  setTimeout(() => {
+    if (!KNOWN.has(ch)) {
+      packet.classList.add('denied')
+      verdict.className = 'no'; verdict.id = 'ipc-verdict'
+      verdict.textContent = `✗ no such channel — the preload allowlist never exposed it. Impossible to even ask.`
+    } else if (locked && !OPEN.has(ch)) {
+      packet.classList.add('denied')
+      verdict.className = 'no'
+      verdict.textContent = `✗ refused: app is locked and "${ch}" is not in OPEN_CHANNELS (fail-closed).`
+    } else {
+      verdict.className = 'ok'
+      verdict.textContent = `✓ allowed${locked ? ' (open pre-login by design — the lock screen itself needs it)' : ''} — main executes and replies.`
+    }
+  }, 380)
+})
+
+/* ---------- air gap playground ---------- */
+const ALLOW = ['api.anthropic.com', 'api.openai.com', 'router.requesty.ai', 'bedrock-runtime.*.amazonaws.com']
+const compile = (h) =>
+  new RegExp('^' + h.split('.').map(p => p === '*' ? '[a-z0-9-]+' : p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\.') + '$', 'i')
+const ALLOW_RE = ALLOW.map(compile)
+const allowed = (host) => ALLOW_RE.some(re => re.test(host))
+let freed = false
+const agSwitch = document.getElementById('ag-switch')
+const agLabel = document.getElementById('ag-label')
+agSwitch.onclick = () => {
+  freed = !freed
+  agSwitch.classList.toggle('on', freed)
+  agLabel.textContent = freed
+    ? '🔓 pane freed — proxy allows all HTTP(S) (raw sockets still dead: the sandbox never changed)'
+    : '⛨ pane is air-gapped (provider allowlist only)'
+}
+const HOSTS = [
+  ['api.anthropic.com', 'the model API — the whole point of the pane'],
+  ['router.requesty.ai', 'the model router'],
+  ['bedrock-runtime.us-east-1.amazonaws.com', 'wildcard provider host'],
+  ['github.com', 'your source host — not a provider'],
+  ['bedrock-runtime.x.amazonaws.com.evil.com', 'suffix-bypass phishing attempt'],
+  ['exfil.attacker.io', 'obvious exfiltration'],
+]
+const rows = document.getElementById('net-rows')
+for (const [host, why] of HOSTS) {
+  const row = document.createElement('div'); row.className = 'net-row'
+  row.innerHTML = `<button class="btn ghost who" style="text-align:left">→ ${host}</button>
+    <div class="net-track"><div class="net-dot"></div></div>
+    <div class="net-verdict"></div>`
+  const btn = row.querySelector('button'), dot = row.querySelector('.net-dot'), v = row.querySelector('.net-verdict')
+  btn.title = why
+  btn.onclick = () => {
+    dot.classList.remove('blocked'); dot.style.left = '0'; void dot.offsetWidth
+    const ok = freed || allowed(host)
+    dot.style.left = ok ? 'calc(100% - 16px)' : '38%'
+    if (!ok) dot.classList.add('blocked')
+    setTimeout(() => {
+      v.className = 'net-verdict ' + (ok ? 'ok' : 'no')
+      v.textContent = ok
+        ? (freed && !allowed(host) ? '✓ via freed proxy' : '✓ allowlisted provider')
+        : '✗ proxy refused — blocked'
+    }, 920)
+  }
+  rows.appendChild(row)
+}
+
+/* ---------- HOTP lab (real RFC 4226) ---------- */
+const VECTORS = ['755224','287082','359152','969429','338314','254676','287922','162583','399871','520489']
+const SECRET = new TextEncoder().encode('12345678901234567890')
+let counter = 0
+async function hotp(secretBytes, counter) {
+  const key = await crypto.subtle.importKey('raw', secretBytes, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign'])
+  const buf = new ArrayBuffer(8)
+  new DataView(buf).setBigUint64(0, BigInt(counter))
+  const h = new Uint8Array(await crypto.subtle.sign('HMAC', key, buf))
+  const o = h[19] & 0xf
+  const n = ((h[o] & 0x7f) << 24 | h[o+1] << 16 | h[o+2] << 8 | h[o+3]) >>> 0
+  return String(n % 1e6).padStart(6, '0')
+}
+async function renderHotp() {
+  document.getElementById('hotp-counter').textContent = counter
+  const code = await hotp(SECRET, counter)
+  document.getElementById('hotp-out').textContent = code
+  const check = document.getElementById('hotp-check')
+  if (counter <= 9) {
+    const ok = code === VECTORS[counter]
+    check.textContent = ok ? `✓ matches RFC 4226 vector #${counter}` : `✗ MISMATCH (expected ${VECTORS[counter]})`
+    check.style.color = ok ? 'var(--green)' : 'var(--red)'
+  } else check.textContent = '(beyond the published vectors)'
+}
+document.getElementById('hotp-gen').onclick = renderHotp
+document.getElementById('hotp-prev').onclick = () => { counter = Math.max(0, counter - 1); renderHotp() }
+document.getElementById('hotp-next').onclick = () => { counter++; renderHotp() }
+renderHotp()
+
+/* ---------- conductor loop sim ---------- */
+const LOOP_SCRIPT = [
+  ['user', 'you: "what is claude doing in the other pane? run the tests over there"'],
+  ['model', 'model → I\u2019ll look at the panes first.'],
+  ['tool', '⚙ tool_use: list_panes()'],
+  ['result', '→ [{id:"pty-1",kind:"claude",airgapped:true,alive:true}, {id:"pty-2",kind:"terminal"…}]'],
+  ['tool', '⚙ tool_use: read_terminal({pane_id:"pty-1", lines:60})'],
+  ['result', '→ "…✻ Compacting conversation… ✗ npm test — 2 failing (authlock.test.js)…"'],
+  ['model', 'model → Claude is mid-task; its tests are failing. Running them in pty-2…'],
+  ['tool', '⚙ tool_use: type_in_terminal({pane_id:"pty-2", text:"npm test\\r", press_enter:true})'],
+  ['guard', '⛨ GUARD (main): auto-run OFF → stripControlChars() kills the smuggled \\r; press_enter ignored'],
+  ['result', '→ "Typed, but NOT submitted: auto-run is disabled. The user can press Enter…"'],
+  ['model', 'model → Done: claude in pty-1 has 2 failing authlock tests. I typed `npm test` in pty-2 — press Enter to run it, or enable auto-run in the ＋ menu.'],
+  ['err', 'chat:done { aborted:false } · stop button hides · message stays in history'],
+]
+const TOKENS = [0, 1200, 1450, 3100, 4300, 2900, 3600, 1500, 900, 2200, 800, 0]
+const loopLog = document.getElementById('loop-log')
+const meter = document.getElementById('token-meter')
+const meterBar = meter.querySelector('i')
+const tokenLabel = document.getElementById('token-label')
+let loopRunning = false
+function renderTokens(n) {
+  const pct = Math.min(100, (n / 400000) * 100)
+  meterBar.style.width = Math.max(1.5, pct) + '%'
+  meter.classList.toggle('hot', pct > 75)
+  tokenLabel.textContent = `${n.toLocaleString()} / 400,000 tokens (cumulative across tool turns)`
+}
+document.getElementById('loop-run').onclick = async () => {
+  if (loopRunning) return
+  loopRunning = true
+  loopLog.innerHTML = ''
+  let total = 0
+  renderTokens(0)
+  for (let i = 0; i < LOOP_SCRIPT.length; i++) {
+    const [kind, text] = LOOP_SCRIPT[i]
+    const ln = document.createElement('div')
+    ln.className = 'ln ' + kind
+    ln.innerHTML = `<span class="t">${String(i).padStart(2, '0')}</span>${text}`
+    loopLog.appendChild(ln)
+    loopLog.scrollTop = loopLog.scrollHeight
+    total += TOKENS[i] || 0
+    renderTokens(total)
+    await new Promise(r => setTimeout(r, kind === 'guard' ? 1100 : 650))
+  }
+  loopRunning = false
+}
+document.getElementById('loop-reset').onclick = () => {
+  loopLog.innerHTML = ''
+  renderTokens(0)
+}
+
+/* ---------- layout persistence lab ---------- */
+const SIM_PANES = [
+  { id: 'pty-1', title: '⛨ claude — tome', kind: 'terminal · fresh shell on restore', cls: 'term' },
+  { id: 'file:README.md', title: 'README.md', kind: 'editor · restores fully', cls: '' },
+  { id: 'chat-3', title: 'assistant', kind: 'chat · restores fully', cls: '' },
+  { id: 'brain:tome', title: '⌬ brain — tome', kind: 'brain · restores fully', cls: '' },
+]
+const DEFAULT_POS = [
+  { x: 2, y: 4, w: 46, h: 56 }, { x: 52, y: 4, w: 46, h: 56 },
+  { x: 2, y: 64, w: 46, h: 32 }, { x: 52, y: 64, w: 46, h: 32 },
+]
+const dockSim = document.getElementById('dock-sim')
+const jsonView = document.getElementById('layout-json')
+const LAY_KEY = 'tome-tour-layout'
+function simLayoutJSON() {
+  const panels = {}
+  dockSim.querySelectorAll('.sim-pane').forEach(p => {
+    panels[p.dataset.id] = {
+      id: p.dataset.id,
+      contentComponent: p.dataset.id.startsWith('pty') ? 'terminal' : p.dataset.id.split(':')[0],
+      title: p.querySelector('.pt').textContent,
+      params: { id: p.dataset.id },
+      x: +p.dataset.x, y: +p.dataset.y, w: +p.dataset.w, h: +p.dataset.h,
+    }
+  })
+  return { grid: { root: { type: 'branch', data: Object.keys(panels) } }, panels }
+}
+function showJSON() { jsonView.textContent = JSON.stringify(simLayoutJSON(), null, 1) }
+function placePane(d) {
+  d.style.left = d.dataset.x + '%'; d.style.top = d.dataset.y + '%'
+  d.style.width = d.dataset.w + '%'; d.style.height = d.dataset.h + '%'
+}
+function makeDraggable(d) {
+  d.onpointerdown = (e) => {
+    d.setPointerCapture(e.pointerId)
+    const sx = e.clientX, sy = e.clientY
+    const ox = +d.dataset.x, oy = +d.dataset.y
+    const W = dockSim.clientWidth, H = dockSim.clientHeight
+    d.onpointermove = (ev) => {
+      d.dataset.x = Math.max(0, Math.min(100 - +d.dataset.w, ox + ((ev.clientX - sx) / W) * 100))
+      d.dataset.y = Math.max(0, Math.min(100 - +d.dataset.h, oy + ((ev.clientY - sy) / H) * 100))
+      placePane(d)
+      showJSON()
+    }
+    d.onpointerup = () => { d.onpointermove = null }
+  }
+}
+function buildPanes(pos) {
+  dockSim.innerHTML = ''
+  SIM_PANES.forEach((p, i) => {
+    const d = document.createElement('div')
+    d.className = 'sim-pane ' + p.cls
+    d.dataset.id = p.id
+    Object.assign(d.dataset, pos[i])
+    placePane(d)
+    d.innerHTML = `<span class="pt">${p.title}</span><span class="pk">${p.kind}</span>`
+    dockSim.appendChild(d)
+    makeDraggable(d)
+  })
+  showJSON()
+}
+document.getElementById('lay-save').onclick = () => {
+  localStorage.setItem(LAY_KEY, JSON.stringify(simLayoutJSON()))
+  showJSON()
+}
+document.getElementById('lay-restore').onclick = () => {
+  const raw = localStorage.getItem(LAY_KEY)
+  if (!raw) { jsonView.textContent = '(nothing saved yet — hit save first)'; return }
+  try {
+    const saved = JSON.parse(raw)
+    const order = SIM_PANES.map(p => saved.panels[p.id]).filter(Boolean)
+    if (!order.length) throw new Error('stale')
+    dockSim.innerHTML = ''
+    order.forEach((panel) => {
+      const meta = SIM_PANES.find(p => p.id === panel.id)
+      const d = document.createElement('div')
+      d.className = 'sim-pane ' + meta.cls
+      d.dataset.id = panel.id
+      Object.assign(d.dataset, { x: panel.x, y: panel.y, w: panel.w, h: panel.h })
+      placePane(d)
+      d.innerHTML = `<span class="pt">${panel.title}</span><span class="pk">${meta.kind}</span>`
+      dockSim.appendChild(d)
+      makeDraggable(d)
+    })
+    showJSON()
+  } catch {
+    // like the real restoreLayout(): corrupt state → start empty rather than crash
+    jsonView.textContent = '(saved layout was corrupt — cleared, starting empty)'
+    localStorage.removeItem(LAY_KEY)
+    buildPanes(DEFAULT_POS)
+  }
+}
+document.getElementById('lay-reset').onclick = () => {
+  buildPanes([...DEFAULT_POS].sort(() => Math.random() - 0.5))
+}
+buildPanes(DEFAULT_POS)
+
+/* ---------- quiz ---------- */
+const QUIZ = [
+  {
+    q: 'Why can’t a compromised Tome renderer spawn /bin/sh?',
+    opts: [
+      'The renderer is minified, so attackers can’t read it',
+      'There is no IPC channel for arbitrary spawning — the pty command line is built in main from a vetted kind',
+      'macOS prevents all apps from spawning shells',
+      'The renderer is encrypted at rest',
+    ],
+    right: 1,
+    why: 'The renderer can only ask for a pane *kind* (claude, terminal…). Main builds the command line. You can’t request what was never exposed through the preload allowlist.',
+  },
+  {
+    q: 'An air-gapped pane tries to reach github.com. What happens?',
+    opts: [
+      'It works — the sandbox only blocks exfiltration domains',
+      'The seatbelt kills the process',
+      'The per-pane proxy refuses it — only model-provider domains pass, and the sandbox blocks everything direct',
+      'It prompts the user each time',
+    ],
+    right: 2,
+    why: 'Direct egress (even DNS) is denied by the seatbelt; the loopback proxy is the only path and it enforces the provider allowlist. Tools that ignore proxy env vars simply get nothing — fail closed.',
+  },
+  {
+    q: 'When "assistant may run commands" is OFF, how is the model stopped from pressing Enter in a terminal?',
+    opts: [
+      'A warning in the system prompt',
+      'The renderer hides the terminal',
+      'Main strips CR/LF/Ctrl-C/Ctrl-D/ESC from typed text — submission characters never reach the pty',
+      'The model is rate-limited',
+    ],
+    right: 2,
+    why: 'Guards live in main, not in the prompt or the UI. The control-char stripper is a regex over the bytes — and it’s pinned by tests because a "simplified" regex once let submissions through.',
+  },
+  {
+    q: 'Why does the chat API key never enter the renderer?',
+    opts: [
+      'It does enter — it’s just hidden in a closure',
+      'Streaming runs in the main process; only text deltas cross IPC to the chat pane',
+      'The key is stored in localStorage',
+      'Chromium encrypts it automatically',
+    ],
+    right: 1,
+    why: '@anthropic-ai/sdk runs in main. The renderer receives chat:delta events. An XSS in the renderer finds no key to steal.',
+  },
+  {
+    q: 'A repo\u2019s build script prints text crafted to steer the assistant. What limits the blast radius?',
+    opts: [
+      'Nothing — the model can do anything',
+      'The confused-deputy loop is capped in main: open_file is workspace-confined, and type_in_terminal can\u2019t submit while auto-run is off',
+      'The terminal font is too small for instructions',
+      'The model promises to be careful in its system prompt',
+    ],
+    right: 1,
+    why: 'Scrollback is untrusted input. Prompts are suggestions; guards in main are enforcement. The worst case with auto-run off is “typed text, unsubmitted” and “opened a workspace file”.',
+  },
+  {
+    q: 'Why can\u2019t a terminal pane\u2019s layout be fully restored after quit?',
+    opts: [
+      'dockview can\u2019t serialize terminals',
+      'The developers forgot',
+      'A pty is a live OS process — scrollback and running programs die with it, so Tome respawns a fresh shell in the saved position instead',
+      'Terminals are encrypted at rest',
+    ],
+    right: 2,
+    why: 'The grid shape (kind, cwd, air-gap state, position) survives in toJSON(); the process does not. Editors, docs, chat and brain panes restore fully.',
+  },
+  {
+    q: 'Why is the layout store key derived from the workspace\u2019s folder list instead of its name?',
+    opts: [
+      'Folder lists are shorter',
+      'So renaming a workspace keeps its layout — the key doesn\u2019t change',
+      'Names can contain emoji',
+      'It isn\u2019t — it uses the name',
+    ],
+    right: 1,
+    why: 'Keying on identity (the folders) rather than the label (the name) means a rename doesn\u2019t orphan the saved grid. Folder-less workspaces fall back to the name.',
+  },
+  {
+    q: 'Why is the test floor mostly "pinning" tests for code that already works?',
+    opts: [
+      'To inflate the test count',
+      'Because the crypto, wildcard compiler, and guards are correct *today* — tests make the next edit own any regression',
+      'Because CI requires a test step',
+      'To test the test runner',
+    ],
+    right: 1,
+    why: 'All four areas were verified correct by review. Without pinned tests, a future "cleanup" could silently break RFC 4226 or wildcard anchoring and nobody would know until it mattered.',
+  },
+]
+let answered = 0, score = 0
+const root = document.getElementById('quiz-root')
+for (const { q, opts, right, why } of QUIZ) {
+  const box = document.createElement('div'); box.className = 'quiz-q card'
+  box.innerHTML = `<p>${q}</p>`
+  const list = document.createElement('div'); list.className = 'quiz-opts'
+  const whyEl = document.createElement('div'); whyEl.className = 'quiz-why'; whyEl.textContent = why
+  opts.forEach((o, i) => {
+    const b = document.createElement('button'); b.textContent = o
+    b.onclick = () => {
+      if (box.dataset.done) return
+      box.dataset.done = 1
+      answered++
+      if (i === right) { b.classList.add('right'); score++ } else b.classList.add('wrong')
+      list.children[right].classList.add('right')
+      whyEl.classList.add('show')
+      document.getElementById('quiz-score').textContent = `${score} / ${answered}`
+    }
+    list.appendChild(b)
+  })
+  box.append(list, whyEl)
+  root.appendChild(box)
+}
+</script>
+</body>
+</html>
