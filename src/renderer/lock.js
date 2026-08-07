@@ -2,16 +2,13 @@
 // Touch ID (macOS) or passphrase + TOTP. First run offers setup (skippable).
 // The real enforcement lives in the main process — every sensitive IPC channel
 // refuses until auth:login / auth:touchid succeeds — this overlay is just the door.
-
-function el(tag, cls, text) {
-  const n = document.createElement(tag)
-  if (cls) n.className = cls
-  if (text != null) n.textContent = text
-  return n
-}
+// NOTE: this overlay() is intentionally separate from modals.js's modalShell —
+// the lock screen is a full-viewport gate (#lock-overlay, sigil, no dismiss),
+// not a dismissible dialog.
+import { el } from './util.js'
 
 function overlay() {
-  const o = el('div', '')
+  const o = el('div')
   o.id = 'lock-overlay'
   const box = el('div', 'ag-box lock-box')
   const sigil = el('div', 'lock-sigil', '▚')
