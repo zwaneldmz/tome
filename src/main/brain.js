@@ -8,7 +8,7 @@ import { watch } from 'node:fs'
 import { join, resolve, relative, dirname, basename, sep } from 'node:path'
 import { homedir } from 'node:os'
 
-const BRAINS_ROOT = join(homedir(), 'Tome', 'Brains')
+export const BRAINS_ROOT = join(homedir(), 'Tome', 'Brains')
 const REINDEX_DEBOUNCE_MS = 300
 
 const AGENTS_MD = (ws) => `# AGENTS.md

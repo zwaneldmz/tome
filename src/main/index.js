@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, systemPreferences } from 'electron'
-import { join, extname } from 'node:path'
-import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises'
+import { join, resolve, extname, sep } from 'node:path'
+import { readdir, readFile, writeFile, mkdir, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { execFile, execFileSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
@@ -16,6 +16,39 @@ import * as conductor from './conductor'
 const ptys = new Map()
 let win = null
 let anthropic = null
+
+// ---- file-open confinement ----
+// Anything that opens or parses a file in main on behalf of the renderer —
+// the conductor's open_file tool (model-driven!) and doc:read's
+// mammoth/SheetJS parsers — stays inside the open workspace folders, or a
+// brain vault. Otherwise a prompt-injected chat reply could make the main
+// process parse ~/.ssh/… with libraries that have CVE histories.
+// (fs:readFile/fs:writeFile/shell:openPath stay unvetted by design: the
+// editor and tree are user-driven; the trust boundary is documented in the
+// review — renderer compromise ≈ user-privileged file access.)
+let openFolders = [] // absolute paths of open workspace folders
+function setOpenFolders(list) {
+  openFolders = Array.isArray(list) ? list.filter((f) => typeof f === 'string' && f) : []
+}
+function isBrainPath(p) {
+  return p.startsWith(brain.BRAINS_ROOT + sep)
+}
+function isConfinedPath(p) {
+  if (typeof p !== 'string' || !p) return false
+  const abs = resolve(p)
+  return openFolders.some((f) => abs === f || abs.startsWith(f + sep)) || isBrainPath(abs)
+}
+// Symlink-aware variant for main-process parsing: resolve the real path so a
+// symlink inside a workspace can't aim the parser outside it.
+async function confinedRealPath(p) {
+  if (!isConfinedPath(p)) return null
+  try {
+    const real = await realpath(p)
+    return isConfinedPath(real) ? real : null
+  } catch {
+    return null
+  }
+}
 
 const SHELL = process.env.SHELL || '/bin/zsh'
 const AGENTS = ['claude', 'opencode', 'pi']
@@ -211,8 +244,13 @@ app.whenReady().then(async () => {
   brain.setEventSink((ws, index) => win?.webContents.send('brain:changed', { ws, index }))
 
   createWindow()
-  conductor.init({ ptys, send: (channel, payload) => win?.webContents.send(channel, payload) })
+  conductor.init({
+    ptys,
+    send: (channel, payload) => win?.webContents.send(channel, payload),
+    canOpenFile: isConfinedPath,
+  })
   ipcMain.on('panes:sync', (e, list) => conductor.setPanes(list))
+  ipcMain.on('ws:sync', (e, folders) => setOpenFolders(folders))
   ipcMain.on('conductor:allowRun', (e, v) => conductor.setAllowRun(v))
 
   // ---- pty ----
@@ -470,6 +508,11 @@ app.whenReady().then(async () => {
 
   // ---- document conversion (docx/xlsx → sandboxed html) ----
   ipcMain.handle('doc:read', async (e, path) => {
+    // Parsing is the dangerous part (mammoth/SheetJS CVE histories) — only
+    // parse files inside the open workspace folders or a brain vault.
+    const real = await confinedRealPath(path)
+    if (!real) throw new Error('doc:read: path is outside the open workspace folders')
+    path = real
     const ext = extname(path).toLowerCase()
     if (ext === '.docx') {
       const { value } = await mammoth.convertToHtml({ path })
