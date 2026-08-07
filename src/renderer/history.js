@@ -1,16 +1,11 @@
 // Git history pane — IntelliJ-style: commit list on the left, commit detail
 // (message, changed files) on the right, per-file diff below it.
 
+import { el } from './util.js'
+
 const tome = () => window.tome
 
 const STATUS = { A: ['A', 'g-add'], M: ['M', 'g-mod'], D: ['D', 'g-del'], R: ['R', 'g-mod'], C: ['C', 'g-add'], T: ['T', 'g-mod'] }
-
-function el(tag, cls, text) {
-  const n = document.createElement(tag)
-  if (cls) n.className = cls
-  if (text != null) n.textContent = text
-  return n
-}
 
 export class HistoryPanel {
   constructor() {
@@ -62,7 +57,7 @@ export class HistoryPanel {
       top.appendChild(el('span', 'hist-subject', c.subject))
       for (const r of c.refs) top.appendChild(el('span', 'hist-ref' + (r.includes('HEAD') ? ' head' : ''), r))
       const sub = el('div', 'hist-row-sub')
-      sub.append(el('span', 'hist-hash', c.short), el('span', '', c.author), el('span', 'hist-date', c.date))
+      sub.append(el('span', 'hist-hash', c.short), el('span', null, c.author), el('span', 'hist-date', c.date))
       row.append(top, sub)
       row.addEventListener('click', () => this.select(c))
       this.listEl.appendChild(row)
@@ -84,7 +79,7 @@ export class HistoryPanel {
     if (this.selected !== c) return // stale response
     this.detailEl.textContent = ''
     const head = el('div', 'hist-meta')
-    head.append(el('span', 'hist-hash', c.short), el('span', '', `${c.author} · ${c.date}`))
+    head.append(el('span', 'hist-hash', c.short), el('span', null, `${c.author} · ${c.date}`))
     const msg = el('pre', 'hist-msg', detail.body)
     const files = el('div', 'hist-files')
     if (!detail.files.length) files.appendChild(el('div', 'hist-err', '(no file list — merge commit?)'))

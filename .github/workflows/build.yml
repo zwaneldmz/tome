@@ -17,5 +17,19 @@ jobs:
       - run: npm ci
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-      - run: npm test
-      - run: npx electron-vite build
+      - name: Lint (hygiene gate)
+        run: npm run lint
+      - name: Tests (vitest floor — crypto, guards, confinement)
+        run: npm test
+      - name: Build (gates on a broken renderer import)
+        run: npm run build
+      # Renderer smoke check: the bundle built and every module import
+      # resolved into it — a broken import fails at build, not at runtime.
+      - name: Renderer smoke check
+        run: |
+          test -f out/renderer/index.html
+          for f in out/renderer/assets/*.js; do
+            node --check "$f" || { echo "renderer bundle failed parse: $f"; exit 1; }
+          done
+          grep -q 'ChatPanel' out/renderer/assets/*.js \
+            && echo "renderer smoke check OK"
