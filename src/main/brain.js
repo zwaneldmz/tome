@@ -5,8 +5,9 @@
 // changes. Module shape mirrors airgap.js: pure functions + module state.
 import { readFile, writeFile, mkdir, readdir, stat, unlink, copyFile } from 'node:fs/promises'
 import { watch } from 'node:fs'
-import { join, resolve, relative, dirname, basename, sep } from 'node:path'
+import { join, relative, dirname, basename } from 'node:path'
 import { homedir } from 'node:os'
+import { confine } from './lib/confine.js'
 
 const BRAINS_ROOT = join(homedir(), 'Tome', 'Brains')
 const REINDEX_DEBOUNCE_MS = 300
@@ -199,19 +200,7 @@ export function close(ws) {
   cache.delete(ws)
 }
 
-// Shared confinement for every note/folder path derived from renderer input:
-// must stay a string resolving inside `root`, no leading slash, no `..`
-// segment. `requireMd` additionally demands a .md extension (notes only —
-// promote's core-vault folder argument is a directory, not a note).
-function confine(root, rel, requireMd) {
-  if (typeof rel !== 'string') return null
-  if (requireMd && !rel.endsWith('.md')) return null
-  if (rel.startsWith('/')) return null
-  if (rel.split(/[\\/]/).includes('..')) return null
-  const full = resolve(root, rel)
-  if (!full.startsWith(root + sep)) return null
-  return full
-}
+// Path confinement lives in ./lib/confine.js (pure, unit-tested).
 
 export async function readNote(ws, rel) {
   const root = brainRoot(ws)
