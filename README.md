@@ -26,9 +26,11 @@ documents, and an assistant — one workspace, one grid.
   ahead/behind. The git menu's **History** opens an IntelliJ-style log pane:
   commit list with ref chips and filter, commit message + changed files, and
   a per-file diff view.
-- **Assistant chat** — streams Claude (`claude-opus-5`, override with
-  `TOME_CHAT_MODEL`) from the main process; the API key never enters the
-  renderer. The assistant is also the workspace **conductor**: it can list
+- **Assistant chat** — streams Claude **Opus 4.8** through the Requesty router
+  by default (`anthropic/claude-opus-4-8` via `REQUESTY_API_KEY`); with no
+  Requesty key it falls back to direct Anthropic (`claude-opus-5` via
+  `ANTHROPIC_API_KEY`). Override with `TOME_CHAT_MODEL` / `TOME_CHAT_BASE_URL`.
+  Streaming runs in the main process; the API key never enters the renderer. The assistant is also the workspace **conductor**: it can list
   panes, read a terminal's scrollback, type into terminals, and open panes and
   files — so you can ask it "what is claude doing in the other pane?" or "run
   the tests over there". It only ever *submits* a command when the ＋ menu
@@ -72,9 +74,10 @@ If `npm run dev` fails with `Error: Electron uninstall`, a script-blocking
 npm guard prevented Electron's binary download — run `npm run fix:electron`
 once.
 
-The assistant pane needs `ANTHROPIC_API_KEY` in the environment (or an
-`ant auth login` profile). Without credentials the pane shows a setup hint;
-everything else works.
+The assistant pane needs `REQUESTY_API_KEY` (router, default) or
+`ANTHROPIC_API_KEY` (direct) in the environment (or an `ant auth login`
+profile). Without credentials the pane shows a setup hint; everything else
+works.
 
 Set `TOME_SHOT=/tmp/shot.png npm run dev` to boot into demo panes and write a
 screenshot — handy for design passes.

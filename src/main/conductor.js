@@ -163,15 +163,16 @@ function runTool(name, input) {
 export async function runChat(anthropic, { id, model, system, messages, betas, fallbacks }) {
   const msgs = [...messages]
   for (let turn = 0; turn < 8; turn++) {
-    const stream = anthropic.beta.messages.stream({
+    const args = {
       model,
       max_tokens: 64000,
       system: system || SYSTEM,
       messages: msgs,
       tools: TOOLS,
-      betas,
-      fallbacks,
-    })
+    }
+    if (betas) args.betas = betas
+    if (fallbacks) args.fallbacks = fallbacks
+    const stream = anthropic.beta.messages.stream(args)
     stream.on('text', (text) => send('chat:delta', { id, text }))
     const final = await stream.finalMessage()
     if (final.stop_reason === 'refusal') {
