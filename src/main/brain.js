@@ -3,7 +3,7 @@
 // (~/Tome/Brains/<ws>) so air-gapped agent panes — whose seatbelt profile
 // denies writes under userData — get full read/write with zero sandbox
 // changes. Module shape mirrors airgap.js: pure functions + module state.
-import { readFile, writeFile, mkdir, readdir, stat, unlink, copyFile } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, readdir, stat, unlink, copyFile, realpath } from 'node:fs/promises'
 import { watch } from 'node:fs'
 import { join, resolve, relative, dirname, basename, sep } from 'node:path'
 import { homedir } from 'node:os'
@@ -213,16 +213,47 @@ function confine(root, rel, requireMd) {
   return full
 }
 
+// Lexical confinement misses symlinks: a link inside the vault pointing
+// outside is followed on read/write, and brain IPC runs unsandboxed in main.
+// Resolve the real path and re-check containment. The realpath'd vault root
+// is cached per call so a symlinked BRAINS_ROOT itself still works.
+async function confineReal(root, rel, requireMd, { mustExist = true } = {}) {
+  const full = confine(root, rel, requireMd)
+  if (!full) return null
+  try {
+    const realRoot = await realpath(root)
+    if (mustExist) {
+      const real = await realpath(full)
+      return real.startsWith(realRoot + sep) ? full : null
+    }
+    // write target may not exist yet: confine the nearest existing ancestor,
+    // which catches a symlink anywhere in the existing part of the path
+    let dir = dirname(full)
+    for (;;) {
+      try {
+        const realDir = await realpath(dir)
+        return realDir === realRoot || realDir.startsWith(realRoot + sep) ? full : null
+      } catch {
+        const parent = dirname(dir)
+        if (parent === dir) return null
+        dir = parent
+      }
+    }
+  } catch {
+    return null
+  }
+}
+
 export async function readNote(ws, rel) {
   const root = brainRoot(ws)
-  const full = confine(root, rel, true)
+  const full = await confineReal(root, rel, true)
   if (!full) throw new Error('brain: path escapes vault')
   return readFile(full, 'utf8')
 }
 
 export async function writeNote(ws, rel, content, exclusive) {
   const root = brainRoot(ws)
-  const full = confine(root, rel, true)
+  const full = await confineReal(root, rel, true, { mustExist: false })
   if (!full) throw new Error('brain: path escapes vault')
   await mkdir(dirname(full), { recursive: true })
   try {
@@ -236,7 +267,7 @@ export async function writeNote(ws, rel, content, exclusive) {
 
 export async function deleteNote(ws, rel) {
   const root = brainRoot(ws)
-  const full = confine(root, rel, true)
+  const full = await confineReal(root, rel, true)
   if (!full) throw new Error('brain: path escapes vault')
   if (basename(full).toLowerCase() === 'agents.md') throw new Error('brain: AGENTS.md is protected')
   await unlink(full)
@@ -262,12 +293,12 @@ export async function coreInfo(root) {
 export async function promote(coreRoot, ws, rel, folder, { overwrite, rename } = {}) {
   const info = await coreInfo(coreRoot)
   if (!info.configured) throw new Error('brain: core vault not configured')
-  const srcFull = confine(brainRoot(ws), rel, true)
+  const srcFull = await confineReal(brainRoot(ws), rel, true)
   if (!srcFull) throw new Error('brain: path escapes vault')
 
   let destDir = info.root
   if (folder) {
-    destDir = confine(info.root, folder, false)
+    destDir = await confineReal(info.root, folder, false, { mustExist: false })
     if (!destDir) throw new Error('brain: folder escapes core vault')
   }
   await mkdir(destDir, { recursive: true })
