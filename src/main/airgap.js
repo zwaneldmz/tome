@@ -5,41 +5,13 @@ import http from 'node:http'
 import { connect } from 'node:net'
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-
-const DEFAULT_ALLOW = [
-  'api.anthropic.com',
-  'claude.ai',
-  'console.anthropic.com',
-  'statsig.anthropic.com',
-  'api.openai.com',
-  'auth.openai.com',
-  'generativelanguage.googleapis.com',
-  'oauth2.googleapis.com',
-  'openrouter.ai',
-  'router.requesty.ai',
-  'api.deepseek.com',
-  'api.moonshot.ai',
-  'api.groq.com',
-  'api.mistral.ai',
-  'api.x.ai',
-  'bedrock-runtime.*.amazonaws.com',
-]
+import { DEFAULT_ALLOW, compileAllowlist } from './lib/allowlist.js'
 
 const DEFAULT_UNLOCK_MINUTES = 15
 
-let allowMatchers = compile(DEFAULT_ALLOW)
+let allowMatchers = compileAllowlist(DEFAULT_ALLOW)
 let onEvent = () => {}
 const panes = new Map() // paneId -> { mode, expiresAt, timer, server }
-
-function compile(patterns) {
-  return patterns.map((p) => {
-    const re = p
-      .split('*')
-      .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-      .join('[a-z0-9-]+')
-    return new RegExp(`^${re}$`, 'i')
-  })
-}
 
 export function setEventSink(fn) {
   onEvent = fn
@@ -49,7 +21,7 @@ export async function loadAllowlist(userData) {
   const file = join(userData, 'airgap.json')
   try {
     const cfg = JSON.parse(await readFile(file, 'utf8'))
-    if (Array.isArray(cfg.allow)) allowMatchers = compile(cfg.allow)
+    if (Array.isArray(cfg.allow)) allowMatchers = compileAllowlist(cfg.allow)
   } catch {
     // seed defaults; loaded into memory once at boot — file edits apply on restart
     await writeFile(file, JSON.stringify({ allow: DEFAULT_ALLOW }, null, 2)).catch(() => {})

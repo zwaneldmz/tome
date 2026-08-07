@@ -2,6 +2,7 @@
 // Tracks pty scrollback + the renderer's pane list, exposes a small tool set
 // to the Claude chat loop, and never runs a command unless the user flipped
 // the "assistant may run commands" toggle (allowRun) on.
+import { stripAnsi, stripControlChars } from './lib/terminal-text.js'
 
 let ptys = null // Map shared with index.js
 let send = () => {} // (channel, payload) -> renderer
@@ -40,14 +41,6 @@ export function setPanes(list) {
 export function setAllowRun(v) {
   allowRun = !!v
 }
-
-// CSI + OSC + stray escapes + control chars (keep \n and \t)
-const stripAnsi = (s) =>
-  s
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
-    .replace(/\x1b[@-_]/g, '')
-    .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
 
 const TOOLS = [
   {
@@ -139,7 +132,7 @@ function runTool(name, input) {
       // With auto-run off the text must stay un-submitted, so strip the control
       // chars that would submit or signal on their own (CR/LF, Ctrl-C, Ctrl-D…).
       // Otherwise `text: "ls\r"` runs a command the user never approved.
-      const text = allowRun ? String(input.text) : String(input.text).replace(/[\x00-\x08\x0a-\x1f\x7f]/g, '')
+      const text = allowRun ? String(input.text) : stripControlChars(input.text)
       p.write(text + (enter ? '\r' : ''))
       send('conductor:acted', { pane: input.pane_id, ran: enter })
       if (enter) return 'Typed and submitted.'
