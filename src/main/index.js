@@ -141,12 +141,58 @@ function resolveAgentSecrets() {
 }
 
 // local-file protocol so panes can embed PDFs/images without file:// cross-origin blocks.
-// corsEnabled: embedding (img/iframe) works; renderer JS cannot *read* tome:// bodies.
+// Embedding (img/iframe) is all this scheme is for, so it gets no fetch/CORS
+// privileges — renderer JS cannot read tome:// bodies by design, not by CSP
+// accident (today's CSP omits tome: from connect-src, but one CSP edit used
+// to silently turn this into a read-any-file primitive). The handler itself
+// is confined to workspace folders / brain vaults + an extension allowlist.
 protocol.registerSchemesAsPrivileged([
   {
     scheme: 'tome',
-    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true },
+    privileges: { standard: true, secure: true, stream: true },
   },
+])
+
+// tome:// serves displayable content only: images, pdf, plain text/markdown,
+// and common source files. Executables/archives/documents that parse in main
+// (docx/xlsx go through doc:read instead) stay out.
+const TOME_SERVE_EXT = new Set([
+  'png',
+  'jpg',
+  'jpeg',
+  'gif',
+  'webp',
+  'svg',
+  'bmp',
+  'ico',
+  'avif',
+  'pdf',
+  'md',
+  'markdown',
+  'txt',
+  'json',
+  'js',
+  'mjs',
+  'cjs',
+  'ts',
+  'tsx',
+  'jsx',
+  'css',
+  'html',
+  'py',
+  'rb',
+  'go',
+  'rs',
+  'c',
+  'h',
+  'cpp',
+  'java',
+  'sh',
+  'yml',
+  'yaml',
+  'toml',
+  'xml',
+  'csv',
 ])
 
 const git = (dir, args) =>
@@ -222,9 +268,14 @@ app.whenReady().then(async () => {
       return fn(e, ...args)
     })
 
-  protocol.handle('tome', (req) => {
+  protocol.handle('tome', async (req) => {
     const p = decodeURIComponent(new URL(req.url).searchParams.get('p') || '')
-    return net.fetch(pathToFileURL(p).toString())
+    const deny = () => new Response('tome: path not allowed', { status: 403 })
+    const ext = extname(p).slice(1).toLowerCase()
+    if (!TOME_SERVE_EXT.has(ext)) return deny()
+    const real = await confinedRealPath(p)
+    if (!real) return deny()
+    return net.fetch(pathToFileURL(real).toString())
   })
 
   if (process.platform === 'darwin' && !app.isPackaged && app.dock) {
