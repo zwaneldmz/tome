@@ -31,7 +31,15 @@ const paneCwd = () => activeRoot || activeWorkspace()?.folders[0] || tome.home
 
 // ---------- toasts ----------
 const toasts = document.getElementById('toasts')
+// Toasts vanish after ~5 s, so every one is also logged (session-only, capped)
+// behind the bell in the top bar — a missed "airgap blocked" stays retrievable.
+const notifLog = []
+const NOTIF_CAP = 100
 function toast(msg, kind = 'err') {
+  notifLog.push({ ts: Date.now(), kind, msg: String(msg) })
+  if (notifLog.length > NOTIF_CAP) notifLog.splice(0, notifLog.length - NOTIF_CAP)
+  const bell = document.getElementById('btn-notifs')
+  if (bell) bell.classList.add('unseen')
   const t = document.createElement('div')
   t.className = 'toast ' + kind
   t.textContent = msg
@@ -48,7 +56,7 @@ tome.pty.onExit(({ id, exitCode }) =>
 )
 const chats = new Map()
 tome.chat.onDelta(({ id, text }) => chats.get(id)?.appendDelta(text))
-tome.chat.onDone(({ id, error }) => chats.get(id)?.finish(error))
+tome.chat.onDone(({ id, error, aborted }) => chats.get(id)?.finish(error, aborted))
 tome.chat.onTool(({ id, tool, hint }) => chats.get(id)?.toolNote(tool, hint))
 const brains = new Map() // ws name -> BrainPanel instance
 tome.brain.onChanged(({ ws: bws, index }) => brains.get(bws)?.onChanged(index))
@@ -284,6 +292,7 @@ class ChatPanel {
         <button type="button" class="chat-brain-toggle" title="Inject workspace brain context">◈ brain</button>
         <textarea rows="2" placeholder="Ask the assistant… (Enter to send · Shift+Enter newline · dictate with the 🎤 key)"></textarea>
         <button type="button" class="chat-speak" title="Speak replies aloud">🔊</button>
+        <button type="button" class="chat-stop hidden" title="Stop the reply">■</button>
         <button type="submit">Send</button>
       </form>`
   }
@@ -307,6 +316,8 @@ class ChatPanel {
       this.speakBtn.classList.toggle('active', this.speak)
       if (!this.speak) speechSynthesis.cancel()
     })
+    this.stopBtn = this.element.querySelector('.chat-stop')
+    this.stopBtn.addEventListener('click', () => tome.chat.abort(this.chatId))
     this.element.querySelector('form').addEventListener('submit', (e) => {
       e.preventDefault()
       this.send()
@@ -330,6 +341,7 @@ class ChatPanel {
     const text = this.input.value.trim()
     if (!text || this.busy) return
     this.busy = true
+    this.stopBtn.classList.remove('hidden')
     this.input.value = ''
     this.bubble('me', text)
     this.history.push({ role: 'user', content: text })
@@ -359,12 +371,20 @@ class ChatPanel {
     this.current = this.bubble('ai', '')
     this.segText = ''
   }
-  finish(error) {
+  finish(error, aborted) {
     this.busy = false
+    this.stopBtn.classList.add('hidden')
     if (this.current && !this.segText) this.current.remove()
     if (error) {
       this.bubble('err', error)
-      this.history.pop()
+      // Roll the failed user message out of history, but hand it back to the
+      // input so it can be resent instead of vanishing. On a user-initiated
+      // stop the message was answered (partially) — keep it in history.
+      const last = this.history.pop()
+      if (!aborted && last?.role === 'user' && !this.input.value.trim()) {
+        this.input.value = last.content
+        this.input.focus()
+      }
     } else {
       this.history.push({ role: 'assistant', content: this.currentText })
       if (this.speak && this.currentText) {
@@ -1018,6 +1038,140 @@ tome.conductor.onActed(({ pane, ran }) =>
   toast(`assistant ${ran ? 'ran a command in' : 'typed into'} ${pane}`, 'ok')
 )
 
+// ---------- layout persistence ----------
+// The dockview grid is serialized with toJSON() and stored per workspace,
+// keyed by the workspace's folder list (falls back to the name) so renaming a
+// workspace keeps its layout. Saved on every layout change (debounced) and
+// once more via the main-process quit handshake.
+//
+// Terminals/agents are the exception: a pty is a live process and cannot be
+// resumed. On restore we recreate each terminal/agent pane as a FRESH SHELL
+// in its saved position (same kind/cwd/airgap), rather than skipping it — the
+// grid shape survives even though scrollback and running processes don't.
+let restoring = false
+let layoutLoaded = false
+let layoutSaveTimer = null
+
+const layoutKey = (w) => {
+  if (!w) return 'layout:none'
+  const basis = w.folders.length ? w.folders.join('|') : 'name:' + w.name
+  const slug = basis.replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 90)
+  return 'layout-' + (slug || 'unnamed')
+}
+
+function scheduleLayoutSave() {
+  if (restoring || !layoutLoaded) return
+  clearTimeout(layoutSaveTimer)
+  layoutSaveTimer = setTimeout(saveLayoutNow, 800)
+}
+
+async function saveLayoutNow() {
+  if (!layoutLoaded) return
+  clearTimeout(layoutSaveTimer)
+  try {
+    await tome.store.set(layoutKey(activeWorkspace()), dock.toJSON())
+  } catch {}
+}
+
+dock.onDidLayoutChange(scheduleLayoutSave)
+tome.app.onBeforeQuit(() => {
+  saveLayoutNow().finally(() => tome.app.quitReady())
+})
+
+async function restoreLayout() {
+  const w = activeWorkspace()
+  const saved = await tome.store.get(layoutKey(w))
+  if (!saved || !Array.isArray(saved.panels) || !Object.keys(saved.panels).length) return
+  restoring = true
+  try {
+    dock.fromJSON(saved)
+  } catch (err) {
+    console.warn('layout restore failed, starting empty:', err)
+    restoring = false
+    try {
+      dock.clear()
+    } catch {}
+    return
+  }
+  // Panels that failed to deserialize (e.g. a doc iframe with a null content
+  // element) come back without a renderer-side instance — drop them.
+  const stale = []
+  for (const p of dock.panels) {
+    const el = p.view?.content?.element
+    if (!el || !el.isConnected) stale.push(p)
+  }
+  for (const p of stale) {
+    try {
+      dock.removePanel(p)
+    } catch {}
+  }
+  try {
+    await Promise.all(
+      dock.panels.map(async (p) => {
+        const params = p.params || {}
+        const component = componentOf(p)
+        if (component === 'terminal') {
+          const kind = AGENT_KINDS.has(params.kind) || params.kind === 'terminal' ? params.kind : 'terminal'
+          spawnTerminal({ kind, cwd: params.cwd, airgap: params.airgap, wsName: params.ws, saved: p })
+        } else if (component === 'chat') {
+          spawnChat(p)
+        } else if (component === 'brain') {
+          if (ws.workspaces.some((x) => x.name === params.ws)) spawnBrain(params.ws, p)
+          else dock.removePanel(p) // workspace gone — skip
+        } else if (component === 'history') {
+          const dir = typeof params.dir === 'string' && (await dirExists(params.dir)) ? params.dir : null
+          if (dir) spawnHistory(dir, p)
+          else dock.removePanel(p)
+        } else if (component === 'editor' || component === 'doc') {
+          if (typeof params.path === 'string' && (await fileExists(params.path))) {
+            if (component === 'doc' && !DOC_MODES.has(params.mode)) dock.removePanel(p)
+            else await openFile(params.path, p)
+          } else {
+            dock.removePanel(p) // file no longer exists — skip
+          }
+        } else {
+          dock.removePanel(p) // unknown component from an older build — skip
+        }
+      })
+    )
+  } finally {
+    restoring = false
+  }
+}
+
+const AGENT_KINDS = new Set(['claude', 'opencode', 'pi'])
+const DOC_MODES = new Set(['pdf', 'img', 'doc', 'binary'])
+
+// fromJSON gives us the panel shell (id, title, params, position) but not the
+// component instance — infer what to respawn from the params we persisted.
+function componentOf(panel) {
+  const params = panel.params || {}
+  if (params.ptyId) return 'terminal'
+  if (params.chatId) return 'chat'
+  if (params.ws) return 'brain'
+  if (params.dir) return 'history'
+  if (params.path && params.mode) return 'doc'
+  if (params.path) return 'editor'
+  return null
+}
+
+async function fileExists(path) {
+  try {
+    await tome.fs.readFile(path)
+    return true
+  } catch {
+    return false
+  }
+}
+async function dirExists(path) {
+  try {
+    await tome.fs.readDir(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function place() {
   const n = dock.panels.length
   if (n === 0) return undefined
@@ -1025,27 +1179,39 @@ function place() {
 }
 
 function addTerminal(kind) {
+  spawnTerminal({ kind })
+}
+
+// Shared by the ＋ menu and layout restore. `saved` carries the persisted
+// id/title/params when recreating a pane from a stored layout.
+function spawnTerminal({ kind, cwd, airgap, wsName, saved }) {
   const id = `pty-${++seq}`
-  const cwd = paneCwd()
+  cwd = cwd || paneCwd()
   const name = cwd.split('/').pop() || cwd
   const isAgent = kind !== 'terminal'
-  const gapped = isAgent && airgapDefault
+  const gapped = airgap !== undefined ? !!airgap : isAgent && airgapDefault
   dock.addPanel({
     id,
     component: 'terminal',
-    title: isAgent ? `${gapped ? '⛨ ' : ''}${kind} — ${name}` : `zsh — ${name}`,
-    position: place(),
-    params: { ptyId: id, kind, cwd, airgap: gapped, ws: activeWorkspace()?.name },
+    title:
+      saved?.title ||
+      (isAgent ? `${gapped ? '⛨ ' : ''}${kind} — ${name}` : `zsh — ${name}`),
+    position: saved ? { referencePanel: saved.id } : place(),
+    params: { ptyId: id, kind, cwd, airgap: gapped, ws: wsName ?? activeWorkspace()?.name },
   })
 }
 
 function addChat() {
+  spawnChat()
+}
+
+function spawnChat(saved) {
   const id = `chat-${++seq}`
   dock.addPanel({
     id,
     component: 'chat',
-    title: 'assistant',
-    position: place(),
+    title: saved?.title || 'assistant',
+    position: saved ? { referencePanel: saved.id } : place(),
     params: { chatId: id },
   })
 }
@@ -1053,7 +1219,11 @@ function addChat() {
 function addBrain() {
   const w = activeWorkspace()
   if (!w) return
-  const id = `brain:${w.name}`
+  spawnBrain(w.name)
+}
+
+function spawnBrain(wsName, saved) {
+  const id = `brain:${wsName}`
   const existing = dock.getPanel(id)
   if (existing) {
     existing.api.setActive()
@@ -1062,15 +1232,19 @@ function addBrain() {
   dock.addPanel({
     id,
     component: 'brain',
-    title: `⌬ brain — ${w.name}`,
-    position: place(),
-    params: { ws: w.name },
+    title: saved?.title || `⌬ brain — ${wsName}`,
+    position: saved ? { referencePanel: saved.id } : place(),
+    params: { ws: wsName },
   })
 }
 
 function addHistory() {
   if (!activeRoot) return
-  const id = `history:${activeRoot}`
+  spawnHistory(activeRoot)
+}
+
+function spawnHistory(dir, saved) {
+  const id = `history:${dir}`
   const existing = dock.getPanel(id)
   if (existing) {
     existing.api.setActive()
@@ -1079,26 +1253,27 @@ function addHistory() {
   dock.addPanel({
     id,
     component: 'history',
-    title: `⎇ history — ${activeRoot.split('/').pop()}`,
-    position: place(),
-    params: { dir: activeRoot },
+    title: saved?.title || `⎇ history — ${dir.split('/').pop()}`,
+    position: saved ? { referencePanel: saved.id } : place(),
+    params: { dir },
   })
 }
 
 const IMG_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'])
 const CONV_EXT = new Set(['docx', 'xlsx', 'xls'])
 
-async function openFile(path) {
+async function openFile(path, saved) {
   const id = `file:${path}`
   const existing = dock.getPanel(id)
   if (existing) {
     existing.api.setActive()
     return
   }
-  const name = path.split('/').pop()
+  const name = saved?.title || path.split('/').pop()
+  const pos = saved ? { referencePanel: saved.id } : place()
   const ext = (name.includes('.') ? name.split('.').pop() : '').toLowerCase()
   const docPanel = (mode) =>
-    dock.addPanel({ id, component: 'doc', title: name, position: place(), params: { mode, path } })
+    dock.addPanel({ id, component: 'doc', title: name, position: pos, params: { mode, path } })
 
   if (ext === 'pdf') return docPanel('pdf')
   if (IMG_EXT.has(ext)) return docPanel('img')
@@ -1111,7 +1286,7 @@ async function openFile(path) {
   } catch {
     return docPanel('binary')
   }
-  dock.addPanel({ id, component: 'editor', title: name, position: place(), params: { path } })
+  dock.addPanel({ id, component: 'editor', title: name, position: pos, params: { path } })
 }
 
 // ---------- menus (shared behaviour) ----------
@@ -1379,6 +1554,36 @@ wireMenu('btn-add', 'add-menu', async (menu) => {
       if (p) openFile(p)
     },
   })
+})
+
+// ---------- notification log (toast history) ----------
+wireMenu('btn-notifs', 'notifs-menu', (menu) => {
+  document.getElementById('btn-notifs').classList.remove('unseen')
+  menu.innerHTML = ''
+  if (!notifLog.length) {
+    menuLabel(menu, 'No notifications yet')
+    return
+  }
+  menuItem(menu, {
+    label: 'Clear',
+    hint: `${notifLog.length} entr${notifLog.length === 1 ? 'y' : 'ies'}`,
+    onClick: () => {
+      notifLog.length = 0
+    },
+  })
+  menuRule(menu)
+  for (const n of [...notifLog].reverse()) {
+    const row = document.createElement('div')
+    row.className = 'notif-row ' + (n.kind === 'ok' ? 'ok' : 'err')
+    const time = document.createElement('span')
+    time.className = 'notif-time'
+    time.textContent = new Date(n.ts).toLocaleTimeString([], { hour12: false })
+    const text = document.createElement('span')
+    text.className = 'notif-msg'
+    text.textContent = n.msg
+    row.append(time, text)
+    menu.appendChild(row)
+  }
 })
 
 // ---------- air gap modal ----------
@@ -1653,6 +1858,12 @@ function renderAll() {
   tome.airgap.state().then((s) => (agState = { ...agState, ...s }))
   activeRoot = activeWorkspace()?.folders[0] || null
   renderAll()
+  try {
+    await restoreLayout()
+  } catch (err) {
+    console.warn('layout restore failed:', err)
+  }
+  layoutLoaded = true // layout changes from here on are user-driven — persist them
   if (tome.shotMode && activeRoot) {
     // screenshot/demo mode: open a representative set of panes
     const id = `pty-${++seq}`
