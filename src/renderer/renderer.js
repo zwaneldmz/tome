@@ -10,9 +10,11 @@ import { prefs, wsState, agState, counters } from './state.js'
 import { terms, chats, brains } from './regs.js'
 import { dock, addChat, addBrain, openFile, restoreLayout } from './panes.js'
 import { renderAll } from './menus.js'
-import { startGitPolling } from './git.js'
+import { startGitPolling, initGitMenu } from './git.js'
 import { activeWorkspace } from './workspaces.js'
 import { bootAuth } from './lock.js'
+import { bootTheme } from './theme.js'
+import { bootChrome } from './chrome.js'
 import './airgap-ui.js' // wires the air-gap event listeners + strip ticker
 import './style.css'
 
@@ -28,7 +30,9 @@ tome.brain.onChanged(({ ws: bws, index }) => brains.get(bws)?.onChanged(index))
 
 // ---------- boot ----------
 ;(async () => {
+  await bootTheme() // before the lock screen paints — store:get is open while locked
   await bootAuth(tome, toast) // main gates the sensitive IPC until this resolves
+  await bootChrome()
   const saved = await tome.store.get('workspaces')
   if (saved && Array.isArray(saved.workspaces)) {
     wsState.ws = saved
@@ -44,6 +48,7 @@ tome.brain.onChanged(({ ws: bws, index }) => brains.get(bws)?.onChanged(index))
   tome.airgap.state().then((s) => Object.assign(agState, s))
   wsState.activeRoot = activeWorkspace()?.folders[0] || null
   renderAll()
+  initGitMenu() // deferred out of git.js's module body — see the note there
   startGitPolling() // gated on unlock: the IPC gate refuses while locked
   try {
     await restoreLayout()

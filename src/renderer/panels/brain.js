@@ -5,8 +5,8 @@ import { Decoration, EditorView, MatchDecorator, ViewPlugin, keymap } from '@cod
 import { EditorState } from '@codemirror/state'
 import { LanguageDescription } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
-import { oneDark } from '@codemirror/theme-one-dark'
 import { tome, toast } from '../util.js'
+import { cmTheme, onTheme } from '../theme.js'
 import { brains } from '../regs.js'
 import { modalShell } from '../modals.js'
 
@@ -52,6 +52,16 @@ function stubNote(name) {
 }
 
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+// The graph is a canvas, so it reads the palette instead of inheriting it.
+const graphPalette = () => ({
+  bg: cssVar('--bg'),
+  edge: cssVar('--graph-edge'),
+  node: cssVar('--graph-node'),
+  active: cssVar('--graph-node-active'),
+  muted: cssVar('--muted'),
+  bright: cssVar('--bright'),
+  mono: cssVar('--mono'),
+})
 
 // deterministic 0..1 hash so a node's seed position is stable across panel
 // opens (same name -> same seed) until the force sim nudges it
@@ -107,7 +117,7 @@ export class BrainPanel {
     this.backEl = this.element.querySelector('.brain-back')
     this.graphCanvas = this.element.querySelector('canvas.brain-graph')
     this.graphCtx = this.graphCanvas.getContext('2d')
-    this.graphColors = { void: cssVar('--void'), muted: cssVar('--muted'), bright: cssVar('--bright'), mono: cssVar('--mono') }
+    this.graphColors = graphPalette()
 
     this.searchInput.addEventListener('input', () => this.renderList(this.index))
     this.element.querySelector('.brain-new').addEventListener('click', () => this.newNoteModal())
@@ -130,9 +140,9 @@ export class BrainPanel {
     this.promoteBtn.classList.toggle('hidden', !coreInfo.configured)
 
     const langExt = await markdownLangExt()
-    this.extensions = [
+    this.cm = cmTheme()
+    this.baseExtensions = [
       basicSetup,
-      oneDark,
       langExt,
       wikilinkDeco,
       EditorView.domEventHandlers({ mousedown: (e, view) => this.handleWikiClick(e, view) }),
@@ -147,13 +157,24 @@ export class BrainPanel {
       ]),
       EditorView.updateListener.of((u) => this.handleUpdate(u)),
     ]
-    this.view = new EditorView({ doc: '', parent: this.editorHost, extensions: this.extensions })
+    this.view = new EditorView({ doc: '', parent: this.editorHost, extensions: this.extensions() })
+    this.untheme = this.cm.attach(this.view)
+    this.ungraph = onTheme(() => {
+      this.graphColors = graphPalette()
+      if (this.graphMode) this.draw()
+    })
 
     const { index } = await tome.brain.open(this.ws)
     this.index = index
     this.renderList(index)
     const first = index.notes.find((n) => n.rel === 'AGENTS.md') || index.notes[0]
     if (first) await this.loadNote(first.rel)
+  }
+  // A fresh compartment binding per state: setState() below rebuilds the
+  // editor from scratch, so the theme has to be re-bound each time or a
+  // note switch would drop back to the appearance at panel-open time.
+  extensions() {
+    return [this.cm.ext(), ...this.baseExtensions]
   }
   handleUpdate(u) {
     if (!u.docChanged || this.loading) return
@@ -241,7 +262,7 @@ export class BrainPanel {
     this.openRel = rel
     this.dirty = false
     this.loading = true
-    this.view.setState(EditorState.create({ doc: text, extensions: this.extensions }))
+    this.view.setState(EditorState.create({ doc: text, extensions: this.extensions() }))
     this.loading = false
     this.updateHead()
     this.renderList(this.index)
@@ -340,7 +361,7 @@ export class BrainPanel {
     if (updated === text) return
     clearTimeout(this.saveTimer)
     this.loading = true
-    this.view.setState(EditorState.create({ doc: updated, extensions: this.extensions }))
+    this.view.setState(EditorState.create({ doc: updated, extensions: this.extensions() }))
     this.loading = false
     this.dirty = false
     this.updateHead()
@@ -474,9 +495,9 @@ export class BrainPanel {
   draw() {
     const ctx = this.graphCtx
     const { graphW: w, graphH: h, graphColors: c } = this
-    ctx.fillStyle = c.void
+    ctx.fillStyle = c.bg
     ctx.fillRect(0, 0, w, h)
-    ctx.strokeStyle = 'rgba(0,229,255,0.18)'
+    ctx.strokeStyle = c.edge
     ctx.lineWidth = 1
     ctx.beginPath()
     for (const [ak, bk] of this.graphEdges) {
@@ -497,14 +518,14 @@ export class BrainPanel {
         ctx.stroke()
         ctx.setLineDash([])
       } else if (n.rel === this.openRel) {
-        ctx.shadowColor = '#ff2ea6'
+        ctx.shadowColor = c.active
         ctx.shadowBlur = 12
-        ctx.fillStyle = '#ff2ea6'
+        ctx.fillStyle = c.active
         ctx.arc(n.x, n.y, r, 0, Math.PI * 2)
         ctx.fill()
         ctx.shadowBlur = 0
       } else {
-        ctx.fillStyle = '#00e5ff'
+        ctx.fillStyle = c.node
         ctx.arc(n.x, n.y, r, 0, Math.PI * 2)
         ctx.fill()
       }
@@ -584,7 +605,7 @@ export class BrainPanel {
     }
     if (text === this.view.state.doc.toString()) return
     this.loading = true
-    this.view.setState(EditorState.create({ doc: text, extensions: this.extensions }))
+    this.view.setState(EditorState.create({ doc: text, extensions: this.extensions() }))
     this.loading = false
     this.updateHead()
   }
@@ -595,6 +616,8 @@ export class BrainPanel {
     window.removeEventListener('mouseup', this.onGraphMouseUp)
     tome.brain.close(this.ws)
     brains.delete(this.ws)
+    this.untheme?.()
+    this.ungraph?.()
     this.view?.destroy()
   }
 }

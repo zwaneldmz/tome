@@ -1,0 +1,41 @@
+<!doctype html>
+<!--
+  Shell document for a pane dragged out into its own OS window.
+  Deliberately script-free: dockview moves the pane's live DOM into this
+  document and clones the app stylesheet, but the panel's JavaScript keeps
+  running in the main window's realm — so nothing here needs a preload.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' tome:; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' tome: data:; connect-src 'self' ws: wss:; frame-src 'self' tome: data:; object-src 'none'; base-uri 'none'"
+    />
+    <title>tome</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #ffffff;
+      }
+      @media (prefers-color-scheme: dark) {
+        html:not([data-theme='light']),
+        html:not([data-theme='light']) body {
+          background: #0b0b11;
+        }
+      }
+      html[data-theme='dark'],
+      html[data-theme='dark'] body {
+        background: #0b0b11;
+      }
+      html[data-theme='light'],
+      html[data-theme='light'] body {
+        background: #ffffff;
+      }
+    </style>
+  </head>
+  <body class="tome-popout"></body>
+</html>

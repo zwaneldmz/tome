@@ -48,6 +48,11 @@ contextBridge.exposeInMainWorld('tome', {
   doc: {
     read: (p) => ipcRenderer.invoke('doc:read', p),
   },
+  theme: {
+    // resolved appearance ('light' | 'dark') — main uses it for window
+    // backgrounds and the CSS it injects into converted-document iframes
+    set: (pref, mode) => ipcRenderer.send('theme:set', { pref, mode }),
+  },
   openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
   airgap: {
     state: () => ipcRenderer.invoke('airgap:state'),

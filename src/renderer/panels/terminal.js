@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { tome } from '../util.js'
 import { terms, strips } from '../regs.js'
+import { onTheme, xtermTheme } from '../theme.js'
 import { stripRender, airgapModal } from '../airgap-ui.js'
 
 export class TerminalPanel {
@@ -34,29 +35,11 @@ export class TerminalPanel {
       fontSize: 12.5,
       fontFamily: "'MesloLGS NF', 'JetBrainsMono Nerd Font', ui-monospace, Menlo, monospace",
       cursorBlink: true,
-      theme: {
-        background: '#060609',
-        foreground: '#c9d4e3',
-        cursor: '#ff2ea6',
-        cursorAccent: '#060609',
-        selectionBackground: 'rgba(0,229,255,0.22)',
-        black: '#11131c',
-        red: '#ff3b5c',
-        green: '#3dff9e',
-        yellow: '#ffd23e',
-        blue: '#00a6ff',
-        magenta: '#ff2ea6',
-        cyan: '#00e5ff',
-        white: '#c9d4e3',
-        brightBlack: '#566179',
-        brightRed: '#ff6b84',
-        brightGreen: '#7dffbe',
-        brightYellow: '#ffe37e',
-        brightBlue: '#57c4ff',
-        brightMagenta: '#ff7ec9',
-        brightCyan: '#7ef2ff',
-        brightWhite: '#eef4fb',
-      },
+      theme: xtermTheme(),
+    })
+    // xterm paints to a canvas, so it can't inherit the CSS palette
+    this.untheme = onTheme((mode) => {
+      term.options.theme = xtermTheme(mode)
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -92,6 +75,7 @@ export class TerminalPanel {
     tome.pty.kill(this.ptyId)
     terms.delete(this.ptyId)
     strips.delete(this.ptyId)
+    this.untheme?.()
     this.term?.dispose()
   }
 }
