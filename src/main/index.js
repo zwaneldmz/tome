@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, systemPreferences } from 'electron'
 import { join, extname } from 'node:path'
 import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -10,6 +10,8 @@ import mammoth from 'mammoth'
 import * as XLSX from 'xlsx'
 import * as airgap from './airgap'
 import * as authlock from './authlock'
+import * as brain from './brain'
+import * as conductor from './conductor'
 
 const ptys = new Map()
 let win = null
@@ -110,6 +112,30 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  // ---- app lock ----
+  // Every invoke channel refuses until login succeeds; only the door itself
+  // (auth + first-run setup) and the ui-state store stay open. Registered
+  // handlers below inherit the guard because this wraps ipcMain.handle first.
+  const OPEN_CHANNELS = new Set([
+    'auth:status',
+    'auth:login',
+    'auth:touchid',
+    'airgap:setup',
+    'airgap:enrollTotp',
+    'airgap:confirmTotp',
+    'airgap:state',
+    'store:get',
+    'store:set',
+  ])
+  const isLockedNow = () =>
+    authlock.authStatus().configured && !authlock.isUnlocked() && !process.env.TOME_SHOT
+  const rawHandle = ipcMain.handle.bind(ipcMain)
+  ipcMain.handle = (channel, fn) =>
+    rawHandle(channel, (e, ...args) => {
+      if (!OPEN_CHANNELS.has(channel) && isLockedNow()) throw new Error('Tome is locked.')
+      return fn(e, ...args)
+    })
+
   protocol.handle('tome', (req) => {
     const p = decodeURIComponent(new URL(req.url).searchParams.get('p') || '')
     return net.fetch(pathToFileURL(p).toString())
@@ -129,18 +155,27 @@ app.whenReady().then(async () => {
   await airgap.loadAllowlist(userData)
   await authlock.initAuth(userData)
   airgap.setEventSink((type, payload) => win?.webContents.send('airgap:' + type, payload))
+  brain.setEventSink((ws, index) => win?.webContents.send('brain:changed', { ws, index }))
 
   createWindow()
+  conductor.init({ ptys, send: (channel, payload) => win?.webContents.send(channel, payload) })
+  ipcMain.on('panes:sync', (e, list) => conductor.setPanes(list))
+  ipcMain.on('conductor:allowRun', (e, v) => conductor.setAllowRun(v))
 
   // ---- pty ----
   // The renderer names a vetted pane kind; the command line is built HERE so a
   // compromised renderer can't request arbitrary binaries or arguments.
-  ipcMain.handle('pty:create', async (e, { id, kind, cwd, airgap: gapped }) => {
+  ipcMain.handle('pty:create', async (e, { id, kind, cwd, airgap: gapped, ws }) => {
     const isAgent = AGENTS.includes(kind)
     if (!isAgent && kind !== 'terminal') return
     let spawnCmd = SHELL
     let spawnArgs = isAgent ? ['-l', '-c', kind] : ['-l']
     const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
+    if (ws) {
+      env.TOME_BRAIN = await brain.ensureBrain(ws)
+      const info = await brain.coreInfo(await readStore('core-vault'))
+      if (info.configured) env.TOME_CORE_VAULT = info.root
+    }
     if (gapped && process.platform === 'darwin') {
       const { port } = await airgap.createPaneProxy(id)
       const proxy = `http://127.0.0.1:${port}`
@@ -158,9 +193,14 @@ app.whenReady().then(async () => {
       env,
     })
     ptys.set(id, p)
-    p.onData((data) => win?.webContents.send('pty:data', { id, data }))
+    conductor.register(id, { kind, cwd: cwd || homedir(), airgap: !!gapped })
+    p.onData((data) => {
+      conductor.record(id, data)
+      win?.webContents.send('pty:data', { id, data })
+    })
     p.onExit(({ exitCode }) => {
       ptys.delete(id)
+      conductor.markExited(id)
       airgap.closePane(id)
       win?.webContents.send('pty:exit', { id, exitCode })
     })
@@ -170,15 +210,21 @@ app.whenReady().then(async () => {
   ipcMain.on('pty:kill', (e, { id }) => {
     ptys.get(id)?.kill()
     ptys.delete(id)
+    conductor.forget(id)
     airgap.closePane(id)
   })
 
   // ---- air gap ----
   ipcMain.handle('airgap:state', () => ({ ...airgap.getState(), auth: authlock.authStatus() }))
   ipcMain.handle('airgap:unlock', (e, { paneId, passphrase, code, minutes }) => {
-    if (!authlock.verifyPassphrase(passphrase)) return { ok: false, error: 'Wrong passphrase.' }
-    if (authlock.totpActive() && !authlock.verifyTotp(code))
-      return { ok: false, error: 'Wrong 2FA code.' }
+    // The app login already proved the passphrase (or Touch ID) — this channel
+    // is gated, so nobody reaches it locked. Freeing a pane still demands a
+    // second factor: the TOTP code when enrolled, the passphrase otherwise.
+    if (authlock.totpActive()) {
+      if (!authlock.verifyTotp(code)) return { ok: false, error: 'Wrong 2FA code.' }
+    } else if (!authlock.verifyPassphrase(passphrase)) {
+      return { ok: false, error: 'Wrong passphrase.' }
+    }
     airgap.unlockPane(paneId, minutes)
     return { ok: true }
   })
@@ -186,10 +232,48 @@ app.whenReady().then(async () => {
   ipcMain.handle('airgap:setup', async (e, { passphrase }) => {
     if (authlock.authStatus().configured) return { ok: false, error: 'Already configured.' }
     await authlock.setPassphrase(passphrase)
+    authlock.markUnlocked() // first-run setup happens at the lock screen
     return { ok: true }
   })
   ipcMain.handle('airgap:enrollTotp', () => authlock.enrollTotp())
   ipcMain.handle('airgap:confirmTotp', (e, { code }) => authlock.confirmTotp(code))
+
+  // ---- app login (Touch ID or passphrase + TOTP; arms the whole workspace) ----
+  ipcMain.handle('auth:status', () => ({
+    ...authlock.authStatus(),
+    unlocked: authlock.isUnlocked(),
+    touchId: process.platform === 'darwin' && systemPreferences.canPromptTouchID(),
+  }))
+  ipcMain.handle('auth:touchid', async () => {
+    try {
+      await systemPreferences.promptTouchID('unlock the Tome workspace')
+      authlock.markUnlocked()
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err.message || 'Touch ID failed.' }
+    }
+  })
+  ipcMain.handle('auth:login', (e, { passphrase, code }) => {
+    if (!authlock.verifyPassphrase(passphrase)) return { ok: false, error: 'Wrong passphrase.' }
+    if (authlock.totpActive() && !authlock.verifyTotp(code))
+      return { ok: false, error: 'Wrong 2FA code.' }
+    authlock.markUnlocked()
+    return { ok: true }
+  })
+
+  // ---- brain (per-workspace note vault) ----
+  ipcMain.handle('brain:open', (e, { ws }) => brain.open(ws))
+  ipcMain.handle('brain:close', (e, { ws }) => brain.close(ws))
+  ipcMain.handle('brain:index', (e, { ws }) => brain.getIndex(ws))
+  ipcMain.handle('brain:read', (e, { ws, rel }) => brain.readNote(ws, rel))
+  ipcMain.handle('brain:write', (e, { ws, rel, content, exclusive }) =>
+    brain.writeNote(ws, rel, content, exclusive)
+  )
+  ipcMain.handle('brain:delete', (e, { ws, rel }) => brain.deleteNote(ws, rel))
+  ipcMain.handle('brain:coreInfo', async () => brain.coreInfo(await readStore('core-vault')))
+  ipcMain.handle('brain:promote', async (e, { ws, rel, folder, overwrite, rename }) =>
+    brain.promote(await readStore('core-vault'), ws, rel, folder, { overwrite, rename })
+  )
 
   // ---- fs ----
   ipcMain.handle('fs:readDir', async (e, dir) => {
@@ -203,15 +287,26 @@ app.whenReady().then(async () => {
   ipcMain.handle('fs:writeFile', (e, { path, content }) => writeFile(path, content))
 
   // ---- json store (workspaces, ui state) ----
+  // store:get/set stay open pre-login for the lock screen, so keys are strictly
+  // vetted: plain slugs only (no traversal) and never the files that hold
+  // credentials (airgap-auth) or the egress allowlist (airgap).
   const storeDir = app.getPath('userData')
-  ipcMain.handle('store:get', async (e, key) => {
+  const RESERVED_KEYS = new Set(['airgap', 'airgap-auth'])
+  function vetKey(key) {
+    if (typeof key !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(key) || RESERVED_KEYS.has(key))
+      throw new Error('Bad store key.')
+    return key
+  }
+  async function readStore(key) {
     try {
-      return JSON.parse(await readFile(join(storeDir, key + '.json'), 'utf8'))
+      return JSON.parse(await readFile(join(storeDir, vetKey(key) + '.json'), 'utf8'))
     } catch {
       return null
     }
-  })
+  }
+  ipcMain.handle('store:get', (e, key) => readStore(key))
   ipcMain.handle('store:set', async (e, { key, value }) => {
+    vetKey(key)
     await mkdir(storeDir, { recursive: true })
     await writeFile(join(storeDir, key + '.json'), JSON.stringify(value, null, 2))
   })
@@ -258,6 +353,48 @@ app.whenReady().then(async () => {
       return { ok: false, error: err.message }
     }
   })
+  const LOG_SEP = '\x1f'
+  ipcMain.handle('git:log', async (e, { dir, limit }) => {
+    const out = await git(dir, [
+      'log',
+      `-${limit || 250}`,
+      '--date=format-local:%Y-%m-%d %H:%M',
+      `--pretty=format:%H${LOG_SEP}%h${LOG_SEP}%an${LOG_SEP}%ad${LOG_SEP}%D${LOG_SEP}%s`,
+    ])
+    return out
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => {
+        const [hash, short, author, date, refs, subject] = l.split(LOG_SEP)
+        return { hash, short, author, date, refs: refs ? refs.split(', ').filter(Boolean) : [], subject }
+      })
+  })
+  ipcMain.handle('git:commit', async (e, { dir, hash }) => {
+    const body = (await git(dir, ['show', '-s', '--format=%B', hash])).trim()
+    let raw
+    try {
+      // vs first parent, so merge commits list files too
+      raw = await git(dir, ['diff', '--name-status', '-M', `${hash}^`, hash])
+    } catch {
+      // root commit has no parent
+      raw = await git(dir, ['diff-tree', '--no-commit-id', '--name-status', '-r', '-M', '--root', hash])
+    }
+    const files = raw
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => {
+        const parts = l.split('\t')
+        return { status: parts[0][0], path: parts[parts.length - 1] }
+      })
+    return { body, files }
+  })
+  ipcMain.handle('git:diff', async (e, { dir, hash, file }) => {
+    try {
+      return await git(dir, ['diff', `${hash}^`, hash, '--', file])
+    } catch {
+      return git(dir, ['show', '--format=', hash, '--', file])
+    }
+  })
 
   // ---- document conversion (docx/xlsx → sandboxed html) ----
   ipcMain.handle('doc:read', async (e, path) => {
@@ -300,24 +437,20 @@ app.whenReady().then(async () => {
   })
 
   // ---- chat (Claude API, streamed from main so the key never enters the renderer) ----
-  ipcMain.handle('chat:send', async (e, { id, messages }) => {
+  ipcMain.handle('chat:send', async (e, { id, messages, brainWs }) => {
     try {
       anthropic ??= new Anthropic()
-      const stream = anthropic.beta.messages.stream({
+      // conductor system prompt (workspace tools) + the brain vault context
+      let system = conductor.SYSTEM
+      if (brainWs) system += await brain.contextFor(brainWs, messages[messages.length - 1]?.content || '')
+      await conductor.runChat(anthropic, {
+        id,
         model: CHAT_MODEL,
-        max_tokens: 64000,
-        system: CHAT_SYSTEM,
+        system,
         messages,
         betas: ['server-side-fallback-2026-07-01'],
         fallbacks: 'default',
       })
-      stream.on('text', (text) => win?.webContents.send('chat:delta', { id, text }))
-      const final = await stream.finalMessage()
-      if (final.stop_reason === 'refusal') {
-        win?.webContents.send('chat:done', { id, error: 'Request declined by safety classifiers.' })
-      } else {
-        win?.webContents.send('chat:done', { id })
-      }
     } catch (err) {
       const msg = err?.message || String(err)
       const authy = err?.status === 401 || /api.key|auth/i.test(msg)
