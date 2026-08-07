@@ -3,6 +3,7 @@
   --panel: #0c0d15;
   --panel-2: #12141f;
   --line: #1b1e2f;
+  --line-2: #262b42;
   --text: #c9d4e3;
   --bright: #eef4fb;
   --muted: #566179;
@@ -496,6 +497,189 @@ textarea:focus-visible {
   background: var(--cyan-dim);
 }
 
+/* ---- brain ---- */
+.panel-brain {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 210px 1fr;
+  background: var(--void);
+}
+.brain-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+}
+.brain-search {
+  margin: 8px;
+  font: inherit;
+  color: var(--bright);
+  background: var(--void);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 9px;
+}
+.brain-search::placeholder {
+  color: var(--muted);
+}
+.brain-search:focus {
+  outline: none;
+  border-color: var(--cyan);
+}
+.brain-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 4px;
+}
+.brain-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--text);
+}
+.brain-row:hover {
+  background: var(--cyan-dim);
+}
+.brain-row.active {
+  color: var(--cyan);
+  background: var(--cyan-dim);
+}
+.brain-row .hint {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 90px;
+}
+.brain-foot {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--line);
+}
+.brain-foot button {
+  flex: 1;
+  color: var(--cyan);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 0;
+  cursor: pointer;
+  font: inherit;
+}
+.brain-foot button:hover {
+  border-color: var(--cyan);
+  background: var(--cyan-dim);
+}
+.brain-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.brain-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.brain-title {
+  color: var(--bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.brain-promote {
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.brain-promote:hover {
+  color: var(--cyan);
+}
+.brain-promote.hidden {
+  display: none;
+}
+.brain-del {
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 6px;
+}
+.brain-del:hover:not(:disabled) {
+  color: var(--g-del);
+}
+.brain-del:disabled {
+  color: #2b3245;
+  cursor: not-allowed;
+}
+.brain-editor {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.brain-editor .cm-editor {
+  height: 100%;
+  font-size: 12.5px;
+  background: var(--void);
+}
+.brain-editor .cm-gutters {
+  background: var(--void);
+  border-right: 1px solid var(--line);
+}
+canvas.brain-graph {
+  display: none;
+  flex: 1;
+  min-height: 0;
+}
+.panel-brain.graph-mode .brain-editor {
+  display: none;
+}
+.panel-brain.graph-mode canvas.brain-graph {
+  display: block;
+}
+.brain-back {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  min-height: 16px;
+}
+.brain-chip {
+  color: var(--cyan);
+  background: var(--cyan-dim);
+  border: 1px solid rgba(0, 229, 255, 0.3);
+  border-radius: 10px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+.brain-chip:hover {
+  background: rgba(0, 229, 255, 0.24);
+}
+.cm-wikilink {
+  color: var(--cyan);
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+
 /* ---- chat ---- */
 .panel-chat {
   height: 100%;
@@ -572,6 +756,23 @@ textarea:focus-visible {
 }
 .chat-form button:hover {
   box-shadow: 0 0 12px rgba(0, 229, 255, 0.45);
+}
+.chat-form button.chat-brain-toggle {
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  padding: 0 10px;
+  font-weight: 400;
+}
+.chat-form button.chat-brain-toggle:hover {
+  color: var(--text);
+  border-color: var(--cyan);
+  box-shadow: none;
+}
+.chat-form button.chat-brain-toggle.active {
+  color: var(--cyan);
+  border-color: var(--cyan);
+  background: var(--cyan-dim);
 }
 
 /* ================= air gap ================= */
@@ -750,4 +951,253 @@ textarea:focus-visible {
   #git-chip.pulse {
     animation: none;
   }
+}
+
+/* ================= git history ================= */
+.panel-history {
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(260px, 38%) 1fr;
+  background: var(--void);
+}
+.hist-left {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  background: var(--panel);
+}
+.hist-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+}
+.hist-filter {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--bright);
+  background: var(--void);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 9px;
+}
+.hist-filter::placeholder {
+  color: var(--muted);
+}
+.hist-filter:focus {
+  outline: none;
+  border-color: var(--cyan);
+}
+.hist-refresh {
+  color: var(--cyan);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+.hist-refresh:hover {
+  border-color: var(--cyan);
+  background: var(--cyan-dim);
+}
+.hist-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 4px 8px;
+}
+.hist-row {
+  padding: 6px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.hist-row:hover {
+  background: var(--cyan-dim);
+}
+.hist-row.active {
+  background: var(--cyan-dim);
+  border-left-color: var(--cyan);
+}
+.hist-row-top {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+}
+.hist-subject {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hist-row.active .hist-subject {
+  color: var(--bright);
+}
+.hist-ref {
+  flex: none;
+  color: var(--magenta);
+  border: 1px solid rgba(255, 46, 166, 0.4);
+  border-radius: 8px;
+  padding: 0 6px;
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+.hist-ref.head {
+  color: var(--cyan);
+  border-color: rgba(0, 229, 255, 0.4);
+}
+.hist-row-sub {
+  display: flex;
+  gap: 10px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.hist-hash {
+  color: var(--g-mod);
+}
+.hist-date {
+  margin-left: auto;
+}
+.hist-right {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.hist-detail {
+  flex: none;
+  max-height: 45%;
+  overflow-y: auto;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.hist-meta {
+  display: flex;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.hist-msg {
+  margin: 8px 0;
+  color: var(--bright);
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.hist-file {
+  display: flex;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  overflow: hidden;
+}
+.hist-file:hover,
+.hist-file.active {
+  background: var(--cyan-dim);
+}
+.hist-file.active .hist-path {
+  color: var(--cyan);
+}
+.hist-status {
+  flex: none;
+  width: 12px;
+}
+.hist-status.g-add {
+  color: var(--g-add);
+}
+.hist-status.g-mod {
+  color: var(--g-mod);
+}
+.hist-status.g-del {
+  color: var(--g-del);
+}
+.hist-path {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hist-diff {
+  flex: 1;
+  overflow: auto;
+  padding: 8px 0 20px;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.hist-diff .dl {
+  padding: 0 14px;
+  white-space: pre;
+}
+.hist-diff .dl.add {
+  color: var(--g-add);
+  background: rgba(61, 255, 158, 0.06);
+}
+.hist-diff .dl.del {
+  color: #ff8ba0;
+  background: rgba(255, 59, 92, 0.07);
+}
+.hist-diff .dl.hunk {
+  color: var(--cyan);
+  background: var(--cyan-dim);
+  margin: 4px 0;
+}
+.hist-diff .dl.head {
+  color: var(--muted);
+}
+.hist-err {
+  color: var(--muted);
+  padding: 8px 14px;
+}
+
+/* ================= app lock ================= */
+#lock-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: var(--void);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lock-box {
+  width: 340px;
+  text-align: center;
+}
+.lock-sigil {
+  color: var(--magenta);
+  font-size: 34px;
+  text-shadow: 0 0 18px var(--magenta);
+  margin-bottom: 6px;
+  user-select: none;
+}
+.lock-box .ag-body {
+  text-align: left;
+}
+
+/* ---- chat: speak toggle + conductor tool chips ---- */
+.chat-form .chat-speak {
+  flex: none;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+.chat-form .chat-speak.active {
+  color: var(--cyan);
+  border-color: var(--cyan);
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.25);
+}
+.msg.tool {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px dashed var(--line-2);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 9px;
 }

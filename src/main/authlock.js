@@ -7,6 +7,12 @@ import { join } from 'node:path'
 
 let file = null
 let auth = null // { salt, hash, totp?: { secret, active } }
+let unlocked = false // app-level login state (session-scoped, main process only)
+
+export const isUnlocked = () => unlocked
+export const markUnlocked = () => {
+  unlocked = true
+}
 
 export async function initAuth(userData) {
   file = join(userData, 'airgap-auth.json')

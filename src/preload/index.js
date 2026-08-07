@@ -24,6 +24,22 @@ contextBridge.exposeInMainWorld('tome', {
     info: (dir) => ipcRenderer.invoke('git:info', dir),
     branches: (dir) => ipcRenderer.invoke('git:branches', dir),
     checkout: (dir, branch, create) => ipcRenderer.invoke('git:checkout', { dir, branch, create }),
+    log: (dir, limit) => ipcRenderer.invoke('git:log', { dir, limit }),
+    commit: (dir, hash) => ipcRenderer.invoke('git:commit', { dir, hash }),
+    diff: (dir, hash, file) => ipcRenderer.invoke('git:diff', { dir, hash, file }),
+  },
+  auth: {
+    status: () => ipcRenderer.invoke('auth:status'),
+    login: (opts) => ipcRenderer.invoke('auth:login', opts),
+    touchid: () => ipcRenderer.invoke('auth:touchid'),
+  },
+  panes: {
+    sync: (list) => ipcRenderer.send('panes:sync', list),
+  },
+  conductor: {
+    allowRun: (v) => ipcRenderer.send('conductor:allowRun', v),
+    onOpen: (cb) => ipcRenderer.on('conductor:open', (e, m) => cb(m)),
+    onActed: (cb) => ipcRenderer.on('conductor:acted', (e, m) => cb(m)),
   },
   doc: {
     read: (p) => ipcRenderer.invoke('doc:read', p),
@@ -43,9 +59,23 @@ contextBridge.exposeInMainWorld('tome', {
     list: () => ipcRenderer.invoke('agents:list'),
   },
   chat: {
-    send: (id, messages) => ipcRenderer.invoke('chat:send', { id, messages }),
+    send: (id, messages, brainWs) => ipcRenderer.invoke('chat:send', { id, messages, brainWs }),
     onDelta: (cb) => ipcRenderer.on('chat:delta', (e, m) => cb(m)),
     onDone: (cb) => ipcRenderer.on('chat:done', (e, m) => cb(m)),
+    onTool: (cb) => ipcRenderer.on('chat:tool', (e, m) => cb(m)),
+  },
+  brain: {
+    open: (ws) => ipcRenderer.invoke('brain:open', { ws }),
+    close: (ws) => ipcRenderer.invoke('brain:close', { ws }),
+    index: (ws) => ipcRenderer.invoke('brain:index', { ws }),
+    read: (ws, rel) => ipcRenderer.invoke('brain:read', { ws, rel }),
+    write: (ws, rel, content, exclusive) =>
+      ipcRenderer.invoke('brain:write', { ws, rel, content, exclusive }),
+    delete: (ws, rel) => ipcRenderer.invoke('brain:delete', { ws, rel }),
+    coreInfo: () => ipcRenderer.invoke('brain:coreInfo'),
+    promote: (ws, rel, folder, overwrite, rename) =>
+      ipcRenderer.invoke('brain:promote', { ws, rel, folder, overwrite, rename }),
+    onChanged: (cb) => ipcRenderer.on('brain:changed', (e, m) => cb(m)),
   },
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
   pickFile: () => ipcRenderer.invoke('dialog:pickFile'),

@@ -23,16 +23,30 @@ documents, and an assistant — one workspace, one grid.
   back to "Open in default app".
 - **Git** — clickable branch chip (switch or create branches, IntelliJ-style)
   with live working-tree counters `+added ~modified −deleted` and `↑↓`
-  ahead/behind.
+  ahead/behind. The git menu's **History** opens an IntelliJ-style log pane:
+  commit list with ref chips and filter, commit message + changed files, and
+  a per-file diff view.
 - **Assistant chat** — streams Claude (`claude-opus-5`, override with
   `TOME_CHAT_MODEL`) from the main process; the API key never enters the
-  renderer.
+  renderer. The assistant is also the workspace **conductor**: it can list
+  panes, read a terminal's scrollback, type into terminals, and open panes and
+  files — so you can ask it "what is claude doing in the other pane?" or "run
+  the tests over there". It only ever *submits* a command when the ＋ menu
+  toggle **assistant may run commands** is on (default off); otherwise typed
+  commands wait for your Enter. Toggle `🔊` to have replies spoken aloud
+  (macOS voices); dictate into the box with the macOS mic key (`🎤` / double-Fn).
+- **App login** — once a passphrase is set, Tome locks at launch: unlock with
+  Touch ID or passphrase (+ authenticator code when enrolled). The gate is
+  enforced in the main process — pty, fs, git, chat, and brain IPC all refuse
+  until login — not just painted over. First run offers setup (skippable).
 - **Air gap (macOS)** — agent panes spawn inside a seatbelt sandbox that kills
   all direct network egress (DNS included); the only way out is a per-pane
   local proxy that allows **model-provider domains only**. The cyan strip on
-  the pane frees it — passphrase (plus optional authenticator-app 2FA), scoped
-  to that pane, auto-relocking after 15/30/60 minutes. Blocked hosts surface
-  on the strip and as toasts.
+  the pane frees it — scoped to that pane, auto-relocking after 15/30/60
+  minutes. Because the app login already proved your passphrase, freeing a
+  pane asks only for the second factor: the authenticator code when 2FA is
+  enrolled, the passphrase otherwise. Blocked hosts surface on the strip and
+  as toasts.
 
 ## Air gap notes
 
