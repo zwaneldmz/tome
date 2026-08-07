@@ -4,3 +4,6 @@ dist/
 build/icon.iconset/
 .DS_Store
 .env
+.claude/
+index.js
+tome-council-report.pdf
