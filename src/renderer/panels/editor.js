@@ -10,6 +10,8 @@ import { confirmModal } from '../modals.js'
 import { cmTheme } from '../theme.js'
 import { renderStatusbar } from '../statusbar.js'
 import { fileIcon } from '../icons.js'
+import { lintGutter } from '@codemirror/lint'
+import { lspExtensions, registerEditor, unregisterEditor, posOf } from '../lsp-editor.js'
 
 // Every open editor, so a preference change re-skins the live ones instead of
 // only applying to panes opened afterwards.
@@ -93,6 +95,10 @@ export class EditorPanel {
         langExt,
         wrapComp.of(wrapExt()),
         indentComp.of(indentExt()),
+        lintGutter(),
+        // diagnostics, hover and F12 go-to-definition, when a language server
+        // for this file type is installed
+        lspExtensions(path),
         // Tab indents. CodeMirror leaves it unbound by default so keyboard
         // users can tab out of the editor; a code pane wants the indent.
         keymap.of([indentWithTab, { key: 'Mod-s', run: () => (this.save(), true) }]),
@@ -106,6 +112,9 @@ export class EditorPanel {
     this.untheme = theme.attach(this.view)
     editors.add(this)
     tome.fs.watch(path)
+    registerEditor(path, this.view)
+    tome.lsp.didOpen(path, text)
+    if (params.reveal) this.reveal(params.reveal)
   }
 
   markDirty() {
@@ -148,10 +157,26 @@ export class EditorPanel {
   isDirty() {
     return !!this.dirty
   }
+  // Put a position (from go-to-definition) in the middle of the pane and
+  // leave the cursor there.
+  reveal({ line, character }) {
+    if (!this.view) return
+    const pos = posOf(this.view.state, { line, character })
+    this.view.dispatch({
+      selection: { anchor: pos },
+      effects: EditorView.scrollIntoView(pos, { y: 'center' }),
+    })
+    this.view.focus()
+  }
+
   dispose() {
     editors.delete(this)
     clearTimeout(this.autosaveTimer)
-    if (this.path) tome.fs.unwatch(this.path)
+    if (this.path) {
+      tome.fs.unwatch(this.path)
+      tome.lsp.didClose(this.path)
+      unregisterEditor(this.path, this.view)
+    }
     this.untheme?.()
     this.view?.destroy()
   }

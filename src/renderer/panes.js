@@ -10,6 +10,7 @@ import { wsState } from './state.js'
 import { floatingMenu, populateAddMenu } from './menus.js'
 import { choiceModal, confirmModal } from './modals.js'
 import { trackThemedDocument } from './theme.js'
+import { setOpenFile } from './lsp-editor.js'
 import { TerminalPanel } from './panels/terminal.js'
 import { EditorPanel } from './panels/editor.js'
 import { DocPanel } from './panels/doc.js'
@@ -583,11 +584,13 @@ function spawnHistory(dir, saved, target) {
 const IMG_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'])
 const CONV_EXT = new Set(['docx', 'xlsx', 'xls'])
 
-export async function openFile(path, saved, target) {
+export async function openFile(path, saved, target, reveal) {
   const id = `file:${path}`
   const existing = dock.getPanel(id)
   if (existing) {
     existing.api.setActive()
+    // already open — jump to the requested position (go-to-definition)
+    if (reveal) existing.view?.content?.reveal?.(reveal)
     return
   }
   const name = saved?.title || path.split('/').pop()
@@ -607,5 +610,7 @@ export async function openFile(path, saved, target) {
   } catch {
     return docPanel('binary')
   }
-  dock.addPanel({ id, component: 'editor', title: name, position: pos, params: { path } })
+  dock.addPanel({ id, component: 'editor', title: name, position: pos, params: { path, reveal } })
 }
+
+setOpenFile(openFile)
