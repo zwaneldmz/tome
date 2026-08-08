@@ -96,9 +96,9 @@ export const dock = createDockview(document.getElementById('dock'), {
     }
   },
 })
-window.addEventListener('resize', () =>
-  dock.layout(dock.element.parentElement.clientWidth, dock.element.parentElement.clientHeight)
-)
+// no manual resize wiring: createDockview returns the api, which has no
+// `element`, so this threw on every resize — and dockview already watches its
+// own container with a ResizeObserver unless disableAutoResizing is set.
 
 // ---------- close guard ----------
 // Panels expose isDirty() (editors do); closing one asks before discarding.
@@ -206,6 +206,12 @@ document.addEventListener(
 const POPOUT_SIZE = { width: 940, height: 640 }
 
 function popout(item, at) {
+  // Only a pane still sitting in the main grid can be torn off. A drag that
+  // ended in one of our own popout windows reports dropEffect 'none' back to
+  // this document and lands outside this window's bounds, so the tear-off
+  // fires for a pane dockview has already moved — popping it out again throws
+  // 'invalid operation' inside dockview and desyncs the grid.
+  if (item.api?.location?.type !== 'grid') return
   const position = at
     ? {
         left: Math.round(at.x - POPOUT_SIZE.width / 2),
@@ -223,7 +229,11 @@ function popout(item, at) {
         w.addEventListener('pagehide', untrack, { once: true })
       },
     })
-  ).catch((err) => toast(`could not open a window for that pane: ${err?.message || err}`))
+  )
+    // dockview catches its own failures and resolves false rather than
+    // rejecting, so without this a failed tear-off is silent to the user
+    .then((ok) => ok === false && toast('could not open a window for that pane'))
+    .catch((err) => toast(`could not open a window for that pane: ${err?.message || err}`))
 }
 
 const outsideWindow = (x, y) =>
@@ -232,16 +242,28 @@ const outsideWindow = (x, y) =>
   x > window.screenX + window.outerWidth ||
   y > window.screenY + window.outerHeight
 
-function armTearOff(item) {
-  const onEnd = (e) => {
-    document.removeEventListener('dragend', onEnd, true)
+// One listener, one pending item — not a listener per drag. A drag that ends
+// inside a popout window fires its dragend on *that* document, so a per-drag
+// listener on this one is never removed: they pile up and later fire with
+// stale items, which is what produced the 'invalid operation' bursts.
+let tearOffItem = null
+const armTearOff = (item) => {
+  tearOffItem = item
+}
+
+document.addEventListener(
+  'dragend',
+  (e) => {
+    const item = tearOffItem
+    tearOffItem = null
+    if (!item) return
     // a drop dockview handled sets a dropEffect; 'none' means it landed nowhere
     if (e.dataTransfer && e.dataTransfer.dropEffect !== 'none') return
     if (!outsideWindow(e.screenX, e.screenY)) return
     popout(item, { x: e.screenX, y: e.screenY })
-  }
-  document.addEventListener('dragend', onEnd, true)
-}
+  },
+  true
+)
 
 dock.onWillDragPanel(({ panel }) => armTearOff(panel))
 dock.onWillDragGroup(({ group }) => armTearOff(group))
