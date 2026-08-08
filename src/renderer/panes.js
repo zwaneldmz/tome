@@ -111,6 +111,43 @@ export const removePanel = (p) => {
 
 // Close a panel with the same guard the tab's ✕ uses: a dirty editor asks
 // before discarding. Clean panels go straight through removePanel.
+// ---------- drag-and-drop file open ----------
+// Dropping OS files anywhere over the window opens them as panes. The
+// highlight is counter-based because dragenter/dragleave fire per nested
+// element; dockview's own tab drags carry no 'Files' type and pass through.
+const dockEl = document.getElementById('dock')
+let dropDepth = 0
+const isFileDrag = (e) => [...(e.dataTransfer?.types || [])].includes('Files')
+
+window.addEventListener('dragenter', (e) => {
+  if (!isFileDrag(e)) return
+  dropDepth++
+  dockEl.classList.add('drop-target')
+})
+window.addEventListener('dragleave', (e) => {
+  if (!isFileDrag(e)) return
+  dropDepth = Math.max(0, dropDepth - 1)
+  if (!dropDepth) dockEl.classList.remove('drop-target')
+})
+window.addEventListener('dragover', (e) => {
+  if (!isFileDrag(e)) return
+  e.preventDefault() // allow the drop
+  e.dataTransfer.dropEffect = 'copy'
+})
+window.addEventListener('drop', (e) => {
+  if (!isFileDrag(e)) return
+  e.preventDefault()
+  dropDepth = 0
+  dockEl.classList.remove('drop-target')
+  for (const file of e.dataTransfer.files) {
+    // File.path is the classic Electron renderer field; newer versions gate
+    // it behind webUtils.getPathForFile in the preload.
+    const path = file.path || tome.webUtils?.pathForFile?.(file)
+    if (typeof path === 'string' && path) openFile(path)
+    else toast(`cannot open dropped item: ${file.name}`)
+  }
+})
+
 export function closePanel(panel) {
   if (!panel) return
   const view = panel.view?.content
@@ -409,7 +446,9 @@ export function addChat(target) {
 }
 
 function spawnChat(saved, target) {
-  const id = `chat-${++counters.seq}`
+  // A restored pane keeps its saved chatId so the persisted transcript
+  // (chat-log-<chatId> in the store) lines back up with this pane.
+  const id = typeof saved?.params?.chatId === 'string' ? saved.params.chatId : `chat-${++counters.seq}`
   dock.addPanel({
     id,
     component: 'chat',
