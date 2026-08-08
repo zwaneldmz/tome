@@ -41,6 +41,9 @@ class GroupActions {
     this.element = el('div', 'grp-actions')
     const add = el('button', 'grp-btn', '＋')
     add.title = 'New pane in this group'
+    add.setAttribute('aria-label', 'New pane in this group')
+    add.setAttribute('aria-haspopup', 'true')
+    add.setAttribute('aria-expanded', 'false')
     add.addEventListener('click', (e) => {
       e.stopPropagation()
       floatingMenu(add, (menu) => populateAddMenu(menu, { group }))
