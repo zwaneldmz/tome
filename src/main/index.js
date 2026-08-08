@@ -60,9 +60,10 @@ let anthropic = null
 // mammoth/SheetJS parsers — stays inside the open workspace folders, or a
 // brain vault. Otherwise a prompt-injected chat reply could make the main
 // process parse ~/.ssh/… with libraries that have CVE histories.
-// (fs:readFile/fs:writeFile/shell:openPath stay unvetted by design: the
-// editor and tree are user-driven; the trust boundary is documented in the
-// review — renderer compromise ≈ user-privileged file access.)
+// (fs:readFile/fs:writeFile/fs:mkdir/fs:createFile/shell:openPath stay
+// unvetted by design: the editor and tree are user-driven; the trust
+// boundary is documented in the review — renderer compromise ≈
+// user-privileged file access.)
 let openFolders = [] // absolute paths of open workspace folders
 // "Never told" is not the same answer as "told, and it is empty". Both deny,
 // but only one is a bug — a silent deny during startup looks exactly like a
@@ -649,6 +650,11 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('fs:readFile', (e, p) => readFile(p, 'utf8'))
   ipcMain.handle('fs:writeFile', (e, { path, content }) => writeFile(path, content))
+  ipcMain.handle('fs:mkdir', (e, p) => mkdir(p, { recursive: true }))
+  ipcMain.handle('fs:createFile', async (e, p) => {
+    // 'wx' fails rather than clobbering an existing file
+    await writeFile(p, '', { flag: 'wx' })
+  })
 
   // ---- open-file watching ----
   // Editors ask to be told when a file changes underneath them. Refcounted,
