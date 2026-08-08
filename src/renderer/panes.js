@@ -105,6 +105,22 @@ export const removePanel = (p) => {
   }
 }
 
+// Close a panel with the same guard the tab's ✕ uses: a dirty editor asks
+// before discarding. Clean panels go straight through removePanel.
+export function closePanel(panel) {
+  if (!panel) return
+  const view = panel.view?.content
+  if (typeof view?.isDirty === 'function' && view.isDirty()) {
+    confirmModal(
+      'Discard unsaved changes?',
+      `“${panel.title.replace(/^● /, '')}” has changes that have not been saved. Closing it discards them.`,
+      'Discard'
+    ).then((ok) => ok && removePanel(panel))
+    return
+  }
+  removePanel(panel)
+}
+
 // The default tab's close affordance is .dv-default-tab-action (it honours
 // defaultPrevented, so a capture-phase preventDefault vetoes the close).
 // Tab DOM order matches group.panels order.
