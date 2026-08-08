@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, systemPreferences, nativeTheme, Menu } from 'electron'
 import { join, resolve, extname, sep } from 'node:path'
 import { readdir, readFile, writeFile, mkdir, realpath } from 'node:fs/promises'
+import { watch as watchFile } from 'node:fs'
 import { homedir } from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -634,6 +635,43 @@ app.whenReady().then(async () => {
   })
   ipcMain.handle('fs:readFile', (e, p) => readFile(p, 'utf8'))
   ipcMain.handle('fs:writeFile', (e, { path, content }) => writeFile(path, content))
+
+  // ---- open-file watching ----
+  // Editors ask to be told when a file changes underneath them. Refcounted,
+  // because the same path can be open in more than one pane. Nothing here
+  // tries to tell our own writes apart from someone else's — the renderer
+  // compares content, which is the only check that cannot race.
+  const watched = new Map() // path -> { watcher, count, timer }
+  ipcMain.handle('fs:watch', (e, p) => {
+    const entry = watched.get(p)
+    if (entry) {
+      entry.count++
+      return true
+    }
+    let watcher
+    try {
+      watcher = watchFile(p, () => {
+        const w = watched.get(p)
+        if (!w) return
+        // editors save in bursts and fs.watch is chatty; one event is enough
+        clearTimeout(w.timer)
+        w.timer = setTimeout(() => win?.webContents.send('fs:changed', p), 120)
+      })
+    } catch {
+      return false // unwatchable (deleted, permissions) — not worth failing over
+    }
+    watcher.on('error', () => {})
+    watched.set(p, { watcher, count: 1, timer: null })
+    return true
+  })
+  ipcMain.handle('fs:unwatch', (e, p) => {
+    const entry = watched.get(p)
+    if (!entry) return
+    if (--entry.count > 0) return
+    clearTimeout(entry.timer)
+    entry.watcher.close()
+    watched.delete(p)
+  })
 
   // ---- json store (workspaces, ui state) ----
   // store:get/set stay open pre-login for the lock screen, so keys are strictly
