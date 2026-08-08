@@ -9,6 +9,7 @@ import { renderStatusbar } from './statusbar.js'
 import { renderTree } from './tree.js'
 import { refreshGit } from './git.js'
 import { shortcutsModal } from './keys.js'
+import { preferencesModal } from './preferences.js'
 
 const allMenus = []
 // Which button opened which menu — used to flip aria-expanded and to hand
@@ -343,6 +344,7 @@ export async function populateAddMenu(menu, target) {
     },
   })
   menuRule(menu)
+  menuItem(menu, { label: 'Preferences…', hint: '⌘,', onClick: () => preferencesModal() })
   menuItem(menu, { label: 'Keyboard shortcuts', hint: '⌘', onClick: () => shortcutsModal() })
 }
 
