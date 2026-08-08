@@ -64,13 +64,26 @@ let anthropic = null
 // editor and tree are user-driven; the trust boundary is documented in the
 // review — renderer compromise ≈ user-privileged file access.)
 let openFolders = [] // absolute paths of open workspace folders
+// "Never told" is not the same answer as "told, and it is empty". Both deny,
+// but only one is a bug — a silent deny during startup looks exactly like a
+// genuine confinement violation, which is how the missing boot-time ws:sync
+// went unnoticed. Keeping the distinction explicit also means a future change
+// cannot let an unpopulated list read as "no restrictions".
+let foldersSynced = false
 function setOpenFolders(list) {
   openFolders = Array.isArray(list) ? list.filter((f) => typeof f === 'string' && f) : []
+  foldersSynced = true
 }
+// Why a confined path was refused, for error messages that can be acted on.
+const confinementError = (what) =>
+  foldersSynced
+    ? `${what}: path is outside the open workspace folders`
+    : `${what}: workspace folders have not been reported yet`
 function isBrainPath(p) {
   return p.startsWith(brain.BRAINS_ROOT + sep)
 }
 function isConfinedPath(p) {
+  if (!foldersSynced) return false // refuse until the renderer has reported
   if (typeof p !== 'string' || !p) return false
   const abs = resolve(p)
   return openFolders.some((f) => abs === f || abs.startsWith(f + sep)) || isBrainPath(abs)
@@ -430,7 +443,7 @@ app.whenReady().then(async () => {
 
   protocol.handle('tome', async (req) => {
     const p = decodeURIComponent(new URL(req.url).searchParams.get('p') || '')
-    const deny = () => new Response('tome: path not allowed', { status: 403 })
+    const deny = () => new Response(confinementError('tome'), { status: 403 })
     const ext = extname(p).slice(1).toLowerCase()
     if (!TOME_SERVE_EXT.has(ext)) return deny()
     const real = await confinedRealPath(p)
@@ -824,7 +837,7 @@ app.whenReady().then(async () => {
     // Parsing is the dangerous part (mammoth/SheetJS CVE histories) — only
     // parse files inside the open workspace folders or a brain vault.
     const real = await confinedRealPath(path)
-    if (!real) throw new Error('doc:read: path is outside the open workspace folders')
+    if (!real) throw new Error(confinementError('doc:read'))
     path = real
     const ext = extname(path).toLowerCase()
     if (ext === '.docx') {
