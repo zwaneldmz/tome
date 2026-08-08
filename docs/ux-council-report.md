@@ -103,4 +103,16 @@ All four P2 tracks shipped. Build green, tests green (0 failures), app boots cle
 
 **Test-count note:** earlier "76/190/228" figures were vitest globbing duplicate test files inside leftover `.claude/worktrees/*`. The tracked suite (`test/`, 4 files) passes with **0 failures** throughout.
 
-**Remaining (out of scope / future):** inline SVG icon set (deferred — Unicode glyphs retained as brand); status-bar per-panel metadata (line/col for editors); menu-bar live radio state for Appearance (currently opens the picker).
+**Remaining (out of scope / future):** menu-bar live radio state for Appearance (currently opens the picker).
+
+## Final polish — **COMPLETE** (2026-08-08)
+
+The two deferred items plus folder icons, done directly by the orchestrator (all touch the shared visual layer — `icons.js`/`tree.js`/`style.css`/`panes.js` — so no parallel subagents).
+
+| Item | Delivered | Commit |
+|------|-----------|--------|
+| **Inline SVG icon set** | New `src/renderer/icons.js`: stroke-based `currentColor` icons (16×16, 1.6px round-cap) tracking design tokens across light/dark. Topbar (sidebar, theme sun/moon/half-system, bell, add, git-branch) and group ＋/⧉ now SVG; theme icon swaps live. Kept `▚` sigil + `⛨/⛉` shields as text (brand). | `eefb992` |
+| **Folder icons in tree** | Closed/open folder icons (accent) + file glyphs per row, flex layout with ellipsis; folder icon toggles on expand/collapse. | `eefb992` |
+| **Status-bar per-panel metadata** | Panels expose optional `statusMeta() → { icon, text, title }`; new `#sb-context` item renders the active pane's context. Editor: live `Ln N, Col M` (CodeMirror updateListener); Terminal: kind + cwd. `dock.onDidActivePanelChange` drives refresh. | `963f5cf` |
+
+Build green, tests green (0 failures), app boots clean (TOME_SHOT smoke, no renderer JS errors).
