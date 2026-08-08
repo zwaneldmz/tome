@@ -1103,6 +1103,7 @@ body.tree-anim #tree {
 }
 .flow-add-node,
 .flow-save,
+.flow-run,
 .flow-open-text {
   color: var(--accent);
   background: transparent;
@@ -1119,13 +1120,18 @@ body.tree-anim #tree {
   border-color: var(--accent-ring);
   background: var(--accent-soft);
 }
-.flow-save {
+/* Save and Run share the filled, primary-accent treatment — both are the
+   "commit to something happening" actions in this toolbar, unlike the
+   outlined ＋ node / Open as text buttons. */
+.flow-save,
+.flow-run {
   color: var(--accent-fg);
   background: var(--accent);
   border-color: transparent;
   font-weight: 600;
 }
-.flow-save:hover {
+.flow-save:hover,
+.flow-run:hover {
   box-shadow: var(--accent-glow);
 }
 

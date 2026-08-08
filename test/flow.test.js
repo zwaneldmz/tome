@@ -14,6 +14,7 @@ import {
   validateFlow,
   topoSort,
   composeBootstrapPrompt,
+  flowRoot,
 } from '../src/renderer/flow-model.js'
 
 describe('createFlow', () => {
@@ -205,6 +206,24 @@ describe('topoSort', () => {
     addEdge(flow, { from: 'n1', to: 'n3', fromOutput: 'o', toInput: 'i', label: 'z' })
 
     expect(topoSort(flow).map((n) => n.id)).toEqual(['n1', 'n2', 'n3'])
+  })
+})
+
+describe('flowRoot', () => {
+  it('walks back to the folder containing .tome for a flow saved under it', () => {
+    expect(flowRoot('/Users/x/proj/.tome/flows/review-pipeline.flow.json')).toBe('/Users/x/proj')
+  })
+
+  it('handles .tome nested more than one level deep in the workspace', () => {
+    expect(flowRoot('/a/b/c/.tome/flows/f.flow.json')).toBe('/a/b/c')
+  })
+
+  it('falls back to the dirname when the path never passes through .tome', () => {
+    expect(flowRoot('/tmp/fixtures/f.flow.json')).toBe('/tmp/fixtures')
+  })
+
+  it('falls back to "." for a bare filename with no directory', () => {
+    expect(flowRoot('f.flow.json')).toBe('.')
   })
 })
 
