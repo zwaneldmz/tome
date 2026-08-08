@@ -75,11 +75,28 @@ contextBridge.exposeInMainWorld('tome', {
     setup: (passphrase) => ipcRenderer.invoke('airgap:setup', { passphrase }),
     enrollTotp: () => ipcRenderer.invoke('airgap:enrollTotp'),
     confirmTotp: (code) => ipcRenderer.invoke('airgap:confirmTotp', { code }),
+    // Repo allowlists: main reads/hashes/validates the file and owns the
+    // consent store — the renderer only asks, it never supplies hosts.
+    readRepo: (root) => ipcRenderer.invoke('airgap:readRepoAllowlist', { root }),
+    consentRepo: (root, hash) => ipcRenderer.invoke('airgap:consentRepoAllowlist', { root, hash }),
+    revokeRepo: (root) => ipcRenderer.invoke('airgap:revokeRepoAllowlist', { root }),
     onBlocked: (cb) => ipcRenderer.on('airgap:blocked', (e, m) => cb(m)),
     onState: (cb) => ipcRenderer.on('airgap:state', (e, m) => cb(m)),
   },
   agents: {
     list: () => ipcRenderer.invoke('agents:list'),
+  },
+  // Persistent event log (main owns userData/events.jsonl): a read-only tail
+  // plus a live push for each new record.
+  events: {
+    list: () => ipcRenderer.invoke('events:list'),
+    // Returns an unsubscribe — a disposed pane must stop receiving pushes
+    // (ipcRenderer.on returns the emitter, which has no .dispose).
+    onAppended: (cb) => {
+      const l = (e, m) => cb(m)
+      ipcRenderer.on('events:appended', l)
+      return () => ipcRenderer.removeListener('events:appended', l)
+    },
   },
   chat: {
     send: (id, messages, brainWs) => ipcRenderer.invoke('chat:send', { id, messages, brainWs }),

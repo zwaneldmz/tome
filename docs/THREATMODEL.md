@@ -117,3 +117,24 @@ third-party repacks.
   delete-protected.
 - **`tome://` protocol is embed-only.** `corsEnabled` lets panes embed
   PDFs/images, but renderer JS cannot *read* `tome://` response bodies.
+- **A repo's `.tome/airgap.json` is untrusted input.** It is validated by
+  the same wildcard compiler as the user allowlist, over-broad patterns
+  (bare `*`, `*.com`, single labels, URL syntax) are refused, and the user
+  must consent before any of it is honored. Consent is collected in the
+  renderer but **verified and stored in main**
+  (`userData/airgap-repo-consents.json`, 0600, seatbelt-denied to agents):
+  main re-reads and re-hashes the file at consent time (TOCTOU-safe — a
+  hash mismatch refuses) and at every boot and workspace sync, dropping
+  consents whose file changed or vanished, so a post-consent edit
+  re-prompts and delete-the-file is a real revocation. A compromised
+  renderer cannot widen egress — it can only *ask* main to re-check the
+  file. A consent is a **standing grant pinned to the file's SHA-1**: it
+  applies globally (to every air-gapped pane, not just the active
+  workspace) until the file changes or the user revokes it — switching
+  workspaces does not revoke it.
+- **The event log records actions, never payloads.** `userData/events.jsonl`
+  keeps a capped, append-only audit of security-relevant actions — conductor
+  tool calls (name, pane/chat id, outcome), air-gap unlocks/relocks, blocked
+  egress hosts — but tool *inputs/outputs* and typed text stay out of the
+  log by design: they may contain secrets. The renderer reads it only
+  through the lock-gated `events:list` channel.

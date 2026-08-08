@@ -3,7 +3,7 @@
 import { tome, toast, el, notifLog } from './util.js'
 import { prefs, wsState } from './state.js'
 import { activeWorkspace, saveWs, renderWsChip } from './workspaces.js'
-import { addTerminal, addChat, addBrain, openFile, createFlowFile } from './panes.js'
+import { addTerminal, addChat, addBrain, addEvents, openFile, createFlowFile } from './panes.js'
 import { confirmModal, promptModal } from './modals.js'
 import { renderStatusbar } from './statusbar.js'
 import { renderTree, createFileIn, createFolderIn } from './tree.js'
@@ -397,6 +397,8 @@ export async function populateAddMenu(menu, target) {
       createFlowFile(wsState.activeRoot, check.rel, target)
     },
   })
+  menuRule(menu)
+  menuItem(menu, { label: 'Event log', hint: 'audit', onClick: () => addEvents(target) })
   menuRule(menu)
   menuItem(menu, { label: 'Preferences…', hint: '⌘,', onClick: () => preferencesModal() })
   menuItem(menu, { label: 'Keyboard shortcuts', hint: '⌘', onClick: () => shortcutsModal() })

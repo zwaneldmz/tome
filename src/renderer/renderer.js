@@ -12,6 +12,7 @@ import { dock, addChat, addBrain, openFile, restoreLayout } from './panes.js'
 import { renderAll } from './menus.js'
 import { startGitPolling, initGitMenu } from './git.js'
 import { activeWorkspace, syncFolders } from './workspaces.js'
+import { checkRepoAirgap } from './repo-airgap.js'
 import { bootAuth } from './lock.js'
 import { bootTheme } from './theme.js'
 import { bootChrome } from './chrome.js'
@@ -52,6 +53,9 @@ tome.brain.onChanged(({ ws: bws, index }) => brains.get(bws)?.onChanged(index))
   tome.airgap.state().then((s) => Object.assign(agState, s))
   syncFolders() // main starts with an empty confinement list
   wsState.activeRoot = activeWorkspace()?.folders[0] || null
+  // After bootAuth, so the lock-gated apply channel is reachable; a repo's
+  // .tome/airgap.json still needs the user's consent before it is honored.
+  checkRepoAirgap()
   renderAll()
   initGitMenu() // deferred out of git.js's module body — see the note there
   startGitPolling() // gated on unlock: the IPC gate refuses while locked

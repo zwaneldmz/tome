@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "name": "docs-sweep",
+  "nodes": [
+    {
+      "id": "n1",
+      "kind": "claude",
+      "name": "reader",
+      "instructions": "Read every file in docs/. Build an inventory of factual claims that can go stale: file paths, command names, flags, config keys, version numbers, and counts (e.g. \"N panes\", \"M tests\"). List each claim with the doc file and line.",
+      "expects": "nothing — this is the first node",
+      "produces": "an inventory of checkable claims, one per line: docs/<file>:<line> — claim",
+      "inputs": [],
+      "outputs": [{ "name": "claims" }],
+      "x": 40,
+      "y": 60
+    },
+    {
+      "id": "n2",
+      "kind": "terminal",
+      "name": "grep",
+      "instructions": "Take the claims inventory and check each one against the tree: grep the source for every path, command, flag, and config key it names. Report each claim as OK or STALE (with what the source actually says). Do not fix anything — just produce the stale-list.",
+      "expects": "reader's claims inventory",
+      "produces": "a stale-list: claims that no longer match the source, with evidence",
+      "inputs": [{ "name": "claims" }],
+      "outputs": [{ "name": "stale-list" }],
+      "x": 340,
+      "y": 60
+    },
+    {
+      "id": "n3",
+      "kind": "claude",
+      "name": "fixer",
+      "instructions": "Read the stale-list. For each STALE entry, draft the minimal doc edit that makes the claim true again — quote the old line and the replacement. Do not touch claims marked OK, do not rephrase for style, and do not invent new facts: if the source is ambiguous, flag it for the user instead of guessing.",
+      "expects": "grep's stale-list with evidence",
+      "produces": "a set of minimal doc edits (old line → new line), or flags for ambiguous claims",
+      "inputs": [{ "name": "stale-list" }],
+      "outputs": [],
+      "x": 640,
+      "y": 60
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from": "n1", "to": "n2", "fromOutput": "claims", "toInput": "claims" },
+    { "id": "e2", "from": "n2", "to": "n3", "fromOutput": "stale-list", "toInput": "stale-list" }
+  ]
+}

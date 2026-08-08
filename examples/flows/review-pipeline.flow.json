@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "name": "review-pipeline",
+  "nodes": [
+    {
+      "id": "n1",
+      "kind": "claude",
+      "name": "planner",
+      "instructions": "Pick one open issue (or ask the user which). Produce an implementation plan: file-level slices, the exact interfaces each slice touches, and a list of security-sensitive surfaces the reviewer should attack.\nKeep it under 400 lines — a plan nobody reads is worse than no plan.",
+      "expects": "an issue to plan for (ask the user if none is given)",
+      "produces": "an implementation plan with file-level slices and a threat list",
+      "inputs": [],
+      "outputs": [{ "name": "plan" }],
+      "x": 40,
+      "y": 160
+    },
+    {
+      "id": "n2",
+      "kind": "opencode",
+      "name": "implementer",
+      "instructions": "Read the plan from the handoff file. Implement it slice by slice, running the test suite after each slice and keeping the build green.\nDo not deviate from the plan's interfaces without writing down why — the reviewer will check the diff against the plan, not against your intentions.",
+      "expects": "planner's plan: file-level slices, interfaces, threat list",
+      "produces": "the diff, plus a changelog of any deviations from the plan",
+      "inputs": [{ "name": "plan" }],
+      "outputs": [{ "name": "code" }],
+      "x": 340,
+      "y": 60
+    },
+    {
+      "id": "n3",
+      "kind": "pi",
+      "name": "adversarial-reviewer",
+      "instructions": "Read the plan AND the implementer's changelog. Review the diff adversarially: try to break each new interface, check every item on the plan's threat list, and hunt for the bug the implementer hoped you wouldn't find.\nVerdict format: SHIP or FIX, each finding with file:line and a one-line reproduction. No style nitpicks.",
+      "expects": "planner's plan and implementer's code+changelog",
+      "produces": "a SHIP/FIX verdict with findings",
+      "inputs": [{ "name": "plan" }, { "name": "code" }],
+      "outputs": [{ "name": "verdict" }],
+      "x": 640,
+      "y": 160
+    },
+    {
+      "id": "n4",
+      "kind": "terminal",
+      "name": "verify",
+      "instructions": "Run the full test suite and the build. If the reviewer's verdict was FIX, confirm each finding has a corresponding commit or a written rebuttal before reporting green.",
+      "expects": "reviewer's verdict and the final state of the tree",
+      "produces": "a release-readiness report: tests, build, unresolved findings",
+      "inputs": [{ "name": "verdict" }],
+      "outputs": [],
+      "x": 940,
+      "y": 160
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from": "n1", "to": "n2", "fromOutput": "plan", "toInput": "plan" },
+    { "id": "e2", "from": "n1", "to": "n3", "fromOutput": "plan", "toInput": "plan" },
+    { "id": "e3", "from": "n2", "to": "n3", "fromOutput": "code", "toInput": "code" },
+    { "id": "e4", "from": "n3", "to": "n4", "fromOutput": "verdict", "toInput": "verdict" }
+  ]
+}
