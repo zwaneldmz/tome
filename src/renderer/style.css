@@ -647,6 +647,21 @@ body.tree-collapsed #btn-sidebar .chev {
 #sb-root {
   font-family: var(--mono);
 }
+#statusbar .sb-context {
+  color: var(--text);
+  border-left: 1px solid var(--line);
+  padding-left: 14px;
+}
+#statusbar .sb-ctx-icon {
+  display: inline-flex;
+  width: 13px;
+  height: 13px;
+  color: var(--muted);
+}
+#statusbar .sb-ctx-icon .icon {
+  width: 13px;
+  height: 13px;
+}
 #sb-airgap.sb-open {
   color: var(--spark);
 }
