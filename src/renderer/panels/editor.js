@@ -6,6 +6,7 @@ import { indentWithTab } from '@codemirror/commands'
 import { LanguageDescription, indentUnit } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
 import { tome, toast } from '../util.js'
+import { confirmModal } from '../modals.js'
 import { cmTheme } from '../theme.js'
 import { renderStatusbar } from '../statusbar.js'
 import { fileIcon } from '../icons.js'
@@ -14,7 +15,8 @@ import { fileIcon } from '../icons.js'
 // only applying to panes opened afterwards.
 const editors = new Set()
 
-export const EDITOR_DEFAULTS = { tabSize: 2, wrap: false, trimOnSave: true }
+export const EDITOR_DEFAULTS = { tabSize: 2, wrap: false, trimOnSave: true, autosave: false }
+export const AUTOSAVE_MS = 800
 export const editorPrefs = { ...EDITOR_DEFAULTS }
 
 // Compartments are identity keys, so one pair covers every view.
@@ -97,11 +99,16 @@ export class EditorPanel {
     })
     this.untheme = theme.attach(this.view)
     editors.add(this)
+    tome.fs.watch(path)
   }
 
   markDirty() {
     this.dirty = this.view.state.doc.toString() !== this.savedText
     this.api?.setTitle(this.dirty ? '● ' + this.name : this.name)
+    clearTimeout(this.autosaveTimer)
+    // debounced: save once typing pauses, never mid-keystroke
+    if (this.dirty && editorPrefs.autosave)
+      this.autosaveTimer = setTimeout(() => this.save(), AUTOSAVE_MS)
   }
 
   async save() {
@@ -136,10 +143,58 @@ export class EditorPanel {
   }
   dispose() {
     editors.delete(this)
+    clearTimeout(this.autosaveTimer)
+    if (this.path) tome.fs.unwatch(this.path)
     this.untheme?.()
     this.view?.destroy()
   }
+
+  // A file changed on disk. Our own save trips the watcher too, so compare
+  // content rather than trying to time-window our writes — that is the only
+  // check that cannot race.
+  async onDiskChanged() {
+    if (!this.view || this.reloading) return
+    let text
+    try {
+      text = await tome.fs.readFile(this.path)
+    } catch {
+      toast(`${this.name} is no longer readable on disk`)
+      return
+    }
+    if (text === this.savedText) return // our own write
+    if (!this.dirty) return this.replaceDoc(text) // clean: just follow the file
+    const ok = await confirmModal(
+      'File changed on disk',
+      `“${this.name}” changed outside Tome, and this pane has unsaved changes. Reloading discards them.`,
+      'Reload from disk'
+    )
+    if (!ok) return // keep the buffer; the next save overwrites the file
+    // re-read: the file may have moved on again while the prompt was up
+    try {
+      this.replaceDoc(await tome.fs.readFile(this.path))
+    } catch {
+      toast(`could not reload ${this.name}`)
+    }
+  }
+
+  replaceDoc(text) {
+    this.reloading = true
+    const sel = this.view.state.selection.main.head
+    this.view.dispatch({
+      changes: { from: 0, to: this.view.state.doc.length, insert: text },
+      selection: { anchor: Math.min(sel, text.length) },
+    })
+    this.savedText = text
+    this.reloading = false
+    this.markDirty()
+  }
 }
+
+// One listener for every editor: main sends the path, each pane checks if it
+// is the one that changed.
+tome.fs.onChanged((p) => {
+  for (const ed of editors) if (ed.path === p) ed.onDiskChanged()
+})
 
 // Save every open editor with unsaved changes (⌘⌥S).
 export async function saveAllEditors() {

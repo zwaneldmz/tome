@@ -142,6 +142,13 @@ export async function preferencesModal() {
     () => editorPrefs.trimOnSave,
     (v) => setEditorPrefs({ trimOnSave: v })
   )
+  toggleRow(
+    editor,
+    'Autosave',
+    'save a moment after you stop typing',
+    () => editorPrefs.autosave,
+    (v) => setEditorPrefs({ autosave: v })
+  )
   m.body.appendChild(editor)
 
   // ---------- security ----------
