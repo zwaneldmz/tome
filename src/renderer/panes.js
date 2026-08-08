@@ -40,7 +40,7 @@ class GroupActions {
     this.group = group
     this.element = el('div', 'grp-actions')
     const add = el('button', 'grp-btn', '＋')
-    add.title = 'New pane in this group'
+    add.title = 'New pane as a tab in this group'
     add.addEventListener('click', (e) => {
       e.stopPropagation()
       floatingMenu(add, (menu) => populateAddMenu(menu, { group }))

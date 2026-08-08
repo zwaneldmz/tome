@@ -33,6 +33,35 @@ window.addEventListener('keydown', (e) => {
   }
 })
 
+// ---------- sidebar drag divider ----------
+const tree = document.getElementById('tree')
+const divider = document.getElementById('tree-divider')
+const TREE_MIN = 150
+const TREE_MAX = 480
+
+// pointer-based drag-to-resize; the inline width survives the collapse
+// (body.tree-collapsed wins with !important), so releasing ⌘B restores it
+divider.addEventListener('pointerdown', (e) => {
+  if (collapsed) return
+  e.preventDefault()
+  divider.setPointerCapture(e.pointerId)
+  divider.classList.add('dragging')
+  const onMove = (e) => {
+    const w = Math.min(TREE_MAX, Math.max(TREE_MIN, e.clientX))
+    tree.style.width = `${w}px`
+  }
+  const onUp = () => {
+    divider.classList.remove('dragging')
+    divider.removeEventListener('pointermove', onMove)
+    divider.removeEventListener('pointerup', onUp)
+    divider.removeEventListener('pointercancel', onUp)
+    tome.store.set('sidebar-width', parseInt(tree.style.width, 10))
+  }
+  divider.addEventListener('pointermove', onMove)
+  divider.addEventListener('pointerup', onUp)
+  divider.addEventListener('pointercancel', onUp)
+})
+
 // ---------- appearance ----------
 const themeBtn = document.getElementById('btn-theme')
 const THEME_LABEL = { system: 'Match system', light: 'Light', dark: 'Dark' }
@@ -57,5 +86,7 @@ onTheme(() => {
 })
 
 export async function bootChrome() {
+  const w = await tome.store.get('sidebar-width')
+  if (typeof w === 'number' && w >= TREE_MIN && w <= TREE_MAX) tree.style.width = `${w}px`
   if (await tome.store.get('sidebar-collapsed')) setCollapsed(true, false)
 }
