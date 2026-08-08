@@ -1,6 +1,7 @@
 // Assistant chat pane: streamed replies, conductor tool chips, optional
 // brain context and spoken replies.
 import { tome, toast } from '../util.js'
+import { renderMarkdown } from '../markdown.js'
 import { chats } from '../regs.js'
 import { activeWorkspace } from '../workspaces.js'
 
@@ -14,7 +15,7 @@ export class ChatPanel {
         <button type="button" class="chat-brain-toggle" title="Inject workspace brain context">◈ brain</button>
         <textarea rows="2" placeholder="Ask the assistant… (Enter to send · Shift+Enter newline · dictate with the 🎤 key)"></textarea>
         <button type="button" class="chat-speak" title="Speak replies aloud">🔊</button>
-        <button type="button" class="chat-stop hidden" title="Stop the reply">■</button>
+        <button type="button" class="chat-stop hidden" title="Stop the reply (aborts the assistant's current answer)">■</button>
         <button type="submit">Send</button>
       </form>`
   }
@@ -59,6 +60,42 @@ export class ChatPanel {
     this.log.scrollTop = this.log.scrollHeight
     return div
   }
+  // assistant bubbles get a markdown body div so deltas can re-render as DOM
+  aiBubble() {
+    this.current = this.bubble('ai', '')
+    this.currentBody = document.createElement('div')
+    this.currentBody.className = 'md'
+    this.current.appendChild(this.currentBody)
+  }
+  // typing dots until the first delta + a muted elapsed-seconds readout
+  // that ticks once a second until the reply finishes
+  startWait() {
+    this.wait = document.createElement('span')
+    this.wait.className = 'chat-wait'
+    this.waitDots = document.createElement('span')
+    this.waitDots.className = 'chat-dots'
+    for (let i = 0; i < 3; i++) this.waitDots.appendChild(document.createElement('span'))
+    this.waitElapsed = document.createElement('span')
+    this.waitElapsed.className = 'chat-elapsed'
+    this.wait.append(this.waitDots, this.waitElapsed)
+    this.waitStart = Date.now()
+    this.tickWait()
+    this.waitTimer = setInterval(() => this.tickWait(), 1000)
+    this.current.appendChild(this.wait)
+  }
+  tickWait() {
+    if (!this.waitElapsed) return
+    const s = Math.floor((Date.now() - this.waitStart) / 1000)
+    this.waitElapsed.textContent = `\u2026 ${s}s`
+  }
+  stopWait() {
+    clearInterval(this.waitTimer)
+    this.waitTimer = null
+    this.wait?.remove()
+    this.wait = null
+    this.waitDots = null
+    this.waitElapsed = null
+  }
   send() {
     const text = this.input.value.trim()
     if (!text || this.busy) return
@@ -67,7 +104,8 @@ export class ChatPanel {
     this.input.value = ''
     this.bubble('me', text)
     this.history.push({ role: 'user', content: text })
-    this.current = this.bubble('ai', '')
+    this.aiBubble()
+    this.startWait()
     this.currentText = ''
     this.segText = ''
     let brainWs
@@ -86,7 +124,12 @@ export class ChatPanel {
     this.currentText += text
     this.segText += text
     if (this.current) {
-      this.current.textContent = this.segText
+      // first delta: the reply has arrived, swap the dots out
+      if (this.waitDots) {
+        this.waitDots.remove()
+        this.waitDots = null
+      }
+      renderMarkdown(this.currentBody, this.segText)
       this.log.scrollTop = this.log.scrollHeight
     }
   }
@@ -94,13 +137,17 @@ export class ChatPanel {
   toolNote(tool, hint) {
     if (this.current && !this.segText) this.current.remove()
     this.bubble('tool', `⚙ ${tool}${hint ? ' · ' + hint : ''}`)
-    this.current = this.bubble('ai', '')
+    this.aiBubble()
+    // keep the elapsed readout alive across the segment break
+    if (this.wait) this.current.appendChild(this.wait)
     this.segText = ''
   }
   finish(error, aborted) {
     this.busy = false
     this.stopBtn.classList.add('hidden')
+    this.stopWait()
     if (this.current && !this.segText) this.current.remove()
+    else if (this.current) renderMarkdown(this.currentBody, this.segText)
     if (error) {
       this.bubble('err', error)
       // Roll the failed user message out of history, but hand it back to the
@@ -121,6 +168,7 @@ export class ChatPanel {
     this.current = null
   }
   dispose() {
+    this.stopWait()
     chats.delete(this.chatId)
   }
 }
