@@ -498,7 +498,10 @@ body.tree-collapsed #btn-sidebar .chev {
   padding: 5px;
   box-shadow: var(--shadow-2);
 }
-.chip-wrap:last-child .menu {
+/* every chip right of the spacer hangs its menu off the right edge — anchoring
+   left would run it past the window, which is what stranded the notification
+   menu half off-screen while ＋ (the last chip) looked fine */
+.spacer ~ .chip-wrap .menu {
   left: auto;
   right: 0;
 }
