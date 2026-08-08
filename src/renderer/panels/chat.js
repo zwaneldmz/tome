@@ -5,6 +5,12 @@ import { renderMarkdown } from '../markdown.js'
 import { chats } from '../regs.js'
 import { activeWorkspace } from '../workspaces.js'
 
+// Transcripts persist to the main-process JSON store so a chat pane restored
+// from a saved layout comes back with its conversation. Writes are debounced
+// and capped — the log is a convenience, not an archive.
+const HISTORY_CAP = 100
+const SAVE_DEBOUNCE = 400
+
 export class ChatPanel {
   constructor() {
     this.element = document.createElement('div')
@@ -23,6 +29,7 @@ export class ChatPanel {
     this.chatId = params.chatId
     this.history = []
     this.busy = false
+    this.saveTimer = null
     this.brainOn = false
     chats.set(this.chatId, this)
     this.log = this.element.querySelector('.chat-log')
@@ -51,6 +58,54 @@ export class ChatPanel {
         this.send()
       }
     })
+    // The layout system restores a chat with the SAME chatId — a stored
+    // transcript under that id is this pane's prior conversation, so replay
+    // it. A brand-new chat has no log and starts empty.
+    if (typeof this.chatId === 'string') this.loadHistory()
+  }
+  // The store is untrusted on reload: validate the shape, then render through
+  // the same safe paths as live traffic (textContent for the user, the
+  // markdown renderer for the assistant — never innerHTML).
+  async loadHistory() {
+    let saved
+    try {
+      saved = await tome.store.get('chat-log-' + this.chatId)
+    } catch {
+      return
+    }
+    if (this.chatId == null || this.history.length) return // not a fresh panel
+    if (!Array.isArray(saved)) return
+    const msgs = saved
+      .filter(
+        (m) =>
+          m &&
+          typeof m.content === 'string' &&
+          m.content &&
+          (m.role === 'user' || m.role === 'assistant')
+      )
+      .slice(-HISTORY_CAP)
+    if (!msgs.length) return
+    this.history = msgs
+    for (const m of msgs) {
+      if (m.role === 'user') {
+        this.bubble('me', m.content)
+      } else {
+        const div = this.bubble('ai', '')
+        const body = document.createElement('div')
+        body.className = 'md'
+        div.appendChild(body)
+        renderMarkdown(body, m.content)
+      }
+    }
+  }
+  persistHistory() {
+    if (typeof this.chatId !== 'string' || !this.chatId) return
+    clearTimeout(this.saveTimer)
+    this.saveTimer = setTimeout(() => {
+      tome.store
+        .set('chat-log-' + this.chatId, this.history.slice(-HISTORY_CAP))
+        .catch(() => {})
+    }, SAVE_DEBOUNCE)
   }
   bubble(cls, text) {
     const div = document.createElement('div')
@@ -104,6 +159,7 @@ export class ChatPanel {
     this.input.value = ''
     this.bubble('me', text)
     this.history.push({ role: 'user', content: text })
+    this.persistHistory()
     this.aiBubble()
     this.startWait()
     this.currentText = ''
@@ -165,10 +221,17 @@ export class ChatPanel {
         speechSynthesis.speak(new SpeechSynthesisUtterance(this.currentText.slice(0, 1500)))
       }
     }
+    this.persistHistory()
     this.current = null
   }
   dispose() {
     this.stopWait()
+    // flush a pending debounced write so a quick close doesn't drop the tail
+    clearTimeout(this.saveTimer)
+    if (typeof this.chatId === 'string' && this.chatId && this.history.length)
+      tome.store
+        .set('chat-log-' + this.chatId, this.history.slice(-HISTORY_CAP))
+        .catch(() => {})
     chats.delete(this.chatId)
   }
 }
