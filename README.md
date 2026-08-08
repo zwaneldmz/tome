@@ -15,6 +15,13 @@ system by default.
 - **Agent panes** — the `＋` menu spawns Claude Code, opencode, or pi in a
   real PTY (login shell, your prompt, your keybindings). Agents light up
   automatically when their CLI appears on `PATH` — no config.
+- **Flows** — a `<name>.flow.json` file under `.tome/flows/` is a small
+  directed graph of agent nodes: what each expects from upstream, what it
+  produces, and the edges wiring one node's output to another's input. The
+  `＋` menu's **Flow diagram…** creates one; opening it draws the canvas —
+  drag nodes, draw edges, edit a node's brief in a modal. **Run** topologically
+  sorts the graph and spawns one terminal per node with its brief pasted in —
+  nothing is ever auto-submitted, so you review and press Enter yourself.
 - **Pane grid** — dockview tiling: drag to rearrange, drop one pane onto
   another to stack as named tabs. Every pane header carries a `＋` that opens
   a new pane *as a tab in that group* — so an agent and the helpers it needs

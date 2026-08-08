@@ -2,7 +2,7 @@
 // Tracks pty scrollback + the renderer's pane list, exposes a small tool set
 // to the Claude chat loop, and never runs a command unless the user flipped
 // the "assistant may run commands" toggle (allowRun) on.
-import { stripAnsi, stripControlChars } from './lib/terminal-text.js'
+import { stripAnsi, stripControlChars } from '../shared/terminal-text.js'
 import { AGENTS, OPENABLE_KINDS_DESCRIPTION } from '../shared/pane-kinds.js'
 
 let ptys = null // Map shared with index.js

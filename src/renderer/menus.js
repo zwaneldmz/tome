@@ -3,10 +3,11 @@
 import { tome, toast, el, notifLog } from './util.js'
 import { prefs, wsState } from './state.js'
 import { activeWorkspace, saveWs, renderWsChip } from './workspaces.js'
-import { addTerminal, addChat, addBrain, openFile } from './panes.js'
+import { addTerminal, addChat, addBrain, openFile, createFlowFile } from './panes.js'
 import { confirmModal, promptModal } from './modals.js'
 import { renderStatusbar } from './statusbar.js'
 import { renderTree, createFileIn, createFolderIn } from './tree.js'
+import { validateRelPath } from './tree-create.js'
 import { refreshGit } from './git.js'
 import { shortcutsModal } from './keys.js'
 import { preferencesModal } from './preferences.js'
@@ -377,6 +378,24 @@ export async function populateAddMenu(menu, target) {
     hint: wsState.activeRoot ? '' : 'needs a workspace folder',
     disabled: !wsState.activeRoot,
     onClick: () => createFolderIn(wsState.activeRoot, target),
+  })
+  menuItem(menu, {
+    label: 'Flow diagram…',
+    hint: wsState.activeRoot ? '' : 'needs a workspace folder',
+    disabled: !wsState.activeRoot,
+    onClick: async () => {
+      const input = await promptModal('New flow', 'name — e.g. review-pipeline', '', 'Create')
+      if (input == null) return // cancelled
+      const check = validateRelPath(input)
+      if (!check.ok) return toast(check.reason)
+      // validateRelPath allows a multi-segment relative path (that's the
+      // point for New file/New folder, which can create nested dirs) — but
+      // flows live flat in .tome/flows/ (plan §2.3), so a name that still has
+      // a "/" in it after that check needs its own refusal here rather than
+      // silently nesting a .flow.json under a folder nothing else browses to.
+      if (check.rel.includes('/')) return toast('flow names can\'t contain "/" — flows live flat in .tome/flows/')
+      createFlowFile(wsState.activeRoot, check.rel, target)
+    },
   })
   menuRule(menu)
   menuItem(menu, { label: 'Preferences…', hint: '⌘,', onClick: () => preferencesModal() })

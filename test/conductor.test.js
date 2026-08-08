@@ -2,7 +2,7 @@
 // is the guard that stops the chat model from submitting commands the user
 // never approved (pi review §1). Verified correct today; pinned here.
 import { describe, it, expect } from 'vitest'
-import { stripAnsi, stripControlChars } from '../src/main/lib/terminal-text.js'
+import { stripAnsi, stripControlChars } from '../src/shared/terminal-text.js'
 
 describe('stripAnsi', () => {
   it('removes CSI sequences', () => {

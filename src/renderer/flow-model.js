@@ -73,6 +73,35 @@ export function addEdge(flow, edge) {
   return null
 }
 
+// Cascading delete: drops the node and every edge that touches it (either
+// endpoint) together, in one place. A future edit that only filters one side
+// (e.g. keeps `edge.from !== nodeId` but forgets `edge.to !== nodeId`) would
+// leave a stale edge referencing a now-deleted node in flow.edges; Save
+// persists that straight to disk, and the next time the file opens,
+// validateFlow's structural "missing node" check (an error, not a warning)
+// refuses to render it at all. Living here as a pure, exported function —
+// rather than as the two-line filter FlowPanel.deleteSelection used to
+// inline — is what lets that invariant be pinned by a test instead of only
+// ever being exercised by clicking around the canvas by hand.
+// Mutates `flow` in place; a nodeId that isn't present is a no-op.
+export function removeNode(flow, nodeId) {
+  flow.nodes = flow.nodes.filter((n) => n.id !== nodeId)
+  flow.edges = flow.edges.filter((edge) => edge.from !== nodeId && edge.to !== nodeId)
+}
+
+// A flow's `name` becomes a literal filesystem path segment for Run's
+// handoff folder (`.tome/flows/<name>/`, see runFlow in flow.js and
+// handoffPath below) via straight string interpolation into an fs:mkdir
+// call. Flows live FLAT in .tome/flows/ (no legitimate nested name), so any
+// path separator or a bare ".." would turn a single click on Run into a
+// write outside the workspace the user never typed or reviewed. Exported so
+// runFlow can re-check the exact same rule right at the point that actually
+// touches the filesystem, instead of only trusting validateFlow's load-time
+// gate below.
+export function unsafeFolderName(name) {
+  return typeof name === 'string' && (name === '..' || /[\\/]/.test(name))
+}
+
 // Errors vs. warnings is a hard line, not a style choice: errors mean the
 // *graph* is broken (topoSort/rendering can't trust node/edge references),
 // so Run must refuse them. Warnings mean only the declared *contract* is
@@ -85,6 +114,16 @@ export function validateFlow(flow) {
 
   if (flow.version !== 1) {
     warnings.push(`unknown flow version "${flow.version}" (expected 1)`)
+  }
+
+  // Hard error, not a warning: unlike a stale port name or an unrecognized
+  // kind, an unsafe name isn't just a wrong *declared contract* — Run's
+  // handoff-folder mkdir (flow.js) uses this string as-is, so letting a
+  // structurally "valid" flow through with a traversal-shaped name would
+  // leave nothing standing between "open a file" and "write outside the
+  // workspace" except remembering not to click Run.
+  if (unsafeFolderName(flow.name)) {
+    errors.push(`flow name "${flow.name}" can't be used as a folder name (no "/", "\\", or "..")`)
   }
 
   const nodeById = new Map()
@@ -177,7 +216,13 @@ function handoffPath(flowName, nodeId, outputName) {
 // won't resolve to anything meaningful in that case.
 export function flowRoot(path) {
   const marker = '/.tome/'
-  const i = path.indexOf(marker)
+  // lastIndexOf, not indexOf: a flow.json can sit inside a nested workspace
+  // that itself lives under another .tome/flows/ (a repo-in-a-repo layout),
+  // producing more than one "/.tome/" in the path. The CLOSEST one to the
+  // file — not the outermost — is the .tome that actually contains this
+  // flow's own .tome/flows/<name>.flow.json, which is what Run's cwd and
+  // composeBootstrapPrompt's relative handoff paths need to agree with.
+  const i = path.lastIndexOf(marker)
   if (i !== -1) return path.slice(0, i)
   const slash = path.lastIndexOf('/')
   return slash === -1 ? '.' : path.slice(0, slash)

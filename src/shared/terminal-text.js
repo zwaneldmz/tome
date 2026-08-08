@@ -1,5 +1,9 @@
-// Pure text sanitizers for pty scrollback and model-typed input.
-// Extracted from conductor.js so the guards are testable without module state.
+// Pure text sanitizers for pty scrollback and typed input. Shared — not
+// main-only — because both main (conductor's type_in_terminal/read_terminal)
+// and the renderer (flow.js's Run, via typeIntoPanel in panes.js) need the
+// exact same no-auto-submit guard; a second, drifted copy of the
+// control-char regex would be the kind of thing that quietly stops matching
+// a new bypass in only one of the two places.
 
 // CSI + OSC + stray escapes + control chars (keep \n and \t)
 export const stripAnsi = (s) =>
