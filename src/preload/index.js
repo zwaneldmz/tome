@@ -97,5 +97,11 @@ contextBridge.exposeInMainWorld('tome', {
   app: {
     onBeforeQuit: (cb) => ipcRenderer.on('app:before-quit', () => cb()),
     quitReady: () => ipcRenderer.send('app:quit-ready'),
+    onOpenPreferences: (cb) => ipcRenderer.on('app:open-preferences', () => cb()),
+  },
+  // Native menu bar: one generic channel, the renderer's menu-bridge
+  // switches on action.id.
+  menu: {
+    onAction: (cb) => ipcRenderer.on('menu:action', (e, action) => cb(action)),
   },
 })

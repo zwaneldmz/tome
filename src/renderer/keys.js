@@ -10,7 +10,6 @@ import { tome, el, toast } from './util.js'
 import { dock, closePanel, openFile } from './panes.js'
 import { activeWorkspace } from './workspaces.js'
 import { zoomTerminals } from './panels/terminal.js'
-import { preferencesModal } from './preferences.js'
 import { closeMenus } from './menus.js'
 
 const isMac = navigator.platform.startsWith('Mac')
@@ -20,7 +19,7 @@ const MOD = isMac ? '⌘' : 'Ctrl+'
 const activeGroup = () =>
   dock.activeGroup || dock.groups.find((g) => g.panels.length) || null
 
-function closeActivePanel() {
+export function closeActivePanel() {
   const panel = dock.activePanel || activeGroup()?.activePanel
   if (panel) closePanel(panel) // goes through the dirty close-guard in panes.js
 }
@@ -119,7 +118,7 @@ function relToWorkspace(path) {
 const isEditable = (n) =>
   !!n && (n.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName))
 
-function quickOpen() {
+export function quickOpen() {
   if (document.getElementById('qo-overlay')) return
   const w = activeWorkspace()
   if (!w?.folders.length) {
@@ -292,22 +291,10 @@ window.addEventListener('keydown', (e) => {
   if (!mod || e.altKey) return
   const key = e.key.toLowerCase()
 
-  // Pane management — global even while typing in an input.
-  if (key === 'w' && !e.shiftKey) {
-    e.preventDefault()
-    closeActivePanel()
-    return
-  }
-  if (key === 'p' && !e.shiftKey) {
-    e.preventDefault()
-    quickOpen()
-    return
-  }
-  if (key === ',' && !e.shiftKey) {
-    e.preventDefault()
-    preferencesModal()
-    return
-  }
+  // ⌘W (close pane) and ⌘P (quick open) are native menu accelerators — the
+  // menu-bridge routes them here; the renderer must not also handle them or
+  // they would fire twice. ⌘, (Preferences) is also a native menu accelerator
+  // routed via menu-bridge, so it is likewise NOT handled here.
   if (!e.shiftKey && DIGITS.includes(e.key)) {
     e.preventDefault()
     focusNthPanel(DIGITS.indexOf(e.key))
