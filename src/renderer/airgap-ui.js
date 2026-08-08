@@ -152,7 +152,7 @@ function setupModal(paneId) {
   })
 }
 
-function totpModal() {
+export function totpModal() {
   const m = modalShell('⛉ enroll authenticator (TOTP)')
   m.note('Add this secret to your authenticator app, then confirm a code.')
   tome.airgap.enrollTotp().then(({ secret, uri }) => {

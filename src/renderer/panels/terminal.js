@@ -19,16 +19,18 @@ tome.store.get('term-font-size').then((v) => {
   }
 })
 
-// delta: +1/-1 to step, 0 to reset. Every live terminal follows, and a
-// resize event nudges each FitAddon to re-measure at the new cell size.
-export function zoomTerminals(delta) {
-  termFontSize =
-    delta === 0
-      ? TERM_FONT.default
-      : Math.min(TERM_FONT.max, Math.max(TERM_FONT.min, termFontSize + delta))
+// Absolute setter (Preferences' stepper). Every live terminal follows, and
+// a resize event nudges each FitAddon to re-measure at the new cell size.
+export function setTermFontSize(size) {
+  termFontSize = Math.min(TERM_FONT.max, Math.max(TERM_FONT.min, size))
   for (const term of terms.values()) term.options.fontSize = termFontSize
   window.dispatchEvent(new window.Event('resize'))
   tome.store.set('term-font-size', termFontSize)
+}
+
+// delta: +1/-1 to step, 0 to reset.
+export function zoomTerminals(delta) {
+  setTermFontSize(delta === 0 ? TERM_FONT.default : termFontSize + delta)
 }
 
 export class TerminalPanel {

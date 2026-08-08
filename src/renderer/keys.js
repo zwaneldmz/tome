@@ -10,6 +10,7 @@ import { tome, el, toast } from './util.js'
 import { dock, closePanel, openFile } from './panes.js'
 import { activeWorkspace } from './workspaces.js'
 import { zoomTerminals } from './panels/terminal.js'
+import { preferencesModal } from './preferences.js'
 import { closeMenus } from './menus.js'
 
 const isMac = navigator.platform.startsWith('Mac')
@@ -243,6 +244,7 @@ const SHORTCUTS = [
   [MOD + 'S', 'Save the active editor'],
   [MOD + 'W', 'Close the active pane (asks if unsaved)'],
   [MOD + 'P', 'Quick-open a file'],
+  [MOD + ',', 'Preferences'],
   [MOD + '1–9', 'Focus the Nth tab of the active group'],
   [MOD + '⇧[ / ' + MOD + '⇧]', 'Previous / next tab (also Ctrl+PageUp/PageDown)'],
   [MOD + '= / ' + MOD + '-', 'Zoom terminal text in / out'],
@@ -299,6 +301,11 @@ window.addEventListener('keydown', (e) => {
   if (key === 'p' && !e.shiftKey) {
     e.preventDefault()
     quickOpen()
+    return
+  }
+  if (key === ',' && !e.shiftKey) {
+    e.preventDefault()
+    preferencesModal()
     return
   }
   if (!e.shiftKey && DIGITS.includes(e.key)) {
