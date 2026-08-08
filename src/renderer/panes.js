@@ -254,6 +254,8 @@ const syncPanes = () => {
 }
 dock.onDidAddPanel(syncPanes)
 dock.onDidRemovePanel(syncPanes)
+// active-pane context in the status bar (editor line:col, terminal cwd, …)
+dock.onDidActivePanelChange(() => renderStatusbar())
 
 // `source` is the assistant pane that asked. Panes it opens join that pane's
 // group as tabs rather than carving up the grid behind the user's back.

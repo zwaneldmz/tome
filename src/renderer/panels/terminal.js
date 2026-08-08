@@ -6,6 +6,7 @@ import { tome } from '../util.js'
 import { terms, strips } from '../regs.js'
 import { onTheme, xtermTheme } from '../theme.js'
 import { stripRender, airgapModal } from '../airgap-ui.js'
+import { terminalIcon } from '../icons.js'
 
 // Terminal font size is user-adjustable (⌘=/⌘-/⌘0, handled in keys.js) and
 // persisted so every terminal — current and future — shares it.
@@ -40,6 +41,8 @@ export class TerminalPanel {
   }
   init({ params, api }) {
     this.ptyId = params.ptyId
+    this.kind = params.kind
+    this.cwd = params.cwd
     let termHost = this.element
     if (params.airgap) {
       this.element.classList.add('airgapped')
@@ -98,6 +101,13 @@ export class TerminalPanel {
     api.onDidActiveChange(({ isActive }) => isActive && setTimeout(() => term.focus(), 0))
     requestAnimationFrame(refit)
     this.term = term
+  }
+  // Status bar context: shell/agent kind + working directory.
+  statusMeta() {
+    if (!this.cwd) return null
+    const name = this.cwd.split('/').pop() || this.cwd
+    const kind = this.kind && this.kind !== 'terminal' ? this.kind : 'zsh'
+    return { icon: terminalIcon, text: `${kind} · ${name}`, title: this.cwd }
   }
   dispose() {
     tome.pty.kill(this.ptyId)
