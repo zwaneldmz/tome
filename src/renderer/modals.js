@@ -75,6 +75,24 @@ export function modalShell(title) {
   }
 }
 
+// Single-field prompt (rename a workspace, …). Resolves the entered string,
+// or null when cancelled. Enter submits, Escape cancels.
+export function promptModal(title, placeholder, initial = '', submitLabel = 'Save') {
+  return new Promise((resolve) => {
+    const m = modalShell(title)
+    const input = m.input(placeholder, 'text')
+    input.value = initial
+    const done = (v) => {
+      m.close()
+      resolve(v)
+    }
+    input.addEventListener('keydown', (e) => e.key === 'Enter' && done(input.value))
+    m.button(submitLabel, () => done(input.value))
+    m.button('Cancel', () => done(null), 'ghost')
+    setTimeout(() => input.select(), 0)
+  })
+}
+
 // Small yes/no gate for destructive or lossy actions (close a dirty editor,
 // delete a workspace, …). Resolves true only when the user confirms.
 export function confirmModal(title, note, confirmLabel = 'Confirm') {

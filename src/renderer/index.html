@@ -12,9 +12,6 @@
   <body>
     <header id="topbar">
       <div class="traffic-pad"></div>
-      <button id="btn-sidebar" class="icon-btn" title="Hide sidebar (⌘B)" aria-label="Toggle sidebar">
-        <span class="chev"></span>
-      </button>
       <div class="chip-wrap">
         <button id="ws-chip" title="Workspace — switch, create, or add folders" aria-label="Workspace" aria-haspopup="true">
           <span class="sigil">▚</span><span id="ws-name">no workspace</span><span class="caret">▾</span>
@@ -42,7 +39,14 @@
       </div>
     </header>
     <div id="body">
-      <aside id="tree"></aside>
+      <aside id="tree">
+        <div id="tree-head">
+          <button id="btn-sidebar" class="icon-btn" title="Hide sidebar (⌘B)" aria-label="Toggle sidebar">
+            <span class="chev"></span>
+          </button>
+        </div>
+        <div id="tree-body"></div>
+      </aside>
       <div id="tree-divider" title="Drag to resize the sidebar"></div>
       <main id="dock"></main>
     </div>

@@ -14,7 +14,9 @@ import { confirmModal } from './modals.js'
 import { renderStatusbar } from './statusbar.js'
 import { folderIcon, fileIcon } from './icons.js'
 
-const treeEl = document.getElementById('tree')
+// Rows render into #tree-body; #tree itself keeps the header row (minimizer)
+// pinned above the scroll.
+const treeEl = document.getElementById('tree-body')
 const JUNK_DIRS = new Set(['node_modules', 'out', 'dist', '.venv', '__pycache__', '.next', 'target'])
 
 async function renderDir(dir, container, depth, rootPath) {

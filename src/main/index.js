@@ -350,6 +350,7 @@ function createWindow() {
   })
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
+    if (process.env.TOME_DEVTOOLS) win.webContents.openDevTools({ mode: 'detach' })
     win.webContents.on('console-message', (event) => {
       console.log(`[renderer] ${event.message}`)
     })

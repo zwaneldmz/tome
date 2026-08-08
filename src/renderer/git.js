@@ -48,6 +48,9 @@ export function startGitPolling() {
 export function initGitMenu() {
   wireMenu('git-chip', 'git-menu', async (menu) => {
     menu.innerHTML = ''
+    // the chip is hidden without a root, but a workspace deleted while it is
+    // still on screen would land here — every entry below needs the path
+    if (!wsState.activeRoot) return menuLabel(menu, 'no active folder')
     menuLabel(menu, wsState.activeRoot.split('/').pop())
     menuInput(menu, 'new branch from HEAD…', 'Create', async (name) => {
       const r = await tome.git.checkout(wsState.activeRoot, name, true)

@@ -4,7 +4,7 @@ import { tome, toast, el, notifLog } from './util.js'
 import { prefs, wsState } from './state.js'
 import { activeWorkspace, saveWs, renderWsChip } from './workspaces.js'
 import { addTerminal, addChat, addBrain, openFile } from './panes.js'
-import { confirmModal } from './modals.js'
+import { confirmModal, promptModal } from './modals.js'
 import { renderStatusbar } from './statusbar.js'
 import { renderTree } from './tree.js'
 import { refreshGit } from './git.js'
@@ -138,7 +138,15 @@ export function wireMenu(btnId, menuId, onOpen) {
     const willOpen = menu.classList.contains('hidden')
     closeMenus()
     if (willOpen) {
-      if (onOpen) await onOpen(menu)
+      // A builder that throws must still leave an open menu: it half-built the
+      // markup either way, and a button that silently does nothing reads as a
+      // dead app rather than as one failed call.
+      if (onOpen)
+        try {
+          await onOpen(menu)
+        } catch (err) {
+          menuLabel(menu, `couldn't load: ${err.message}`)
+        }
       menu.classList.remove('hidden')
       if (menu.dataset.openFor) delete menu.dataset.openFor
       setExpanded(menu, true)
@@ -238,6 +246,16 @@ function createWorkspace(name) {
   addFolderToActive()
 }
 
+async function renameActiveWorkspace() {
+  const w = activeWorkspace()
+  if (!w) return
+  const name = await promptModal('Rename workspace', 'Workspace name', w.name)
+  if (!name || !name.trim() || name.trim() === w.name) return
+  w.name = name.trim()
+  saveWs()
+  renderAll()
+}
+
 function switchWorkspace(i) {
   wsState.ws.active = i
   wsState.activeRoot = activeWorkspace()?.folders[0] || null
@@ -247,6 +265,10 @@ function switchWorkspace(i) {
 
 wireMenu('ws-chip', 'ws-menu', (menu) => {
   menu.innerHTML = ''
+  // Zero workspaces: the capsule is how you create the first one, so the menu
+  // must say what it does — a bare input reads as a dead button.
+  if (!wsState.ws.workspaces.length)
+    menuLabel(menu, 'Group the folders you work across into a workspace.')
   menuInput(menu, 'new workspace name…', 'Create', createWorkspace)
   if (wsState.ws.workspaces.length) {
     menuRule(menu)
@@ -262,6 +284,7 @@ wireMenu('ws-chip', 'ws-menu', (menu) => {
   }
   if (activeWorkspace()) {
     menuRule(menu)
+    menuItem(menu, { label: 'Rename workspace…', onClick: renameActiveWorkspace })
     menuItem(menu, { label: 'Add folder to workspace…', onClick: addFolderToActive })
     menuItem(menu, {
       label: `Delete “${activeWorkspace().name}”`,

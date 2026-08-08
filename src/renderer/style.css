@@ -234,6 +234,12 @@ textarea:focus-visible,
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   -webkit-app-region: drag;
   user-select: none;
+  /* backdrop-filter makes this a stacking context painted at z-index 0, which
+     traps the anchored dropdowns (.menu, z-index 100) inside it — #tree, the
+     divider and the dock headers then paint over them. Lift the whole bar so
+     its menus clear the content below; overlays (1000+) still win. */
+  position: relative;
+  z-index: 10;
 }
 #topbar button {
   -webkit-app-region: no-drag;
@@ -673,13 +679,30 @@ body.tree-collapsed #btn-sidebar .chev {
   min-width: 150px;
   max-width: 480px;
   flex: none;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border-right: 1px solid var(--line);
-  padding: 8px 0 20px;
+  padding: 0 0 20px;
   user-select: none;
   background: var(--sidebar);
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+/* slim header inside the navigator — the minimizer lives with what it
+   controls instead of lost in the topbar traffic lights */
+#tree-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 2px;
+  flex: none;
+}
+#tree-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-top: 4px;
 }
 /* full-height drag handle between the tree and the dock — the width itself
    is set by chrome.js while dragging */
@@ -694,18 +717,24 @@ body.tree-collapsed #btn-sidebar .chev {
 #tree-divider.dragging {
   background: var(--accent-ring);
 }
+/* collapsed: the divider shrinks to a grab sliver so drag-to-reopen still
+   works — display:none would leave the rail as the only way back */
 body.tree-collapsed #tree-divider {
-  display: none;
+  width: 3px;
+  margin-left: 0;
 }
 /* minimizer: !important beats the inline width the drag handle sets,
    so releasing the collapse restores whatever width you dragged to */
 body.tree-collapsed #tree {
-  width: 0 !important;
-  min-width: 0;
+  width: 36px !important;
+  min-width: 36px;
   padding-left: 0;
   padding-right: 0;
   border-right-width: 0;
-  overflow: hidden;
+}
+/* collapsed: only the minimizer stays, so the tree can be reopened in place */
+body.tree-collapsed #tree-body {
+  display: none;
 }
 /* the width transition is only armed around a toggle — otherwise it lags the
    drag handle on every pointermove frame */
