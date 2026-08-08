@@ -21,10 +21,15 @@ export class EditorPanel {
       this.element.textContent = `Could not read ${path}: ${err.message}`
       return
     }
+    this.savedText = text
     const lang = LanguageDescription.matchFilename(languages, name)
     const langExt = lang ? await lang.load() : []
     const save = (view) => {
-      tome.fs.writeFile(path, view.state.doc.toString()).then(() => api.setTitle(name))
+      const doc = view.state.doc.toString()
+      tome.fs.writeFile(path, doc).then(() => {
+        this.savedText = doc
+        api.setTitle(name)
+      })
       return true
     }
     const theme = cmTheme()
@@ -37,11 +42,18 @@ export class EditorPanel {
         langExt,
         keymap.of([{ key: 'Mod-s', run: save }]),
         EditorView.updateListener.of((u) => {
-          if (u.docChanged) api.setTitle('● ' + name)
+          if (u.docChanged) {
+            this.dirty = this.view.state.doc.toString() !== this.savedText
+            api.setTitle(this.dirty ? '● ' + name : name)
+          }
         }),
       ],
     })
     this.untheme = theme.attach(this.view)
+  }
+  // Read by panes.js's close guard: closing a dirty editor asks first.
+  isDirty() {
+    return !!this.dirty
   }
   dispose() {
     this.untheme?.()

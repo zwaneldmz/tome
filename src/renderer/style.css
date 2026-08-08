@@ -1287,6 +1287,13 @@ canvas.brain-graph {
   color: var(--text);
   background: var(--hover);
 }
+.ag-btn.danger {
+  color: #fff;
+  background: var(--g-del);
+}
+.ag-btn.danger:hover {
+  box-shadow: 0 0 12px rgba(208, 42, 77, 0.4);
+}
 .ag-err {
   color: var(--g-del);
   font-size: var(--fs-meta);
