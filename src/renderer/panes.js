@@ -16,6 +16,7 @@ import { EditorPanel } from './panels/editor.js'
 import { DocPanel } from './panels/doc.js'
 import { ChatPanel } from './panels/chat.js'
 import { BrainPanel } from './panels/brain.js'
+import { FlowPanel } from './panels/flow.js'
 import { HistoryPanel } from './history.js'
 import { renderStatusbar, setStatusbarDock } from './statusbar.js'
 import { plusIcon, popoutIcon } from './icons.js'
@@ -103,6 +104,8 @@ export const dock = createDockview(document.getElementById('dock'), {
         return new BrainPanel()
       case 'history':
         return new HistoryPanel()
+      case 'flow':
+        return new FlowPanel()
       default:
         return new TerminalPanel()
     }
@@ -435,6 +438,11 @@ function componentOf(panel) {
   if (params.chatId) return 'chat'
   if (params.ws) return 'brain'
   if (params.dir) return 'history'
+  // Must precede the generic path&&mode / bare-path fallthroughs below, or a
+  // flow's params (which are just { path }, same shape as an editor's) get
+  // classified as 'editor' and the panel silently opens the raw JSON on
+  // restore instead of the flow canvas (plan §5).
+  if (params.path?.endsWith('.flow.json')) return 'flow'
   if (params.path && params.mode) return 'doc'
   if (params.path) return 'editor'
   return null
@@ -502,7 +510,10 @@ export async function restoreLayout() {
           const dir = typeof params.dir === 'string' && (await dirExists(params.dir)) ? params.dir : null
           if (dir) spawnHistory(dir, p)
           else removePanel(p)
-        } else if (component === 'editor' || component === 'doc') {
+        } else if (component === 'editor' || component === 'doc' || component === 'flow') {
+          // openFile() re-routes a .flow.json path to the flow component on
+          // its own (see the check added there), so 'flow' needs no branch
+          // of its own here beyond being let through this condition.
           if (typeof params.path === 'string' && (await fileExists(params.path))) {
             if (component === 'doc' && !DOC_MODES.has(params.mode)) removePanel(p)
             else await openFile(params.path, p)
@@ -635,6 +646,14 @@ export async function openFile(path, saved, target, reveal) {
   const name = saved?.title || path.split('/').pop()
   const pos = saved ? { referencePanel: saved.id } : place(target)
   const ext = (name.includes('.') ? name.split('.').pop() : '').toLowerCase()
+
+  // Compound extension — `ext` above is just 'json' — so test the full name.
+  // Must precede the pdf/img/conv checks and the text/binary sniff below, or
+  // a flow file opens as plain text (plan §5).
+  if (name.endsWith('.flow.json')) {
+    return dock.addPanel({ id, component: 'flow', title: name, position: pos, params: { path } })
+  }
+
   const docPanel = (mode) =>
     dock.addPanel({ id, component: 'doc', title: name, position: pos, params: { mode, path } })
 

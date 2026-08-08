@@ -1069,6 +1069,257 @@ body.tree-anim #tree {
   border-color: var(--accent-ring);
 }
 
+/* ---- flow ---- */
+.panel-flow {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+.flow-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.flow-name {
+  color: var(--bright);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flow-meta {
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  white-space: nowrap;
+}
+.flow-open-text {
+  margin-left: auto;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 5px 12px;
+  font: inherit;
+  font-size: var(--fs-meta);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.flow-open-text:hover {
+  border-color: var(--accent-ring);
+  background: var(--accent-soft);
+}
+
+.flow-warning-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--g-mod);
+  background: var(--surface-2);
+  font-size: var(--fs-meta);
+}
+.flow-warning-body {
+  flex: 1;
+  min-width: 0;
+}
+.flow-warning-head {
+  color: var(--g-mod);
+}
+.flow-warning-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+.flow-warning-dismiss {
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: var(--fs-ui);
+  line-height: 1;
+  padding: 0 2px;
+}
+.flow-warning-dismiss:hover {
+  color: var(--text);
+}
+
+.flow-error {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+}
+.flow-error-list {
+  max-width: 460px;
+  color: var(--g-del);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  text-align: left;
+}
+.flow-error button {
+  margin-top: 6px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  padding: 7px 15px;
+  cursor: pointer;
+  font: inherit;
+}
+.flow-error button:hover {
+  border-color: var(--accent-ring);
+}
+
+.flow-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-sunken);
+  cursor: grab;
+  touch-action: none; /* pan owns pointer gestures here — no zoom to share them with */
+}
+.flow-viewport.panning {
+  cursor: grabbing;
+}
+.flow-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* width/height set inline in flow.js to the graph's bounding box; the
+     transform (also inline) carries the pan offset — see applyPan() */
+}
+.flow-edges {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  overflow: visible;
+  pointer-events: none; /* clicks fall through to the viewport so panning still works over a drawn edge */
+}
+.flow-edge-path {
+  fill: none;
+  stroke: var(--line-2);
+  stroke-width: 1.5;
+}
+.flow-edge-label {
+  fill: var(--muted);
+  font-family: var(--sans);
+  font-size: var(--fs-micro);
+}
+
+.flow-node {
+  /* absolute (not relative): placed at the node's x/y within .flow-content,
+     and that alone already makes it the containing block the port columns
+     below position themselves against. */
+  position: absolute;
+  z-index: 1;
+  width: 220px;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-1);
+}
+.flow-node-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.flow-kind-badge {
+  flex: 0 0 auto;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  padding: 1px 6px;
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.flow-node-name {
+  color: var(--bright);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flow-node-body {
+  flex: 1;
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.flow-ports {
+  position: absolute;
+  top: 40px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none; /* v1 has no port interaction — edge drawing is a later slice */
+}
+.flow-ports-in {
+  left: 0;
+  align-items: flex-start;
+}
+.flow-ports-out {
+  right: 0;
+  align-items: flex-end;
+}
+.flow-port {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 128px;
+}
+.flow-port-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--surface);
+}
+.flow-ports-in .flow-port-dot {
+  margin-left: -4px; /* straddle the card's left border — the port belongs to the edge, not the inside */
+}
+.flow-ports-out .flow-port-dot {
+  margin-right: -4px;
+}
+.flow-port-label {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-empty {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  color: var(--muted);
+  font-size: var(--fs-meta);
+}
+
 /* ---- brain ---- */
 .panel-brain {
   height: 100%;
