@@ -104,4 +104,10 @@ contextBridge.exposeInMainWorld('tome', {
   menu: {
     onAction: (cb) => ipcRenderer.on('menu:action', (e, action) => cb(action)),
   },
+  // A popped-out window is trying to close. Main holds it open until close()
+  // is called; never calling it leaves the window where it is.
+  popout: {
+    onCloseRequest: (cb) => ipcRenderer.on('popout:close-request', (e, req) => cb(req)),
+    close: (id) => ipcRenderer.invoke('popout:close', id),
+  },
 })

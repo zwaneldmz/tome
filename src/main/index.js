@@ -316,6 +316,26 @@ function isPopoutUrl(raw) {
   }
 }
 
+// ---- popped-out window close ----
+// Closing a popout asks first (move its panes to the main window, or close
+// them), so the OS close is vetoed until the renderer answers. dockview names
+// each child window after its popout group, and window.open's frameName
+// carries that name here — which is how the renderer maps a BrowserWindow
+// back to the panes inside it.
+const popoutApproved = new Set() // BrowserWindow ids cleared to close
+
+function watchPopout(child, frameName) {
+  child.on('close', (e) => {
+    // never veto during a quit, or once the main window is gone — there would
+    // be nothing left to show the prompt
+    if (popoutApproved.has(child.id) || quitting) return
+    if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
+    e.preventDefault()
+    win.webContents.send('popout:close-request', { id: child.id, name: frameName })
+  })
+  child.on('closed', () => popoutApproved.delete(child.id))
+}
+
 function createWindow() {
   uiTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
   win = new BrowserWindow({
@@ -353,6 +373,7 @@ function createWindow() {
       },
     }
   })
+  win.webContents.on('did-create-window', (child, { frameName }) => watchPopout(child, frameName))
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(process.env.ELECTRON_RENDERER_URL)
     if (process.env.TOME_DEVTOOLS) win.webContents.openDevTools({ mode: 'detach' })
@@ -743,6 +764,15 @@ app.whenReady().then(async () => {
     throw new Error('No viewer for ' + ext)
   })
   ipcMain.handle('shell:openPath', (e, p) => shell.openPath(p))
+
+  // The renderer answered a popout close prompt: let that window go. Not
+  // calling this is how "cancel" works — the window simply stays open.
+  ipcMain.handle('popout:close', (e, id) => {
+    const child = BrowserWindow.fromId(id)
+    if (!child || child.isDestroyed()) return
+    popoutApproved.add(id)
+    child.close()
+  })
 
   // ---- dialogs ----
   ipcMain.handle('dialog:pickFolder', async () => {
