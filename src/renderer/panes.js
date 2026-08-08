@@ -228,12 +228,39 @@ function popout(item, at) {
         const untrack = trackThemedDocument(w.document)
         w.addEventListener('pagehide', untrack, { once: true })
       },
+      onWillClose: ({ id }) => {
+        // The panes are still in the popout group here; dockview hands them
+        // back to the grid as the window tears down. Grab them now, ask once
+        // that has happened. dockview names the window `${dockId}-${groupId}`.
+        const group = dock.groups.find(
+          (g) => g.api.location.type === 'popout' && id.endsWith(`-${g.api.id}`)
+        )
+        const panels = group ? [...group.panels] : []
+        if (panels.length) setTimeout(() => offerToClosePanes(panels), 0)
+      },
     })
   )
     // dockview catches its own failures and resolves false rather than
     // rejecting, so without this a failed tear-off is silent to the user
     .then((ok) => ok === false && toast('could not open a window for that pane'))
     .catch((err) => toast(`could not open a window for that pane: ${err?.message || err}`))
+}
+
+// Closing a popped-out window returns its panes to the main window — the safe
+// default, since closing a window should not destroy work. Offer the other
+// outcome rather than assume it; closing goes through the dirty-editor guard,
+// so an unsaved editor still gets its own confirmation.
+async function offerToClosePanes(panels) {
+  const back = panels.filter((p) => dock.getPanel(p.id))
+  if (!back.length) return
+  const name = (p) => p.title.replace(/^● /, '')
+  const one = back.length === 1
+  const ok = await confirmModal(
+    'Window closed',
+    `${one ? `“${name(back[0])}”` : `${back.length} panes`} moved back to the main window. Close ${one ? 'it' : 'them'} instead?`,
+    one ? 'Close pane' : `Close ${back.length} panes`
+  )
+  if (ok) for (const p of back) closePanel(p)
 }
 
 const outsideWindow = (x, y) =>
