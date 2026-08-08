@@ -43,6 +43,20 @@ export const folderIcon = (open = false) =>
 export const fileIcon = () =>
   svg('M4 1.8 H9 L12 4.8 V13.7 A1.3 1.3 0 0 1 10.7 15 H4 A1.3 1.3 0 0 1 2.7 13.7 V3 A1.3 1.3 0 0 1 4 1.8 Z M8.7 2 V5 H11.7')
 
+// file/folder glyphs shrunk into the top-left so a "+" badge fits bottom-right
+// without the strokes crossing at 16px
+export const newFileIcon = () =>
+  svg([
+    'M3.2 1.2 H6.6 L8.8 3.4 V9.2 A1 1 0 0 1 7.8 10.2 H3.2 A1 1 0 0 1 2.2 9.2 V2.2 A1 1 0 0 1 3.2 1.2 Z',
+    'M6.4 1.4 V3.6 H8.6',
+    'M12 9.6 V14.4 M9.6 12 H14.4',
+  ])
+export const newFolderIcon = () =>
+  svg([
+    'M1.6 4.6 A1 1 0 0 1 2.6 3.6 H4.6 l0.9 1 H8.4 A1 1 0 0 1 9.2 5.4 V8.6 A1 1 0 0 1 8.4 9.4 H2.6 A1 1 0 0 1 1.6 8.6 Z',
+    'M12 9.6 V14.4 M9.6 12 H14.4',
+  ])
+
 // ---- topbar chrome ----
 export const bellIcon = () =>
   svg([
