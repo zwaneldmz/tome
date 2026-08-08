@@ -11,6 +11,7 @@ import { refreshGit } from './git.js'
 // other at module-evaluation time.
 import { renderAll, addFolderToActive } from './menus.js'
 import { confirmModal } from './modals.js'
+import { renderStatusbar } from './statusbar.js'
 
 const treeEl = document.getElementById('tree')
 const JUNK_DIRS = new Set(['node_modules', 'out', 'dist', '.venv', '__pycache__', '.next', 'target'])
@@ -63,6 +64,7 @@ function setActiveRoot(rootPath) {
     h.classList.toggle('active', h.dataset.path === rootPath)
   }
   refreshGit()
+  renderStatusbar()
 }
 
 function emptyState(text, btnLabel, onClick) {

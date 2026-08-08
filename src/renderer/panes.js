@@ -16,6 +16,7 @@ import { DocPanel } from './panels/doc.js'
 import { ChatPanel } from './panels/chat.js'
 import { BrainPanel } from './panels/brain.js'
 import { HistoryPanel } from './history.js'
+import { renderStatusbar, setStatusbarDock } from './statusbar.js'
 import { AGENTS } from '../shared/pane-kinds.js'
 
 class Watermark {
@@ -205,7 +206,11 @@ dock.onWillDragPanel(({ panel }) => armTearOff(panel))
 dock.onWillDragGroup(({ group }) => armTearOff(group))
 
 // conductor: keep the pane snapshot fresh; let the assistant open panes; toast its actions
-const syncPanes = () => tome.panes.sync(dock.panels.map((p) => ({ id: p.id, title: p.title })))
+setStatusbarDock(dock)
+const syncPanes = () => {
+  tome.panes.sync(dock.panels.map((p) => ({ id: p.id, title: p.title })))
+  renderStatusbar()
+}
 dock.onDidAddPanel(syncPanes)
 dock.onDidRemovePanel(syncPanes)
 

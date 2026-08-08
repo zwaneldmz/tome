@@ -5,6 +5,7 @@ import { tome, toast } from './util.js'
 import { agState } from './state.js'
 import { strips } from './regs.js'
 import { modalShell } from './modals.js'
+import { renderStatusbar } from './statusbar.js'
 
 const blockedThrottle = new Map()
 const blockedCounts = new Map() // paneId -> blocked attempts since last click/unlock
@@ -49,6 +50,7 @@ setInterval(() => {
 tome.airgap.onState((s) => {
   Object.assign(agState, s)
   for (const id of strips.keys()) stripRender(id)
+  renderStatusbar()
 })
 tome.airgap.onBlocked(({ paneId, host }) => {
   // the tally counts every attempt; the flash/toast stay throttled per host
