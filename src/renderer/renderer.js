@@ -16,6 +16,7 @@ import { bootAuth } from './lock.js'
 import { bootTheme } from './theme.js'
 import { bootChrome } from './chrome.js'
 import './airgap-ui.js' // wires the air-gap event listeners + strip ticker
+import './keys.js' // the keyboard spine: pane keys, quick open, zoom, reference
 import './style.css'
 
 // ---------- pty / chat / brain fan-out ----------

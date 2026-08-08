@@ -7,6 +7,30 @@ import { terms, strips } from '../regs.js'
 import { onTheme, xtermTheme } from '../theme.js'
 import { stripRender, airgapModal } from '../airgap-ui.js'
 
+// Terminal font size is user-adjustable (⌘=/⌘-/⌘0, handled in keys.js) and
+// persisted so every terminal — current and future — shares it.
+export const TERM_FONT = { default: 12.5, min: 8, max: 28 }
+let termFontSize = TERM_FONT.default
+
+tome.store.get('term-font-size').then((v) => {
+  if (typeof v === 'number' && v >= TERM_FONT.min && v <= TERM_FONT.max) {
+    termFontSize = v
+    for (const term of terms.values()) term.options.fontSize = v
+  }
+})
+
+// delta: +1/-1 to step, 0 to reset. Every live terminal follows, and a
+// resize event nudges each FitAddon to re-measure at the new cell size.
+export function zoomTerminals(delta) {
+  termFontSize =
+    delta === 0
+      ? TERM_FONT.default
+      : Math.min(TERM_FONT.max, Math.max(TERM_FONT.min, termFontSize + delta))
+  for (const term of terms.values()) term.options.fontSize = termFontSize
+  window.dispatchEvent(new window.Event('resize'))
+  tome.store.set('term-font-size', termFontSize)
+}
+
 export class TerminalPanel {
   constructor() {
     this.element = document.createElement('div')
@@ -32,7 +56,7 @@ export class TerminalPanel {
       stripRender(this.ptyId)
     }
     const term = new Terminal({
-      fontSize: 12.5,
+      fontSize: termFontSize,
       fontFamily: "'MesloLGS NF', 'JetBrainsMono Nerd Font', ui-monospace, Menlo, monospace",
       cursorBlink: true,
       theme: xtermTheme(),

@@ -7,6 +7,7 @@ import { addTerminal, addChat, addBrain, openFile } from './panes.js'
 import { confirmModal } from './modals.js'
 import { renderTree } from './tree.js'
 import { refreshGit } from './git.js'
+import { shortcutsModal } from './keys.js'
 
 const allMenus = []
 export function closeMenus(except) {
@@ -262,6 +263,8 @@ export async function populateAddMenu(menu, target) {
       if (p) openFile(p, undefined, target)
     },
   })
+  menuRule(menu)
+  menuItem(menu, { label: 'Keyboard shortcuts', hint: '⌘', onClick: () => shortcutsModal() })
 }
 
 wireMenu('btn-add', 'add-menu', (menu) => populateAddMenu(menu))

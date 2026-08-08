@@ -1633,6 +1633,120 @@ canvas.brain-graph {
   padding: 4px 10px;
 }
 
+/* ================= keyboard: quick open + shortcut reference ================= */
+#qo-overlay,
+#keys-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: var(--scrim);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+.qo-box {
+  width: 560px;
+  max-width: 92vw;
+  margin-top: 14vh;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .qo-box,
+  .keys-box {
+    animation: menupop 200ms var(--spring);
+  }
+}
+.qo-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: var(--fs-read);
+  color: var(--bright);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 13px 16px;
+}
+.qo-input:focus {
+  outline: none;
+}
+.qo-list {
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 6px;
+}
+.qo-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  min-width: 0;
+}
+.qo-row.sel {
+  background: var(--accent-soft);
+}
+.qo-row.sel .qo-name {
+  color: var(--accent);
+}
+.qo-name {
+  color: var(--bright);
+  font-size: var(--fs-ui);
+  white-space: nowrap;
+}
+.qo-dir {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl; /* ellipsize the front of long paths, keep the tail */
+}
+.qo-empty {
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  padding: 10px 12px;
+}
+.keys-box {
+  width: 480px;
+  margin-top: 12vh;
+}
+.keys-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: 10px 18px;
+  align-items: center;
+}
+.keys-col {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.keys-desc {
+  color: var(--text);
+  font-size: var(--fs-meta);
+}
+kbd {
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  color: var(--bright);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  border-radius: var(--r-xs);
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+
 /* ================= popped-out pane windows ================= */
 /* dockview clones the app stylesheet into the popout document; the pane fills
    it edge to edge with no topbar, so no card chrome either */
