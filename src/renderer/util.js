@@ -23,4 +23,11 @@ export function toast(msg, kind = 'err') {
   toasts.appendChild(t)
   setTimeout(() => t.classList.add('out'), 4200)
   setTimeout(() => t.remove(), 4800)
+  // Screen readers only announce live-region *changes* — clear then re-fill on
+  // the next tick so back-to-back identical toasts each get spoken.
+  const live = document.getElementById('sr-live')
+  if (live) {
+    live.textContent = ''
+    setTimeout(() => (live.textContent = String(msg)), 50)
+  }
 }

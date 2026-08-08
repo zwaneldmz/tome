@@ -100,6 +100,13 @@ function setupScreen(tome, toast, resolve) {
   p2.placeholder = 'repeat passphrase'
   const set = el('button', 'ag-btn primary', 'Set passphrase')
   const skip = el('button', 'ag-btn ghost', 'Skip for now')
+  const dismiss = () => {
+    root.remove()
+    resolve()
+  }
+  // Escape is the skip path — only on setup. The lock screen itself has no
+  // Escape handler: it stays until unlocked.
+  root.addEventListener('keydown', (e) => e.key === 'Escape' && (e.preventDefault(), dismiss()))
   set.addEventListener('click', async () => {
     if (p1.value.length < 8) return (err.textContent = 'Too short — 8 characters minimum.')
     if (p1.value !== p2.value) return (err.textContent = 'Passphrases differ.')
@@ -109,10 +116,7 @@ function setupScreen(tome, toast, resolve) {
     root.remove()
     resolve()
   })
-  skip.addEventListener('click', () => {
-    root.remove()
-    resolve()
-  })
+  skip.addEventListener('click', dismiss)
   body.append(p1, p2, set, skip)
   setTimeout(() => p1.focus(), 0)
 }

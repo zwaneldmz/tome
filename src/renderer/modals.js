@@ -4,20 +4,56 @@ import { el } from './util.js'
 
 export function modalShell(title) {
   document.getElementById('ag-overlay')?.remove()
+  const prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   const overlay = el('div')
   overlay.id = 'ag-overlay'
+  overlay.setAttribute('role', 'dialog')
+  overlay.setAttribute('aria-modal', 'true')
+  overlay.setAttribute('aria-label', title)
   const box = el('div', 'ag-box')
   const h = el('h3', '', title)
   const body = el('div', 'ag-body')
   const err = el('div', 'ag-err')
   box.append(h, body, err)
   overlay.appendChild(box)
-  overlay.addEventListener('click', (e) => e.target === overlay && overlay.remove())
   document.body.appendChild(overlay)
+
+  // Focus trap: Tab cycles within the box, Escape closes like the overlay
+  // click does, and closing hands focus back to whatever had it before.
+  const FOCUSABLE = 'button:not(:disabled), input, select, textarea, [tabindex]'
+  let closed = false
+  const close = () => {
+    if (closed) return
+    closed = true
+    overlay.remove()
+    prevFocus?.focus()
+  }
+  overlay.addEventListener('click', (e) => e.target === overlay && close())
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      close()
+      return
+    }
+    if (e.key === 'Tab') {
+      const f = [...overlay.querySelectorAll(FOCUSABLE)].filter((n) => !n.closest('.hidden'))
+      if (!f.length) return
+      const first = f[0]
+      const last = f[f.length - 1]
+      if (e.shiftKey && (document.activeElement === first || !overlay.contains(document.activeElement))) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && (document.activeElement === last || !overlay.contains(document.activeElement))) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+  })
+  setTimeout(() => overlay.querySelector(FOCUSABLE)?.focus(), 0)
   return {
     body,
     err,
-    close: () => overlay.remove(),
+    close,
     input(placeholder, type = 'password') {
       const i = el('input')
       i.type = type

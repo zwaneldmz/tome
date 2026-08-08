@@ -16,13 +16,13 @@
         <span class="chev">⇤</span>
       </button>
       <div class="chip-wrap">
-        <button id="ws-chip" title="Workspace" aria-haspopup="true">
+        <button id="ws-chip" title="Workspace" aria-label="Workspace" aria-haspopup="true">
           <span class="sigil">▚</span><span id="ws-name">no workspace</span><span class="caret">▾</span>
         </button>
         <div id="ws-menu" class="menu hidden" role="menu"></div>
       </div>
       <div class="chip-wrap">
-        <button id="git-chip" class="hidden" title="Git branch" aria-haspopup="true">
+        <button id="git-chip" class="hidden" title="Git branch" aria-label="Git branch" aria-haspopup="true">
           <span class="gly">⎇</span><span id="git-branch"></span>
         </button>
         <div id="git-menu" class="menu hidden" role="menu"></div>
@@ -31,11 +31,13 @@
       <div class="spacer"></div>
       <button id="btn-theme" class="icon-btn" title="Appearance" aria-label="Appearance">◐</button>
       <div class="chip-wrap">
-        <button id="btn-notifs" class="icon-btn" title="Notifications" aria-haspopup="true">♪</button>
+        <button id="btn-notifs" class="icon-btn" title="Notifications" aria-label="Notifications" aria-haspopup="true">
+          ♪
+        </button>
         <div id="notifs-menu" class="menu hidden" role="menu"></div>
       </div>
       <div class="chip-wrap">
-        <button id="btn-add" class="icon-btn" title="New pane" aria-haspopup="true">
+        <button id="btn-add" class="icon-btn" title="New pane" aria-label="New pane" aria-haspopup="true">
           <span class="plus">＋</span>
         </button>
         <div id="add-menu" class="menu hidden" role="menu"></div>
@@ -46,6 +48,7 @@
       <main id="dock"></main>
     </div>
     <div id="toasts"></div>
+    <div id="sr-live" class="visually-hidden" aria-live="polite" role="status"></div>
     <script type="module" src="./renderer.js"></script>
   </body>
 </html>
