@@ -5,9 +5,15 @@ import { el } from './util.js'
 // `onClose` fires however the modal goes away — a button, Escape, or a click
 // on the scrim — so a caller awaiting a choice always gets an answer instead
 // of a promise that never settles.
-export function modalShell(title, onClose) {
-  document.getElementById('ag-overlay')?.remove()
-  const prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+// `doc` targets another document — a popped-out pane lives in its own window,
+// and a prompt about that window belongs in it, not back in the main one.
+// dockview copies the app's stylesheets into every popout, so the modal is
+// styled there; nodes made with the main document's createElement are adopted
+// on append.
+export function modalShell(title, onClose, doc = document) {
+  doc.getElementById('ag-overlay')?.remove()
+  const active = doc.activeElement
+  const prevFocus = active && typeof active.focus === 'function' ? active : null
   const overlay = el('div')
   overlay.id = 'ag-overlay'
   overlay.setAttribute('role', 'dialog')
@@ -19,7 +25,7 @@ export function modalShell(title, onClose) {
   const err = el('div', 'ag-err')
   box.append(h, body, err)
   overlay.appendChild(box)
-  document.body.appendChild(overlay)
+  doc.body.appendChild(overlay)
 
   // Focus trap: Tab cycles within the box, Escape closes like the overlay
   // click does, and closing hands focus back to whatever had it before.
@@ -44,10 +50,10 @@ export function modalShell(title, onClose) {
       if (!f.length) return
       const first = f[0]
       const last = f[f.length - 1]
-      if (e.shiftKey && (document.activeElement === first || !overlay.contains(document.activeElement))) {
+      if (e.shiftKey && (doc.activeElement === first || !overlay.contains(doc.activeElement))) {
         e.preventDefault()
         last.focus()
-      } else if (!e.shiftKey && (document.activeElement === last || !overlay.contains(document.activeElement))) {
+      } else if (!e.shiftKey && (doc.activeElement === last || !overlay.contains(doc.activeElement))) {
         e.preventDefault()
         first.focus()
       }
@@ -100,9 +106,9 @@ export function promptModal(title, placeholder, initial = '', submitLabel = 'Sav
 // More than two ways forward (close a popout's panes, or move them here…).
 // Resolves the chosen value, or null when dismissed — Escape and the scrim
 // mean "do nothing", same as Cancel.
-export function choiceModal(title, note, choices) {
+export function choiceModal(title, note, choices, doc) {
   return new Promise((resolve) => {
-    const m = modalShell(title, () => resolve(null))
+    const m = modalShell(title, () => resolve(null), doc)
     if (note) m.note(note)
     for (const c of choices)
       m.button(
@@ -119,9 +125,9 @@ export function choiceModal(title, note, choices) {
 
 // Small yes/no gate for destructive or lossy actions (close a dirty editor,
 // delete a workspace, …). Resolves true only when the user confirms.
-export function confirmModal(title, note, confirmLabel = 'Confirm') {
+export function confirmModal(title, note, confirmLabel = 'Confirm', doc) {
   return new Promise((resolve) => {
-    const m = modalShell(title)
+    const m = modalShell(title, undefined, doc)
     if (note) m.note(note)
     const done = (v) => {
       m.close()

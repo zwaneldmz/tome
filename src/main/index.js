@@ -409,6 +409,10 @@ app.whenReady().then(async () => {
     'airgap:state',
     'store:get',
     'store:set',
+    // Closing a window the user already asked to close is not privileged, and
+    // gating it deadlocks: main vetoes the close until the renderer answers,
+    // so a locked app would leave a popout window that cannot be closed.
+    'popout:close',
   ])
   // TOME_SHOT is a dev/screenshot affordance — an env var that bypasses the
   // lock gate must never ship in packaged builds.
@@ -867,6 +871,21 @@ function buildMenu() {
         { role: 'unhide' },
         { type: 'separator' },
         { role: 'quit' },
+      ],
+    },
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Save',
+          accelerator: 'CmdOrCtrl+S',
+          click: send({ id: 'save' }),
+        },
+        {
+          label: 'Save All',
+          accelerator: 'CmdOrCtrl+Alt+S',
+          click: send({ id: 'save-all' }),
+        },
       ],
     },
     {
