@@ -5,6 +5,7 @@ import { prefs, wsState } from './state.js'
 import { activeWorkspace, saveWs, renderWsChip } from './workspaces.js'
 import { addTerminal, addChat, addBrain, openFile } from './panes.js'
 import { confirmModal } from './modals.js'
+import { renderStatusbar } from './statusbar.js'
 import { renderTree } from './tree.js'
 import { refreshGit } from './git.js'
 import { shortcutsModal } from './keys.js'
@@ -213,6 +214,7 @@ export function renderAll() {
   renderWsChip()
   renderTree()
   refreshGit()
+  renderStatusbar()
 }
 
 export async function addFolderToActive() {

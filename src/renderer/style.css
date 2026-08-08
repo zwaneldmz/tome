@@ -584,8 +584,47 @@ body.tree-collapsed #btn-sidebar .chev {
 /* ================= layout ================= */
 #body {
   display: flex;
-  height: calc(100% - 44px);
+  height: calc(100% - 44px - 26px); /* topbar + statusbar */
   background: var(--bg-sunken);
+}
+
+/* ================= status bar ================= */
+#statusbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 26px;
+  padding: 0 12px;
+  border-top: 1px solid var(--line);
+  background: var(--chrome);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  user-select: none;
+  white-space: nowrap;
+}
+#statusbar .sb-item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+#statusbar .sb-spacer {
+  flex: 1;
+}
+#statusbar .sb-item:empty {
+  display: none;
+}
+#sb-root {
+  font-family: var(--mono);
+}
+#sb-airgap.sb-open {
+  color: var(--spark);
+}
+#sb-airgap.sb-shut {
+  color: var(--accent);
 }
 #tree {
   width: 236px;
@@ -742,7 +781,7 @@ body.tree-anim #tree {
   --dv-inactivegroup-visiblepanel-tab-color: var(--text);
   --dv-inactivegroup-hiddenpanel-tab-background-color: var(--surface-2);
   --dv-inactivegroup-hiddenpanel-tab-color: var(--muted);
-  --dv-separator-border: transparent;
+  --dv-separator-border: var(--line);
   --dv-sash-color: transparent;
   --dv-active-sash-color: var(--accent);
   --dv-active-sash-transition-duration: 0.12s;

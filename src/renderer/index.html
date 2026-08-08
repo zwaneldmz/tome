@@ -46,6 +46,12 @@
       <div id="tree-divider" title="Drag to resize the sidebar"></div>
       <main id="dock"></main>
     </div>
+    <footer id="statusbar" aria-label="Status">
+      <span id="sb-root" class="sb-item" title="Active root — new panes and git follow this folder"></span>
+      <span class="sb-spacer"></span>
+      <span id="sb-panes" class="sb-item" title="Open panes"></span>
+      <span id="sb-airgap" class="sb-item sb-net" title="Air-gap network state"></span>
+    </footer>
     <div id="toasts"></div>
     <div id="sr-live" class="visually-hidden" aria-live="polite" role="status"></div>
     <script type="module" src="./renderer.js"></script>
