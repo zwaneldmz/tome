@@ -69,6 +69,20 @@
 
 **Summary:** Tome looks and thinks like a mature tool — but operates like a mouse-driven prototype. Give it a keyboard spine and safety rails first; everything else is refinement.
 
-## Execution log
-- WS1 (P0 safety rails): dirty close guard, destructive confirms, passphrase min — see git history.
-- WS2 (keyboard core), WS3 (a11y menus/modals), WS4 (chat markdown), WS5 (discoverability polish) — delegated to headless subagents, verified with build+test after each.
+## Execution log — **COMPLETE** (2026-08-08)
+
+All P0 + P1 items shipped. Build green, 228/228 tests green, app boots clean (TOME_SHOT smoke).
+
+| WS | Scope | How | Status |
+|----|-------|-----|--------|
+| WS1 | 🔴 P0 safety rails: dirty-editor close guard, destructive-action confirms (delete workspace / remove folder), air-gap passphrase min 4→8 | orchestrator (main) | ✅ merged `17fbafd` |
+| WS2 | 🔴 P0 keyboard spine: ⌘W close (via shared close-guard), ⌘1–9 tabs, ⌘⇧[/] cycle, ⌘P quick-open fuzzy palette, terminal zoom ⌘=/-/0 (persisted), shortcut-reference modal | subagent `ux2-keys` | ✅ merged `8dce27e` |
+| WS3 | 🟠 P1 a11y: menu arrow/Esc nav + `aria-expanded`, modal focus-trap + Esc + focus restore, aria-labels on glyph buttons, `aria-live` toast region, focus rings | subagent `ux3-a11y` | ✅ merged `2ea139d` |
+| WS4 | 🟠 P1 chat: dependency-free safe markdown (code blocks + copy button, headings, lists, inline code, bold/italic), streaming typing indicator + elapsed, stop-button focus | subagent `ux4-chat` | ✅ merged `f7fa180` (style.css conflict resolved — kept both appended blocks) |
+| WS5 | 🟠 P1 discoverability: group ＋/⧉ visible at rest (0.4 opacity), full-height sidebar drag divider (persisted width, replaces 16px corner grip), air-gap copy de-jargoned, blocked-count tally on strip, richer tooltips | subagent `ux5-polish` | ✅ merged `98ba896` (index.html + panes.js conflicts resolved — merged aria-labels with richer tooltips) |
+
+**Integration note:** WS2 refactored WS1's click-only close-guard into a shared `closePanel()` in `panes.js` used by both the tab ✕ and ⌘W — one confirm path.
+
+**Method:** WS1 done directly (touches shared `panes.js`/`menus.js`); WS2–WS5 dispatched as 4 parallel headless `pi -p` subagents in isolated `git worktree`s, merged sequentially with build+test after each. Two additive CSS/markup conflicts resolved by keeping both sides and merging aria + tooltip attributes.
+
+**Deferred (P2, not yet done):** ⌘, Preferences pane (#9), native macOS menu bar (#4 — partly obviated by the in-app shortcut reference), chat persistence + drag-drop open (#11), status bar / SVG icon set / light-mode pane separators (#12).
