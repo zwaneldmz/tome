@@ -551,24 +551,37 @@ function targetCwd(target) {
 }
 
 export function addTerminal(kind, target) {
-  spawnTerminal({ kind, cwd: targetCwd(target), target })
+  return spawnTerminal({ kind, cwd: targetCwd(target), target })
 }
 
-// Shared by the ＋ menus and layout restore. `saved` carries the persisted
-// id/title when recreating a pane from a stored layout.
-function spawnTerminal({ kind, cwd, airgap, wsName, saved, target }) {
+// Shared by the ＋ menus, layout restore, and flow Run (flow.js — it needs
+// the returned panel to read back .group so subsequent nodes in the same run
+// stack as tabs alongside the first). `saved` carries the persisted id/title
+// when recreating a pane from a stored layout.
+export function spawnTerminal({ kind, cwd, airgap, wsName, saved, target }) {
   const id = `pty-${++counters.seq}`
   cwd = cwd || paneCwd()
   const name = cwd.split('/').pop() || cwd
   const isAgent = kind !== 'terminal'
   const gapped = airgap !== undefined ? !!airgap : isAgent && prefs.airgapDefault
-  dock.addPanel({
+  return dock.addPanel({
     id,
     component: 'terminal',
     title: saved?.title || (isAgent ? `${gapped ? '⛨ ' : ''}${kind} — ${name}` : `zsh — ${name}`),
     position: saved ? { referencePanel: saved.id } : place(target),
     params: { ptyId: id, kind, cwd, airgap: gapped, ws: wsName ?? activeWorkspace()?.name },
   })
+}
+
+// A flow's Run action types a node's bootstrap prompt into its freshly
+// spawned terminal via this — and ONLY this. It never appends '\r'. This is
+// the same no-auto-submit contract as the conductor's type_in_terminal with
+// auto-run off (see conductor.js's allowRun gate): the user reviews what
+// landed in the prompt and presses Enter themselves. Flows v1 has no
+// allowRun-equivalent override — there is no path in this codebase that
+// makes a flow submit a command on the user's behalf (plan §4).
+export function typeIntoPanel(panel, text) {
+  tome.pty.write(panel.params.ptyId, text)
 }
 
 export function addChat(target) {

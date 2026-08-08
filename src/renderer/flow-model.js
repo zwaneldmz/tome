@@ -166,6 +166,23 @@ function handoffPath(flowName, nodeId, outputName) {
   return `.tome/flows/${flowName}/${nodeId}-${outputName}.md`
 }
 
+// Where Run spawns its terminals. composeBootstrapPrompt's handoff paths
+// (".tome/flows/<name>/<node>-<output>.md") are relative to whatever folder
+// contains this flow's own ".tome" — not to the flow.json's own folder,
+// which is two levels deeper (".tome/flows/"). A flow saved under a
+// workspace's .tome walks back up to that workspace root; a hand-placed
+// flow.json that was never put under a .tome at all (e.g. a test fixture, or
+// one dragged in from elsewhere) falls back to its own directory so Run
+// still has *some* cwd to spawn into, even though the handoff paths it types
+// won't resolve to anything meaningful in that case.
+export function flowRoot(path) {
+  const marker = '/.tome/'
+  const i = path.indexOf(marker)
+  if (i !== -1) return path.slice(0, i)
+  const slash = path.lastIndexOf('/')
+  return slash === -1 ? '.' : path.slice(0, slash)
+}
+
 // Builds the text pasted into a freshly spawned agent terminal when a flow
 // runs (plan §2.5 step 3). File-based handoff — rather than any new IPC or
 // inter-pty channel — is deliberate: it works with unmodified agent CLIs

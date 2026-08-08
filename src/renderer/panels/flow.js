@@ -6,8 +6,8 @@
 // add/delete, save + dirty guard, and a live disk-change watch. Run (§2.5)
 // is still a later commit.
 import { tome, el, toast } from '../util.js'
-import { validateFlow, addNode, addEdge, edgeError } from '../flow-model.js'
-import { dock } from '../panes.js'
+import { validateFlow, addNode, addEdge, edgeError, topoSort, composeBootstrapPrompt, flowRoot } from '../flow-model.js'
+import { dock, spawnTerminal, typeIntoPanel } from '../panes.js'
 import { modalShell, confirmModal } from '../modals.js'
 import { AGENTS } from '../../shared/pane-kinds.js'
 
@@ -271,10 +271,13 @@ export class FlowPanel {
     const saveBtn = el('button', 'flow-save', 'Save')
     saveBtn.type = 'button'
     saveBtn.addEventListener('click', () => this.save())
+    const runBtn = el('button', 'flow-run', 'Run')
+    runBtn.type = 'button'
+    runBtn.addEventListener('click', () => this.runFlow())
     const openText = el('button', 'flow-open-text', 'Open as text')
     openText.type = 'button'
     openText.addEventListener('click', () => this.openAsText())
-    actions.append(addBtn, saveBtn, openText)
+    actions.append(addBtn, saveBtn, runBtn, openText)
     bar.appendChild(actions)
     return bar
   }
@@ -884,6 +887,72 @@ export class FlowPanel {
     this.diskConflict = false
     this.clearDirty()
     this.refreshWarningStrip()
+  }
+
+  // Run (plan §2.5): topo-sort the graph, spawn one terminal per node stacked
+  // as tabs in a single group, and type each node's bootstrap prompt into its
+  // terminal. Runs the IN-MEMORY graph, not a re-read of the file — Save is a
+  // separate, deliberate action, and what you see on the canvas (possibly
+  // ahead of disk) is what a run should reflect.
+  async runFlow() {
+    if (!this.flow) return
+    if (this.flow.nodes.length === 0) {
+      toast('this flow has no nodes')
+      return
+    }
+    const order = topoSort(this.flow)
+    if (!order) {
+      toast('flow has a cycle — cannot run')
+      return
+    }
+
+    // composeBootstrapPrompt's handoff paths are relative to the folder that
+    // contains this flow's own .tome — not to the flow.json's own folder,
+    // which sits two levels deeper (.tome/flows/). flowRoot derives that
+    // folder from this panel's path so the spawned agents' cwd lines up with
+    // the paths their prompts tell them to read and write.
+    const root = flowRoot(this.path)
+    try {
+      // Agents write their handoff outputs here as soon as they finish, so
+      // the directory needs to exist before any prompt referencing it is
+      // typed — not lazily created by whichever node happens to finish first.
+      await tome.fs.mkdir(`${root}/.tome/flows/${this.flow.name}`)
+    } catch (err) {
+      toast(`could not prepare handoff folder: ${err.message}`)
+      return
+    }
+
+    // First node spawns normally; every node after it targets the first
+    // node's group so a run lands as tabs in one place instead of scattering
+    // across the grid (mirrors how conductor-opened panes join the asking
+    // pane's group — see groupTarget in panes.js). Passing no explicit
+    // `airgap` here means each node gets exactly the same default spawnTerminal
+    // already applies everywhere else: plain 'terminal' nodes un-gapped,
+    // agent kinds gapped per prefs.airgapDefault (plan's Air-gap note) —
+    // Run must not special-case or bypass that.
+    let group
+    order.forEach((node, i) => {
+      const panel = spawnTerminal({ kind: node.kind, cwd: root, target: group ? { group } : undefined })
+      if (!group) group = panel.group
+
+      // The pty spawns asynchronously and an agent CLI takes a beat to print
+      // its own startup banner before it's actually reading stdin. Bytes
+      // written earlier than that aren't lost — the kernel buffers pty
+      // input — but they can land interleaved with the CLI's own boot output
+      // and arrive garbled. A real readiness signal (wait for a shell
+      // prompt, or the pty's first pty:data) is future work; v1 uses a fixed,
+      // per-node-staggered delay instead. That's an acceptable tradeoff only
+      // because nothing here auto-submits (see typeIntoPanel in panes.js) —
+      // the user reviews every prompt before pressing Enter, so a garbled
+      // paste is visible and correctable, never dangerous.
+      const delay = 1500 + i * 400
+      setTimeout(() => typeIntoPanel(panel, composeBootstrapPrompt(this.flow, node)), delay)
+    })
+
+    toast(
+      `flow "${this.flow.name}" — ${order.length} terminal${order.length === 1 ? '' : 's'} spawned; review and submit each prompt yourself`,
+      'ok'
+    )
   }
 
   // A file changed on disk. Our own save trips the watcher too, so compare
