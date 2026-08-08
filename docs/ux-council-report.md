@@ -85,4 +85,22 @@ All P0 + P1 items shipped. Build green, 228/228 tests green, app boots clean (TO
 
 **Method:** WS1 done directly (touches shared `panes.js`/`menus.js`); WS2–WS5 dispatched as 4 parallel headless `pi -p` subagents in isolated `git worktree`s, merged sequentially with build+test after each. Two additive CSS/markup conflicts resolved by keeping both sides and merging aria + tooltip attributes.
 
-**Deferred (P2, not yet done):** ⌘, Preferences pane (#9), native macOS menu bar (#4 — partly obviated by the in-app shortcut reference), chat persistence + drag-drop open (#11), status bar / SVG icon set / light-mode pane separators (#12).
+## P2 execution — **COMPLETE** (2026-08-08)
+
+All four P2 tracks shipped. Build green, tests green (0 failures), app boots clean (TOME_SHOT smoke).
+
+| WS | Scope | How | Status |
+|----|-------|-----|--------|
+| WS9 | Status bar (active root · open-pane count · air-gap network state) + light-mode pane separators (`--dv-separator-border: var(--line)`) | orchestrator (main) | ✅ `24f4bb3` |
+| WS6 | **⌘, Preferences modal** (`preferences.js`): Appearance picker, terminal font stepper (shared `term-font-size` key, live via `setTermFontSize`), Security toggles + 2FA enroll, sidebar-width reset. Opened via ⌘, and ＋ menu | subagent `p2-prefs` | ✅ `c63bf35` |
+| WS7 | **Chat persistence** (transcript → `chat-log-<chatId>`, debounced, capped 100, replayed via safe markdown; restored panes keep their chatId) + **drag-and-drop file open** (`webUtils.getPathForFile`, accent drop-highlight, gated on Files) | subagent `p2-chat` | ✅ `dbd1cb1` |
+| WS8 | **Native macOS menu bar** (darwin-only, `Menu.buildFromTemplate`): app/Edit/View/Window/Pane menus; custom items → single `menu:action` IPC → `menu-bridge.js` dispatch table reusing existing functions; ⌘B/⌘W/⌘P/⌘, now native accelerators | subagent `p2-menu` | ✅ `e302a86` |
+
+**Integration resolutions (orchestrator):**
+- WS6 vs WS8 both built a ⌘, Preferences → kept WS6's full `preferences.js`; rewired WS8's `menu-bridge.js` to call it and deleted WS8's smaller duplicate modal.
+- WS8 removed the renderer ⌘W/⌘P/⌘, keydown handlers (now native menu accelerators routed via menu-bridge); pruned the then-unused `preferencesModal` import from `keys.js`.
+- WS7 fixed a latent bug: restored chat panes previously got a fresh chatId, orphaning the layout shell — they now reuse `saved.params.chatId`.
+
+**Test-count note:** earlier "76/190/228" figures were vitest globbing duplicate test files inside leftover `.claude/worktrees/*`. The tracked suite (`test/`, 4 files) passes with **0 failures** throughout.
+
+**Remaining (out of scope / future):** inline SVG icon set (deferred — Unicode glyphs retained as brand); status-bar per-panel metadata (line/col for editors); menu-bar live radio state for Appearance (currently opens the picker).
