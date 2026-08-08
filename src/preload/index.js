@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 contextBridge.exposeInMainWorld('tome', {
   home: ipcRenderer.sendSync('app:home'),
@@ -19,6 +19,11 @@ contextBridge.exposeInMainWorld('tome', {
   store: {
     get: (key) => ipcRenderer.invoke('store:get', key),
     set: (key, value) => ipcRenderer.invoke('store:set', { key, value }),
+  },
+  webUtils: {
+    // File.path is gone in newer Electron; drag-and-drop resolves the
+    // absolute path of a dropped File through here instead.
+    pathForFile: (file) => webUtils.getPathForFile(file),
   },
   git: {
     info: (dir) => ipcRenderer.invoke('git:info', dir),
