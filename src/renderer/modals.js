@@ -38,3 +38,18 @@ export function modalShell(title) {
     },
   }
 }
+
+// Small yes/no gate for destructive or lossy actions (close a dirty editor,
+// delete a workspace, …). Resolves true only when the user confirms.
+export function confirmModal(title, note, confirmLabel = 'Confirm') {
+  return new Promise((resolve) => {
+    const m = modalShell(title)
+    if (note) m.note(note)
+    const done = (v) => {
+      m.close()
+      resolve(v)
+    }
+    m.button(confirmLabel, () => done(true), 'danger')
+    m.button('Cancel', () => done(false), 'ghost')
+  })
+}

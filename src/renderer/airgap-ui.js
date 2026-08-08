@@ -119,7 +119,7 @@ function setupModal(paneId) {
   const p1 = m.input('passphrase')
   const p2 = m.input('repeat passphrase')
   m.button('Set passphrase', async () => {
-    if (p1.value.length < 4) return (m.err.textContent = 'Too short.')
+    if (p1.value.length < 8) return (m.err.textContent = 'Too short — 8 characters minimum.')
     if (p1.value !== p2.value) return (m.err.textContent = 'Passphrases differ.')
     const r = await tome.airgap.setup(p1.value)
     if (!r.ok) return (m.err.textContent = r.error)

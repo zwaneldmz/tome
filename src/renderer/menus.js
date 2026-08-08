@@ -4,6 +4,7 @@ import { tome, toast, el, notifLog } from './util.js'
 import { prefs, wsState } from './state.js'
 import { activeWorkspace, saveWs, renderWsChip } from './workspaces.js'
 import { addTerminal, addChat, addBrain, openFile } from './panes.js'
+import { confirmModal } from './modals.js'
 import { renderTree } from './tree.js'
 import { refreshGit } from './git.js'
 
@@ -183,7 +184,14 @@ wireMenu('ws-chip', 'ws-menu', (menu) => {
     menuItem(menu, { label: 'Add folder to workspace…', onClick: addFolderToActive })
     menuItem(menu, {
       label: `Delete “${activeWorkspace().name}”`,
-      onClick: () => {
+      onClick: async () => {
+        const name = activeWorkspace().name
+        const ok = await confirmModal(
+          `Delete “${name}”?`,
+          'The workspace and its saved layout are removed. Its folders on disk are not touched.',
+          'Delete workspace'
+        )
+        if (!ok) return
         wsState.ws.workspaces.splice(wsState.ws.active, 1)
         wsState.ws.active = wsState.ws.workspaces.length ? 0 : -1
         wsState.activeRoot = activeWorkspace()?.folders[0] || null

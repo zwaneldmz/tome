@@ -10,6 +10,7 @@ import { refreshGit } from './git.js'
 // the menus <-> tree import cycle is safe because neither side calls the
 // other at module-evaluation time.
 import { renderAll, addFolderToActive } from './menus.js'
+import { confirmModal } from './modals.js'
 
 const treeEl = document.getElementById('tree')
 const JUNK_DIRS = new Set(['node_modules', 'out', 'dist', '.venv', '__pycache__', '.next', 'target'])
@@ -91,8 +92,14 @@ export function renderTree() {
     label.title = folder
     const rm = el('button', 'root-rm', '×')
     rm.title = 'Remove folder from workspace'
-    rm.addEventListener('click', (e) => {
+    rm.addEventListener('click', async (e) => {
       e.stopPropagation()
+      const ok = await confirmModal(
+        `Remove “${folder.split('/').pop() || folder}” from “${w.name}”?`,
+        'The folder stays on disk; it only leaves this workspace.',
+        'Remove folder'
+      )
+      if (!ok) return
       w.folders = w.folders.filter((f) => f !== folder)
       if (wsState.activeRoot === folder) wsState.activeRoot = w.folders[0] || null
       saveWs()

@@ -8,6 +8,7 @@ import { prefs, counters } from './state.js'
 import { activeWorkspace, paneCwd } from './workspaces.js'
 import { wsState } from './state.js'
 import { floatingMenu, populateAddMenu } from './menus.js'
+import { confirmModal } from './modals.js'
 import { trackThemedDocument } from './theme.js'
 import { TerminalPanel } from './panels/terminal.js'
 import { EditorPanel } from './panels/editor.js'
@@ -89,6 +90,51 @@ export const dock = createDockview(document.getElementById('dock'), {
 })
 window.addEventListener('resize', () =>
   dock.layout(dock.element.parentElement.clientWidth, dock.element.parentElement.clientHeight)
+)
+
+// ---------- close guard ----------
+// Panels expose isDirty() (editors do); closing one asks before discarding.
+// Programmatic removes (layout restore, conductor) set bypassCloseGuard first.
+let bypassCloseGuard = false
+export const removePanel = (p) => {
+  bypassCloseGuard = true
+  try {
+    dock.removePanel(p)
+  } finally {
+    bypassCloseGuard = false
+  }
+}
+
+// The default tab's close affordance is .dv-default-tab-action (it honours
+// defaultPrevented, so a capture-phase preventDefault vetoes the close).
+// Tab DOM order matches group.panels order.
+function dirtyPanelFromTabAction(action) {
+  const tabEl = action.closest('.dv-default-tab')?.parentElement
+  if (!tabEl?.classList.contains('dv-tab')) return null
+  const groupEl = tabEl.closest('.dv-groupview')
+  const group = dock.groups.find((g) => groupEl?.contains(g.element) || g.element === groupEl)
+  if (!group) return null
+  const idx = [...tabEl.parentElement.querySelectorAll(':scope > .dv-tab')].indexOf(tabEl)
+  return group.panels[idx] || null
+}
+
+document.addEventListener(
+  'click',
+  (e) => {
+    if (bypassCloseGuard || !(e.target instanceof Element)) return
+    const action = e.target.closest('.dv-default-tab-action')
+    if (!action) return
+    const panel = dirtyPanelFromTabAction(action)
+    const view = panel?.view?.content
+    if (typeof view?.isDirty !== 'function' || !view.isDirty()) return
+    e.preventDefault()
+    confirmModal(
+      'Discard unsaved changes?',
+      `“${panel.title.replace(/^● /, '')}” has changes that have not been saved. Closing it discards them.`,
+      'Discard'
+    ).then((ok) => ok && removePanel(panel))
+  },
+  true
 )
 
 // ---------- tear-off: drag a pane past the window edge ----------
@@ -260,7 +306,7 @@ export async function restoreLayout() {
   }
   for (const p of stale) {
     try {
-      dock.removePanel(p)
+      removePanel(p)
     } catch {}
   }
   try {
@@ -275,20 +321,20 @@ export async function restoreLayout() {
           spawnChat(p)
         } else if (component === 'brain') {
           if (wsState.ws.workspaces.some((x) => x.name === params.ws)) spawnBrain(params.ws, p)
-          else dock.removePanel(p) // workspace gone — skip
+          else removePanel(p) // workspace gone — skip
         } else if (component === 'history') {
           const dir = typeof params.dir === 'string' && (await dirExists(params.dir)) ? params.dir : null
           if (dir) spawnHistory(dir, p)
-          else dock.removePanel(p)
+          else removePanel(p)
         } else if (component === 'editor' || component === 'doc') {
           if (typeof params.path === 'string' && (await fileExists(params.path))) {
-            if (component === 'doc' && !DOC_MODES.has(params.mode)) dock.removePanel(p)
+            if (component === 'doc' && !DOC_MODES.has(params.mode)) removePanel(p)
             else await openFile(params.path, p)
           } else {
-            dock.removePanel(p) // file no longer exists — skip
+            removePanel(p) // file no longer exists — skip
           }
         } else {
-          dock.removePanel(p) // unknown component from an older build — skip
+          removePanel(p) // unknown component from an older build — skip
         }
       })
     )
