@@ -274,6 +274,33 @@ textarea:focus-visible,
   background: var(--accent-soft);
 }
 
+/* inline SVG icons scale to their host; default chrome size */
+.icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.icon-btn .icon {
+  width: 16px;
+  height: 16px;
+}
+#btn-add .icon {
+  width: 17px;
+  height: 17px;
+}
+.grp-btn .icon {
+  width: 14px;
+  height: 14px;
+}
+#git-chip .gly {
+  display: inline-flex;
+}
+#git-chip .gly .icon {
+  width: 15px;
+  height: 15px;
+}
+
 /* sidebar minimizer — the chevron folds when the tree is hidden */
 #btn-sidebar .chev {
   display: inline-block;
@@ -722,12 +749,14 @@ body.tree-anim #tree {
   color: var(--g-del);
 }
 #tree .entry {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   padding: 5px 10px;
   margin: 0 6px;
   border-radius: var(--r-xs);
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   cursor: pointer;
   color: var(--muted);
   font-size: var(--fs-ui);
@@ -741,6 +770,34 @@ body.tree-anim #tree {
 }
 #tree .entry.junk {
   color: var(--faint);
+}
+#tree .entry-icon {
+  display: inline-flex;
+  flex: none;
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+#tree .entry-icon .icon {
+  width: 15px;
+  height: 15px;
+}
+#tree .entry.dir .entry-icon {
+  color: var(--accent);
+}
+#tree .entry.junk .entry-icon {
+  color: var(--faint);
+}
+#tree .entry:hover .entry-icon {
+  color: var(--bright);
+}
+#tree .entry.dir:hover .entry-icon {
+  color: var(--accent);
+}
+#tree .entry-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .watermark {
   height: 100%;

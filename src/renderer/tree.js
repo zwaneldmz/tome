@@ -12,6 +12,7 @@ import { refreshGit } from './git.js'
 import { renderAll, addFolderToActive } from './menus.js'
 import { confirmModal } from './modals.js'
 import { renderStatusbar } from './statusbar.js'
+import { folderIcon, fileIcon } from './icons.js'
 
 const treeEl = document.getElementById('tree')
 const JUNK_DIRS = new Set(['node_modules', 'out', 'dist', '.venv', '__pycache__', '.next', 'target'])
@@ -26,11 +27,11 @@ async function renderDir(dir, container, depth, rootPath) {
   for (const e of entries) {
     const full = `${dir}/${e.name}`
     const junk = e.dir && JUNK_DIRS.has(e.name)
-    const row = el(
-      'div',
-      'entry ' + (e.dir ? 'dir' : 'file') + (junk ? ' junk' : ''),
-      (e.dir ? '▸ ' : '') + e.name
-    )
+    const row = el('div', 'entry ' + (e.dir ? 'dir' : 'file') + (junk ? ' junk' : ''))
+    const iconWrap = el('span', 'entry-icon')
+    iconWrap.appendChild(e.dir ? folderIcon(false) : fileIcon())
+    const label = el('span', 'entry-name', e.name)
+    row.append(iconWrap, label)
     row.style.paddingLeft = 10 + depth * 13 + 'px'
     container.appendChild(row)
     if (e.dir) {
@@ -39,7 +40,7 @@ async function renderDir(dir, container, depth, rootPath) {
       row.addEventListener('click', () => {
         setActiveRoot(rootPath)
         open = !open
-        row.textContent = (open ? '▾ ' : '▸ ') + e.name
+        iconWrap.replaceChildren(folderIcon(open))
         if (open && !kids) {
           kids = document.createElement('div')
           row.after(kids)

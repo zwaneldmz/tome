@@ -17,6 +17,7 @@ import { ChatPanel } from './panels/chat.js'
 import { BrainPanel } from './panels/brain.js'
 import { HistoryPanel } from './history.js'
 import { renderStatusbar, setStatusbarDock } from './statusbar.js'
+import { plusIcon, popoutIcon } from './icons.js'
 import { AGENTS } from '../shared/pane-kinds.js'
 
 class Watermark {
@@ -40,7 +41,8 @@ class GroupActions {
   constructor(group) {
     this.group = group
     this.element = el('div', 'grp-actions')
-    const add = el('button', 'grp-btn', '＋')
+    const add = el('button', 'grp-btn')
+    add.appendChild(plusIcon())
     add.title = 'New pane as a tab in this group'
     add.setAttribute('aria-label', 'New pane in this group')
     add.setAttribute('aria-haspopup', 'true')
@@ -49,8 +51,10 @@ class GroupActions {
       e.stopPropagation()
       floatingMenu(add, (menu) => populateAddMenu(menu, { group }))
     })
-    this.pop = el('button', 'grp-btn', '⧉')
+    this.pop = el('button', 'grp-btn')
+    this.pop.appendChild(popoutIcon())
     this.pop.title = 'Open this group in its own window'
+    this.pop.setAttribute('aria-label', 'Open this group in its own window')
     this.pop.addEventListener('click', (e) => {
       e.stopPropagation()
       popout(group)
