@@ -241,7 +241,7 @@ function popout(item, at) {
       onDidOpen: ({ window: w }) => {
         w.document.body.classList.add('tome-popout')
         // a drag released in this window ends here, not in the main document
-        w.document.addEventListener('dragend', clearDropOverlays, true)
+        watchDragCleanup(w.document)
         const untrack = trackThemedDocument(w.document)
         w.addEventListener('pagehide', untrack, { once: true })
       },
@@ -297,14 +297,31 @@ tome.popout.onCloseRequest(async ({ id, name }) => {
 // highlight painted. Clearing every group is the same call dockview makes, and
 // is a no-op for groups that have no overlay up.
 function clearDropOverlays() {
-  for (const g of dock.groups) {
+  // The root container backs drops onto the dock's own edges; each group has
+  // its own for tab and content drops. A leftover can be in either.
+  const containers = [
+    dock.component?.rootDropTargetContainer,
+    ...dock.groups.map((g) => g.model?.dropTargetContainer),
+  ]
+  for (const c of containers) {
     try {
-      g.model?.dropTargetContainer?.model?.clear?.()
+      c?.model?.clear?.()
     } catch {
       /* internal shape changed — a stale highlight is not worth throwing over */
     }
   }
 }
+// Deferred so dockview's own drop handling finishes first: clearing ahead of
+// it would just be re-shown. `drop` as well as `dragend`, because a drag that
+// crosses windows does not reliably deliver dragend to the window that was
+// only passed through.
+const clearDropOverlaysSoon = () => setTimeout(clearDropOverlays, 0)
+
+export function watchDragCleanup(doc) {
+  doc.addEventListener('dragend', clearDropOverlaysSoon, true)
+  doc.addEventListener('drop', clearDropOverlaysSoon, true)
+}
+watchDragCleanup(document)
 
 const outsideWindow = (x, y) =>
   x < window.screenX ||
@@ -324,7 +341,6 @@ const armTearOff = (item) => {
 document.addEventListener(
   'dragend',
   (e) => {
-    clearDropOverlays()
     const item = tearOffItem
     tearOffItem = null
     if (!item) return
