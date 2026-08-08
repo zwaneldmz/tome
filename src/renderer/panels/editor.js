@@ -15,7 +15,13 @@ import { fileIcon } from '../icons.js'
 // only applying to panes opened afterwards.
 const editors = new Set()
 
-export const EDITOR_DEFAULTS = { tabSize: 2, wrap: false, trimOnSave: true, autosave: false }
+export const EDITOR_DEFAULTS = {
+  tabSize: 2,
+  wrap: false,
+  trimOnSave: true,
+  autosave: false,
+  formatOnSave: false,
+}
 export const AUTOSAVE_MS = 800
 export const editorPrefs = { ...EDITOR_DEFAULTS }
 
@@ -113,6 +119,7 @@ export class EditorPanel {
 
   async save() {
     if (!this.view) return
+    if (editorPrefs.formatOnSave) await this.format()
     if (editorPrefs.trimOnSave) trimTrailing(this.view)
     const doc = this.view.state.doc.toString()
     try {
@@ -175,6 +182,26 @@ export class EditorPanel {
     } catch {
       toast(`could not reload ${this.name}`)
     }
+  }
+
+  // Formatting lands as a document edit, so the buffer and the file agree and
+  // undo still reaches the pre-format text.
+  async format() {
+    const before = this.view.state.doc.toString()
+    let out
+    try {
+      out = await tome.fs.format(this.path, before)
+    } catch {
+      return
+    }
+    if (out == null) return // no parser for this file type
+    if (out.error) return toast(`${this.name}: ${out.error}`)
+    if (out === before) return
+    const sel = this.view.state.selection.main.head
+    this.view.dispatch({
+      changes: { from: 0, to: this.view.state.doc.length, insert: out },
+      selection: { anchor: Math.min(sel, out.length) },
+    })
   }
 
   replaceDoc(text) {

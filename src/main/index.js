@@ -664,6 +664,24 @@ app.whenReady().then(async () => {
     watched.set(p, { watcher, count: 1, timer: null })
     return true
   })
+  // ---- format on save ----
+  // Prettier runs in main: it is a node module, and the renderer is sandboxed.
+  // Its own config wins, so a project's .prettierrc is respected. A file type
+  // Prettier has no parser for resolves to null and the save proceeds
+  // unformatted rather than failing.
+  ipcMain.handle('fmt:format', async (e, { path, content }) => {
+    try {
+      const prettier = await import('prettier')
+      const info = await prettier.getFileInfo(path, { resolveConfig: true })
+      if (!info.inferredParser) return null
+      const config = (await prettier.resolveConfig(path)) || {}
+      return await prettier.format(content, { ...config, filepath: path })
+    } catch (err) {
+      // a syntax error mid-edit is normal — report it, never block the save
+      return { error: String(err.message || err).split('\n')[0] }
+    }
+  })
+
   ipcMain.handle('fs:unwatch', (e, p) => {
     const entry = watched.get(p)
     if (!entry) return

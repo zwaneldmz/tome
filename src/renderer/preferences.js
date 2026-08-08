@@ -144,6 +144,13 @@ export async function preferencesModal() {
   )
   toggleRow(
     editor,
+    'Format on save',
+    'Prettier, using the project’s own config',
+    () => editorPrefs.formatOnSave,
+    (v) => setEditorPrefs({ formatOnSave: v })
+  )
+  toggleRow(
+    editor,
     'Autosave',
     'save a moment after you stop typing',
     () => editorPrefs.autosave,
