@@ -22,16 +22,14 @@ function setCollapsed(v, animate = true) {
   tome.store.set('sidebar-collapsed', collapsed)
 }
 
+export const toggleSidebar = () => setCollapsed(!collapsed)
+
 sidebarBtn.addEventListener('click', (e) => {
   e.stopPropagation()
-  setCollapsed(!collapsed)
+  toggleSidebar()
 })
-window.addEventListener('keydown', (e) => {
-  if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'b') {
-    e.preventDefault()
-    setCollapsed(!collapsed)
-  }
-})
+// ⌘B is the native menu bar's 'Toggle Sidebar' accelerator (menu-bridge
+// routes it here); no renderer keydown needed anymore.
 
 // ---------- sidebar drag divider ----------
 const tree = document.getElementById('tree')
@@ -66,8 +64,9 @@ divider.addEventListener('pointerdown', (e) => {
 const themeBtn = document.getElementById('btn-theme')
 const THEME_LABEL = { system: 'Match system', light: 'Light', dark: 'Dark' }
 
-themeBtn.addEventListener('click', (e) => {
-  e.stopPropagation()
+// Shared by the topbar button and (via menu-bridge) the View ▸ Appearance
+// submenu, so the native menu can offer the same radio choices.
+export function openThemeMenu() {
   floatingMenu(themeBtn, (menu) => {
     menuLabel(menu, 'Appearance')
     for (const pref of THEME_ORDER) {
@@ -78,6 +77,11 @@ themeBtn.addEventListener('click', (e) => {
       })
     }
   })
+}
+
+themeBtn.addEventListener('click', (e) => {
+  e.stopPropagation()
+  openThemeMenu()
 })
 
 onTheme(() => {
