@@ -674,6 +674,13 @@ body.tree-anim #tree {
   flex: 1;
   min-width: 0;
 }
+/* drag-and-drop file open: accent ring + tint while files hover the window */
+#dock.drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: -6px;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
+}
 
 /* ---- tree ---- */
 .root-head {
