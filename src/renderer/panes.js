@@ -8,7 +8,7 @@ import { prefs, counters } from './state.js'
 import { activeWorkspace, paneCwd } from './workspaces.js'
 import { wsState } from './state.js'
 import { floatingMenu, populateAddMenu } from './menus.js'
-import { confirmModal } from './modals.js'
+import { choiceModal, confirmModal } from './modals.js'
 import { trackThemedDocument } from './theme.js'
 import { TerminalPanel } from './panels/terminal.js'
 import { EditorPanel } from './panels/editor.js'
@@ -152,16 +152,18 @@ window.addEventListener('drop', (e) => {
   }
 })
 
-export function closePanel(panel) {
+// Awaitable so callers closing several panes can do it one at a time — the
+// discard prompt is a modal, and only one modal exists at a time.
+export async function closePanel(panel) {
   if (!panel) return
   const view = panel.view?.content
   if (typeof view?.isDirty === 'function' && view.isDirty()) {
-    confirmModal(
+    const ok = await confirmModal(
       'Discard unsaved changes?',
       `“${panel.title.replace(/^● /, '')}” has changes that have not been saved. Closing it discards them.`,
       'Discard'
-    ).then((ok) => ok && removePanel(panel))
-    return
+    )
+    if (!ok) return
   }
   removePanel(panel)
 }
@@ -228,16 +230,6 @@ function popout(item, at) {
         const untrack = trackThemedDocument(w.document)
         w.addEventListener('pagehide', untrack, { once: true })
       },
-      onWillClose: ({ id }) => {
-        // The panes are still in the popout group here; dockview hands them
-        // back to the grid as the window tears down. Grab them now, ask once
-        // that has happened. dockview names the window `${dockId}-${groupId}`.
-        const group = dock.groups.find(
-          (g) => g.api.location.type === 'popout' && id.endsWith(`-${g.api.id}`)
-        )
-        const panels = group ? [...group.panels] : []
-        if (panels.length) setTimeout(() => offerToClosePanes(panels), 0)
-      },
     })
   )
     // dockview catches its own failures and resolves false rather than
@@ -246,22 +238,37 @@ function popout(item, at) {
     .catch((err) => toast(`could not open a window for that pane: ${err?.message || err}`))
 }
 
-// Closing a popped-out window returns its panes to the main window — the safe
-// default, since closing a window should not destroy work. Offer the other
-// outcome rather than assume it; closing goes through the dirty-editor guard,
-// so an unsaved editor still gets its own confirmation.
-async function offerToClosePanes(panels) {
-  const back = panels.filter((p) => dock.getPanel(p.id))
-  if (!back.length) return
-  const name = (p) => p.title.replace(/^● /, '')
-  const one = back.length === 1
-  const ok = await confirmModal(
-    'Window closed',
-    `${one ? `“${name(back[0])}”` : `${back.length} panes`} moved back to the main window. Close ${one ? 'it' : 'them'} instead?`,
-    one ? 'Close pane' : `Close ${back.length} panes`
+// A popped-out window asked to close. Main vetoed the close and is holding
+// the window open until we call popout.close(id) — so cancelling is simply
+// never calling it. dockview names each popout window `${dockId}-${groupId}`,
+// which is how the window maps back to the panes inside it.
+tome.popout.onCloseRequest(async ({ id, name }) => {
+  const group = dock.groups.find(
+    (g) => g.api.location.type === 'popout' && name.endsWith(`-${g.api.id}`)
   )
-  if (ok) for (const p of back) closePanel(p)
-}
+  const panels = group ? [...group.panels] : []
+  if (!panels.length) return tome.popout.close(id) // nothing to lose, just go
+
+  const one = panels.length === 1
+  const what = one ? `“${panels[0].title.replace(/^● /, '')}”` : `${panels.length} panes`
+  const choice = await choiceModal(
+    one ? 'Close this window?' : `Close this window and its ${panels.length} panes?`,
+    `${what} ${one ? 'is' : 'are'} open in this window.`,
+    [
+      { label: one ? 'Move pane to main window' : 'Move panes to main window', value: 'move' },
+      { label: one ? 'Close pane' : `Close ${panels.length} panes`, value: 'close', cls: 'danger' },
+    ]
+  )
+  if (!choice) return // dismissed — leave the window exactly as it was
+
+  if (choice === 'close') {
+    // Sequential: closePanel can raise its own discard prompt, and only one
+    // modal exists at a time. A pane whose discard is refused stays open and
+    // rides back to the main window when the window closes below.
+    for (const p of panels) await closePanel(p)
+  }
+  tome.popout.close(id)
+})
 
 const outsideWindow = (x, y) =>
   x < window.screenX ||

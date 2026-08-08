@@ -2,7 +2,10 @@
 // One overlay at a time: opening a modal removes any existing one.
 import { el } from './util.js'
 
-export function modalShell(title) {
+// `onClose` fires however the modal goes away — a button, Escape, or a click
+// on the scrim — so a caller awaiting a choice always gets an answer instead
+// of a promise that never settles.
+export function modalShell(title, onClose) {
   document.getElementById('ag-overlay')?.remove()
   const prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
   const overlay = el('div')
@@ -27,6 +30,7 @@ export function modalShell(title) {
     closed = true
     overlay.remove()
     prevFocus?.focus()
+    onClose?.()
   }
   overlay.addEventListener('click', (e) => e.target === overlay && close())
   overlay.addEventListener('keydown', (e) => {
@@ -90,6 +94,26 @@ export function promptModal(title, placeholder, initial = '', submitLabel = 'Sav
     m.button(submitLabel, () => done(input.value))
     m.button('Cancel', () => done(null), 'ghost')
     setTimeout(() => input.select(), 0)
+  })
+}
+
+// More than two ways forward (close a popout's panes, or move them here…).
+// Resolves the chosen value, or null when dismissed — Escape and the scrim
+// mean "do nothing", same as Cancel.
+export function choiceModal(title, note, choices) {
+  return new Promise((resolve) => {
+    const m = modalShell(title, () => resolve(null))
+    if (note) m.note(note)
+    for (const c of choices)
+      m.button(
+        c.label,
+        () => {
+          resolve(c.value) // first resolve wins; the onClose null is a no-op
+          m.close()
+        },
+        c.cls || 'primary'
+      )
+    m.button('Cancel', () => m.close(), 'ghost')
   })
 }
 
