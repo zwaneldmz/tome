@@ -189,9 +189,28 @@ button {
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
-[tabindex]:focus-visible {
+[tabindex]:focus-visible,
+.menu > button:focus-visible,
+.ag-btn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-ring);
+}
+/* menu buttons sit on a translucent surface — the ring alone can wash out,
+   so keyboard-focused items also get the hover accent background */
+.menu > button:focus-visible:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 @media (prefers-reduced-motion: reduce) {
   button {
@@ -485,11 +504,13 @@ body.tree-collapsed #btn-sidebar .chev {
   cursor: pointer;
   text-align: left;
 }
-.menu > button:hover:not(:disabled) {
+.menu > button:hover:not(:disabled),
+.menu > button.kb-focus:not(:disabled) {
   background: var(--accent);
   color: var(--accent-fg);
 }
-.menu > button:hover:not(:disabled) .hint {
+.menu > button:hover:not(:disabled) .hint,
+.menu > button.kb-focus:not(:disabled) .hint {
   color: var(--accent-fg);
   opacity: 0.75;
 }
@@ -505,7 +526,8 @@ body.tree-collapsed #btn-sidebar .chev {
   content: '✓ ';
   margin-right: -6px;
 }
-.menu > button.active:hover:not(:disabled) {
+.menu > button.active:hover:not(:disabled),
+.menu > button.active.kb-focus:not(:disabled) {
   color: var(--accent-fg);
 }
 .menu .hint {

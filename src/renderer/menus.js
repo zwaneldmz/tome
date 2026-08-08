@@ -9,8 +9,74 @@ import { renderTree } from './tree.js'
 import { refreshGit } from './git.js'
 
 const allMenus = []
+// Which button opened which menu — used to flip aria-expanded and to hand
+// focus back when a menu closes from the keyboard.
+const triggers = new Map() // menu element -> trigger button
+let kbMenu = null // the menu keyboard navigation is currently armed on
+
+function setExpanded(menu, open) {
+  triggers.get(menu)?.setAttribute('aria-expanded', String(open))
+}
+
+// Keyboard navigation is a highlight (.kb-focus, styled like :hover), not DOM
+// focus — menu inputs keep their caret and the trigger keeps its focus ring.
+function kbItems(menu) {
+  return [...menu.querySelectorAll(':scope > button:not(:disabled)')]
+}
+function kbMove(menu, pick) {
+  const items = kbItems(menu)
+  if (!items.length) return
+  const at = items.findIndex((b) => b.classList.contains('kb-focus'))
+  const next = items[(pick(at, items.length) + items.length) % items.length]
+  for (const b of items) b.classList.remove('kb-focus')
+  next.classList.add('kb-focus')
+  next.scrollIntoView({ block: 'nearest' })
+}
+function kbClear(menu) {
+  for (const b of menu.querySelectorAll('.kb-focus')) b.classList.remove('kb-focus')
+  if (kbMenu === menu) kbMenu = null
+}
+
+function menuKeydown(e) {
+  if (!kbMenu) {
+    if (e.key === 'Escape') closeMenus()
+    return
+  }
+  const items = kbItems(kbMenu)
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    kbMove(kbMenu, (at) => at + 1)
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    kbMove(kbMenu, (at, n) => (at < 0 ? n - 1 : at - 1))
+  } else if (e.key === 'Home') {
+    e.preventDefault()
+    kbMove(kbMenu, () => 0)
+  } else if (e.key === 'End') {
+    e.preventDefault()
+    kbMove(kbMenu, (_, n) => n - 1)
+  } else if (e.key === 'Enter' || e.key === ' ') {
+    const b = kbMenu.querySelector('.kb-focus')
+    if (b && items.includes(b)) {
+      e.preventDefault()
+      b.click()
+    }
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    const t = triggers.get(kbMenu)
+    closeMenus()
+    t?.focus()
+  }
+}
+document.addEventListener('keydown', menuKeydown)
+
 export function closeMenus(except) {
-  for (const m of allMenus) if (m !== except) m.classList.add('hidden')
+  for (const m of allMenus)
+    if (m !== except && !m.classList.contains('hidden')) {
+      m.classList.add('hidden')
+      setExpanded(m, false)
+      kbClear(m)
+    }
 }
 document.addEventListener('click', () => closeMenus())
 
@@ -28,7 +94,10 @@ function floaterFor(doc) {
     menu.setAttribute('role', 'menu')
     menu.addEventListener('click', (e) => e.stopPropagation())
     doc.body.appendChild(menu)
-    if (doc !== document) doc.addEventListener('click', () => closeMenus())
+    if (doc !== document) {
+      doc.addEventListener('click', () => closeMenus())
+      doc.addEventListener('keydown', menuKeydown)
+    }
     allMenus.push(menu)
     floaters.set(doc, menu)
   }
@@ -51,11 +120,16 @@ export function floatingMenu(anchor, build) {
   menu.style.top = `${Math.round(r.bottom + 6)}px`
   menu.style.right = `${Math.max(8, Math.round(view.innerWidth - r.right))}px`
   menu.classList.remove('hidden')
+  triggers.set(menu, anchor)
+  anchor.setAttribute('aria-expanded', 'true')
+  kbMenu = menu
 }
 export function wireMenu(btnId, menuId, onOpen) {
   const btn = document.getElementById(btnId)
   const menu = document.getElementById(menuId)
   allMenus.push(menu)
+  triggers.set(menu, btn)
+  btn.setAttribute('aria-expanded', 'false')
   btn.addEventListener('click', async (e) => {
     e.stopPropagation()
     const willOpen = menu.classList.contains('hidden')
@@ -63,6 +137,9 @@ export function wireMenu(btnId, menuId, onOpen) {
     if (willOpen) {
       if (onOpen) await onOpen(menu)
       menu.classList.remove('hidden')
+      if (menu.dataset.openFor) delete menu.dataset.openFor
+      setExpanded(menu, true)
+      kbMenu = menu
     }
   })
   menu.addEventListener('click', (e) => e.stopPropagation())
