@@ -17,6 +17,7 @@ import { DocPanel } from './panels/doc.js'
 import { ChatPanel } from './panels/chat.js'
 import { BrainPanel } from './panels/brain.js'
 import { FlowPanel } from './panels/flow.js'
+import { EventsPanel } from './panels/events.js'
 import { HistoryPanel } from './history.js'
 import { renderStatusbar, setStatusbarDock } from './statusbar.js'
 import { plusIcon, popoutIcon } from './icons.js'
@@ -106,6 +107,8 @@ export const dock = createDockview(document.getElementById('dock'), {
         return new BrainPanel()
       case 'history':
         return new HistoryPanel()
+      case 'events':
+        return new EventsPanel()
       case 'flow':
         return new FlowPanel()
       default:
@@ -441,6 +444,7 @@ function componentOf(panel) {
   if (params.chatId) return 'chat'
   if (params.ws) return 'brain'
   if (params.dir) return 'history'
+  if (params.events) return 'events'
   // Must precede the generic path&&mode / bare-path fallthroughs below, or a
   // flow's params (which are just { path }, same shape as an editor's) get
   // classified as 'editor' and the panel silently opens the raw JSON on
@@ -523,6 +527,9 @@ export async function restoreLayout() {
           const dir = typeof params.dir === 'string' && (await dirExists(params.dir)) ? params.dir : null
           if (dir) spawnHistory(dir, p)
           else removePanel(p)
+        } else if (component === 'events') {
+          // main owns the log file (userData) — nothing to existence-check.
+          spawnEvents(p)
         } else if (component === 'editor' || component === 'doc' || component === 'flow') {
           // openFile() re-routes a .flow.json path to the flow component on
           // its own (see the check added there) — including the flow
@@ -669,6 +676,28 @@ function spawnHistory(dir, saved, target) {
     title: saved?.title || `⎇ history — ${dir.split('/').pop()}`,
     position: saved ? { referencePanel: saved.id } : place(target),
     params: { dir },
+  })
+}
+
+export function addEvents(target) {
+  spawnEvents(undefined, target)
+}
+
+// One log pane at a time: fixed id, so a second request just activates the
+// existing tab (same dedupe as brain/history).
+function spawnEvents(saved, target) {
+  const id = 'events:log'
+  const existing = dock.getPanel(id)
+  if (existing) {
+    existing.api.setActive()
+    return
+  }
+  dock.addPanel({
+    id,
+    component: 'events',
+    title: saved?.title || 'event log',
+    position: saved ? { referencePanel: saved.id } : place(target),
+    params: { events: true },
   })
 }
 

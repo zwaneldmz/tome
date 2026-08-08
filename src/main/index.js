@@ -16,6 +16,7 @@ import * as airgap from './airgap'
 import * as authlock from './authlock'
 import * as brain from './brain'
 import * as conductor from './conductor'
+import * as events from './events'
 import * as lsp from './lsp'
 import { AGENTS } from '../shared/pane-kinds.js'
 
@@ -464,8 +465,13 @@ app.whenReady().then(async () => {
 
   const userData = app.getPath('userData')
   await airgap.loadAllowlist(userData)
+  await airgap.loadRepoConsents(userData)
+  airgap.setConfinedRealPath(confinedRealPath)
   await authlock.initAuth(userData)
+  events.initEvents(userData)
   airgap.setEventSink((type, payload) => win?.webContents.send('airgap:' + type, payload))
+  airgap.setLogger(events.logEvent)
+  events.setEventSink((type, payload) => win?.webContents.send('events:' + type, payload))
   brain.setEventSink((ws, index) => win?.webContents.send('brain:changed', { ws, index }))
 
   createWindow()
@@ -474,6 +480,7 @@ app.whenReady().then(async () => {
     ptys,
     send: (channel, payload) => win?.webContents.send(channel, payload),
     canOpenFile: isConfinedPath,
+    logEvent: events.logEvent,
   })
   // The renderer resolves 'system' itself and reports both the preference
   // (so native chrome can keep following the OS) and the resolved mode.
@@ -484,7 +491,13 @@ app.whenReady().then(async () => {
     for (const w of BrowserWindow.getAllWindows()) w.setBackgroundColor(WINDOW_BG[uiTheme])
   })
   ipcMain.on('panes:sync', (e, list) => conductor.setPanes(list))
-  ipcMain.on('ws:sync', (e, folders) => setOpenFolders(folders))
+  ipcMain.on('ws:sync', (e, folders) => {
+    setOpenFolders(folders)
+    // Confined resolution refuses until folders are known, so the boot-time
+    // re-apply above can only run for real once the first sync lands. The
+    // airgap-side guard keeps a second sync from racing an in-flight run.
+    airgap.reapplyRepoConsents()
+  })
   ipcMain.on('conductor:allowRun', (e, v) => conductor.setAllowRun(v))
 
   // ---- pty ----
@@ -584,6 +597,23 @@ app.whenReady().then(async () => {
     return { ok: true }
   })
   ipcMain.handle('airgap:relock', (e, paneId) => airgap.relockPane(paneId))
+  // Read-only tail of the persistent event log. Registered after the lock
+  // gate like every other channel — the log names panes/hosts the assistant
+  // touched, so a locked app must not leak it.
+  ipcMain.handle('events:list', () => events.readEvents())
+  // Repo-committed allowlist (.tome/airgap.json). The renderer collects
+  // consent, but main is the authority: it reads, hashes, and validates the
+  // file itself through the confined resolver, stores consent in its own
+  // 0600 file, and re-checks at consent time (TOCTOU) and every boot/sync.
+  // A compromised renderer can only ASK main to re-check — never widen
+  // egress on its own say-so. Lock-gated like every channel registered
+  // after the gate wrap — a locked app must not have its egress policy
+  // changed.
+  ipcMain.handle('airgap:readRepoAllowlist', (e, { root } = {}) => airgap.readRepoAllowlist(root))
+  ipcMain.handle('airgap:consentRepoAllowlist', (e, { root, hash } = {}) =>
+    airgap.consentRepoAllowlist(root, hash)
+  )
+  ipcMain.handle('airgap:revokeRepoAllowlist', (e, { root } = {}) => airgap.revokeRepoAllowlist(root))
   ipcMain.handle('airgap:setup', async (e, { passphrase }) => {
     if (authlock.authStatus().configured) return { ok: false, error: 'Already configured.' }
     try {

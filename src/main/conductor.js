@@ -10,6 +10,7 @@ let send = () => {} // (channel, payload) -> renderer
 let panes = [] // renderer's pane snapshot [{ id, title }]
 let allowRun = false
 let canOpenFile = () => false // main's workspace confinement check
+let logEvent = () => {} // main's persistent event log (events.js)
 
 const meta = new Map() // ptyId -> { kind, cwd, airgap, exited }
 const scrolls = new Map() // ptyId -> recent raw output
@@ -19,6 +20,7 @@ export function init(opts) {
   ptys = opts.ptys
   send = opts.send
   if (typeof opts.canOpenFile === 'function') canOpenFile = opts.canOpenFile
+  if (typeof opts.logEvent === 'function') logEvent = opts.logEvent
 }
 
 export function register(id, info) {
@@ -224,13 +226,20 @@ export async function runChat(anthropic, { id, model, system, messages, betas, f
       msgs.push({ role: 'assistant', content: final.content })
       const results = []
       for (const block of final.content.filter((b) => b.type === 'tool_use')) {
-        send('chat:tool', { id, tool: block.name, hint: block.input?.pane_id || block.input?.kind || block.input?.path || '' })
+        const hint = block.input?.pane_id || block.input?.kind || block.input?.path || ''
+        send('chat:tool', { id, tool: block.name, hint })
         let out
+        let ok = true
         try {
           out = runTool(block.name, block.input || {}, id)
         } catch (err) {
+          ok = false
           out = 'Tool error: ' + err.message
         }
+        // Audit the ACTION only: tool name, chat, outcome, and the same
+        // identifier hint the chat:tool event carries. Tool input/output
+        // never goes in the log — typed text may contain secrets.
+        logEvent('conductor:tool', { tool: block.name, chatId: id, ok, hint })
         results.push({ type: 'tool_result', tool_use_id: block.id, content: String(out) })
       }
       msgs.push({ role: 'user', content: results })

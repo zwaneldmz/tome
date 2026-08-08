@@ -5,7 +5,21 @@
   "description": "A coding harness: agents, terminals, editors, and chat in one bound workspace.",
   "author": "Lwando Zwane",
   "main": "out/main/index.js",
-  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://gitlab.com/ldmz/tome.git"
+  },
+  "homepage": "https://gitlab.com/ldmz/tome",
+  "bugs": "https://gitlab.com/ldmz/tome/-/issues",
+  "keywords": [
+    "electron",
+    "coding-agents",
+    "air-gap",
+    "sandbox",
+    "claude",
+    "developer-tools"
+  ],
   "build": {
     "appId": "tech.abantu.tome",
     "productName": "Tome",
