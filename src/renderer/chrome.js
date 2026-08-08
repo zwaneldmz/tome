@@ -3,9 +3,11 @@
 import { tome } from './util.js'
 import { floatingMenu, menuItem, menuLabel } from './menus.js'
 import { THEME_GLYPH, THEME_ORDER, onTheme, setTheme, themeState } from './theme.js'
+import { sidebarIcon, themeIcon, bellIcon, plusIcon, branchIcon } from './icons.js'
 
 // ---------- left pane minimizer ----------
 const sidebarBtn = document.getElementById('btn-sidebar')
+sidebarBtn.querySelector('.chev').appendChild(sidebarIcon())
 let collapsed = false
 
 function setCollapsed(v, animate = true) {
@@ -85,9 +87,14 @@ themeBtn.addEventListener('click', (e) => {
 })
 
 onTheme(() => {
-  themeBtn.textContent = THEME_GLYPH[themeState.pref]
+  themeBtn.replaceChildren(themeIcon(themeState.pref))
   themeBtn.title = `Appearance — ${THEME_LABEL[themeState.pref]}`
 })
+
+// ---------- static topbar icons (bell, add, git glyph) ----------
+document.getElementById('btn-notifs').appendChild(bellIcon())
+document.getElementById('btn-add').querySelector('.plus').appendChild(plusIcon())
+document.getElementById('git-chip').querySelector('.gly').appendChild(branchIcon())
 
 export async function bootChrome() {
   const w = await tome.store.get('sidebar-width')
