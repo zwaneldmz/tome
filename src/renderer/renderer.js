@@ -11,7 +11,7 @@ import { terms, chats, brains } from './regs.js'
 import { dock, addChat, addBrain, openFile, restoreLayout } from './panes.js'
 import { renderAll } from './menus.js'
 import { startGitPolling, initGitMenu } from './git.js'
-import { activeWorkspace } from './workspaces.js'
+import { activeWorkspace, syncFolders } from './workspaces.js'
 import { bootAuth } from './lock.js'
 import { bootTheme } from './theme.js'
 import { bootChrome } from './chrome.js'
@@ -50,6 +50,7 @@ tome.brain.onChanged(({ ws: bws, index }) => brains.get(bws)?.onChanged(index))
     tome.conductor.allowRun(true)
   }
   tome.airgap.state().then((s) => Object.assign(agState, s))
+  syncFolders() // main starts with an empty confinement list
   wsState.activeRoot = activeWorkspace()?.folders[0] || null
   renderAll()
   initGitMenu() // deferred out of git.js's module body — see the note there

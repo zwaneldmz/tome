@@ -99,6 +99,18 @@ contextBridge.exposeInMainWorld('tome', {
       ipcRenderer.invoke('brain:promote', { ws, rel, folder, overwrite, rename }),
     onChanged: (cb) => ipcRenderer.on('brain:changed', (e, m) => cb(m)),
   },
+  // Language servers: document sync is fire-and-forget, diagnostics arrive
+  // whenever the server has them.
+  lsp: {
+    didOpen: (path, text) => ipcRenderer.send('lsp:didOpen', { path, text }),
+    didChange: (path, text) => ipcRenderer.send('lsp:didChange', { path, text }),
+    didClose: (path) => ipcRenderer.send('lsp:didClose', path),
+    hover: (path, line, character) => ipcRenderer.invoke('lsp:hover', { path, line, character }),
+    definition: (path, line, character) =>
+      ipcRenderer.invoke('lsp:definition', { path, line, character }),
+    onDiagnostics: (cb) => ipcRenderer.on('lsp:diagnostics', (e, m) => cb(m)),
+    onMissing: (cb) => ipcRenderer.on('lsp:missing', (e, m) => cb(m)),
+  },
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
   pickFile: () => ipcRenderer.invoke('dialog:pickFile'),
   app: {

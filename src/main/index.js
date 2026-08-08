@@ -16,6 +16,7 @@ import * as airgap from './airgap'
 import * as authlock from './authlock'
 import * as brain from './brain'
 import * as conductor from './conductor'
+import * as lsp from './lsp'
 import { AGENTS } from '../shared/pane-kinds.js'
 
 const ptys = new Map()
@@ -664,6 +665,23 @@ app.whenReady().then(async () => {
     watched.set(p, { watcher, count: 1, timer: null })
     return true
   })
+  // ---- language servers ----
+  // Diagnostics are pushed by the server whenever it feels like it, so they
+  // ride an event rather than a request/response.
+  lsp.init({
+    onDiagnostics: (path, diagnostics) => win?.webContents.send('lsp:diagnostics', { path, diagnostics }),
+    onMissing: (cmd, langId) => win?.webContents.send('lsp:missing', { cmd, langId }),
+  })
+  ipcMain.on('lsp:didOpen', (e, { path, text }) => lsp.didOpen(path, text, openFolders))
+  ipcMain.on('lsp:didChange', (e, { path, text }) => lsp.didChange(path, text, openFolders))
+  ipcMain.on('lsp:didClose', (e, path) => lsp.didClose(path, openFolders))
+  ipcMain.handle('lsp:hover', (e, { path, line, character }) =>
+    lsp.hover(path, line, character, openFolders)
+  )
+  ipcMain.handle('lsp:definition', (e, { path, line, character }) =>
+    lsp.definition(path, line, character, openFolders)
+  )
+
   // ---- format on save ----
   // Prettier runs in main: it is a node module, and the renderer is sandboxed.
   // Its own config wins, so a project's .prettierrc is respected. A file type
@@ -1073,6 +1091,7 @@ ipcMain.on('app:quit-ready', () => {
 })
 
 app.on('window-all-closed', () => {
+  lsp.shutdownAll()
   for (const p of ptys.values()) p.kill()
   app.quit()
 })

@@ -2232,3 +2232,17 @@ body.tome-popout .dockview-theme-tome .dv-groupview {
   border-radius: 0;
   box-shadow: none;
 }
+
+/* ================= language server ================= */
+/* hover card: servers can return a lot of text, so cap it and let it scroll */
+.cm-lsp-hover {
+  max-width: 520px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  color: var(--bright);
+}
