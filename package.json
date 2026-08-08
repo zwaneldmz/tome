@@ -50,14 +50,15 @@
     "dockview-core": "^4.0.0",
     "mammoth": "^1.12.0",
     "node-pty": "^1.0.0",
+    "prettier": "^3.9.6",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
     "electron": "^43.3.0",
-    "eslint": "^9.0.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^3.0.0",
+    "eslint": "^9.0.0",
     "vite": "^6.0.0",
     "vitest": "^4.0.18"
   }

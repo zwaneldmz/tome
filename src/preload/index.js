@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('tome', {
     watch: (p) => ipcRenderer.invoke('fs:watch', p),
     unwatch: (p) => ipcRenderer.invoke('fs:unwatch', p),
     onChanged: (cb) => ipcRenderer.on('fs:changed', (e, p) => cb(p)),
+    // Prettier lives in main; returns formatted text, null (no parser), or
+    // { error } when the file does not currently parse
+    format: (path, content) => ipcRenderer.invoke('fmt:format', { path, content }),
   },
   store: {
     get: (key) => ipcRenderer.invoke('store:get', key),
