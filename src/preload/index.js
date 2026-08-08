@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('tome', {
     readDir: (p) => ipcRenderer.invoke('fs:readDir', p),
     readFile: (p) => ipcRenderer.invoke('fs:readFile', p),
     writeFile: (path, content) => ipcRenderer.invoke('fs:writeFile', { path, content }),
+    mkdir: (p) => ipcRenderer.invoke('fs:mkdir', p),
+    createFile: (p) => ipcRenderer.invoke('fs:createFile', p),
     // an open editor asks to hear about changes made outside the app
     watch: (p) => ipcRenderer.invoke('fs:watch', p),
     unwatch: (p) => ipcRenderer.invoke('fs:unwatch', p),
