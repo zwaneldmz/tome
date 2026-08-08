@@ -240,6 +240,8 @@ function popout(item, at) {
       position,
       onDidOpen: ({ window: w }) => {
         w.document.body.classList.add('tome-popout')
+        // a drag released in this window ends here, not in the main document
+        w.document.addEventListener('dragend', clearDropOverlays, true)
         const untrack = trackThemedDocument(w.document)
         w.addEventListener('pagehide', untrack, { once: true })
       },
@@ -288,6 +290,22 @@ tome.popout.onCloseRequest(async ({ id, name }) => {
   tome.popout.close(id)
 })
 
+// dockview clears an anchored drop overlay on dragend/drop, but only in the
+// document that owns it — and onDragLeave deliberately skips the clear while
+// an anchor container is in use. A drag that crosses windows ends in whichever
+// window you released over, so the window you merely passed through keeps its
+// highlight painted. Clearing every group is the same call dockview makes, and
+// is a no-op for groups that have no overlay up.
+function clearDropOverlays() {
+  for (const g of dock.groups) {
+    try {
+      g.model?.dropTargetContainer?.model?.clear?.()
+    } catch {
+      /* internal shape changed — a stale highlight is not worth throwing over */
+    }
+  }
+}
+
 const outsideWindow = (x, y) =>
   x < window.screenX ||
   y < window.screenY ||
@@ -306,6 +324,7 @@ const armTearOff = (item) => {
 document.addEventListener(
   'dragend',
   (e) => {
+    clearDropOverlays()
     const item = tearOffItem
     tearOffItem = null
     if (!item) return
@@ -488,9 +507,13 @@ export async function restoreLayout() {
 // dockview treats a referenceGroup with no direction as 'within'.
 function place(target) {
   if (target?.group) return { referenceGroup: target.group }
-  const n = dock.panels.length
+  // dock.panels spans every window — popped-out and floating groups included.
+  // Placing against the most recent pane overall meant that once anything was
+  // torn off, the main window's ＋ opened panes into that other window.
+  const grid = dock.panels.filter((p) => p.api.location.type === 'grid')
+  const n = grid.length
   if (n === 0) return undefined
-  return { referencePanel: dock.panels[n - 1], direction: n % 2 ? 'right' : 'below' }
+  return { referencePanel: grid[n - 1], direction: n % 2 ? 'right' : 'below' }
 }
 
 // A pane spawned into an existing group is a helper for what is already there,
