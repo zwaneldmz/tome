@@ -21,6 +21,8 @@ import { HistoryPanel } from './history.js'
 import { renderStatusbar, setStatusbarDock } from './statusbar.js'
 import { plusIcon, popoutIcon } from './icons.js'
 import { AGENTS } from '../shared/pane-kinds.js'
+import { createFlow } from './flow-model.js'
+import { stripControlChars } from '../shared/terminal-text.js'
 
 class Watermark {
   constructor() {
@@ -381,6 +383,7 @@ tome.conductor.onOpen(({ kind, file, source }) => {
   if (file) return openFile(file, undefined, target)
   if (kind === 'chat') return addChat(target)
   if (kind === 'brain') return addBrain(target)
+  if (kind === 'flow') return addFlow(target)
   if (kind === 'terminal' || AGENTS.includes(kind)) return addTerminal(kind, target)
   toast(`assistant asked for unknown pane: ${kind}`)
 })
@@ -442,7 +445,17 @@ function componentOf(panel) {
   // flow's params (which are just { path }, same shape as an editor's) get
   // classified as 'editor' and the panel silently opens the raw JSON on
   // restore instead of the flow canvas (plan §5).
-  if (params.path?.endsWith('.flow.json')) return 'flow'
+  //
+  // The flow canvas's own "Open as text" escape hatch (FlowPanel.openAsText)
+  // deliberately reuses this exact { path } shape and the same .flow.json
+  // path — it's the raw-JSON view of the file the canvas renders — but is
+  // saved under a different id (`text:<path>`, not `file:<path>`; see
+  // openFile). Without excluding that id prefix here, restoring a workspace
+  // that persisted ONLY the text escape hatch (the canvas tab was closed)
+  // would still classify it as 'flow', and openFile() would then dedupe to
+  // the fixed id `file:<path>` — which doesn't exist yet — and spawn an
+  // uninvited flow-canvas tab nobody asked to see again.
+  if (params.path?.endsWith('.flow.json') && !panel.id?.startsWith('text:')) return 'flow'
   if (params.path && params.mode) return 'doc'
   if (params.path) return 'editor'
   return null
@@ -512,8 +525,12 @@ export async function restoreLayout() {
           else removePanel(p)
         } else if (component === 'editor' || component === 'doc' || component === 'flow') {
           // openFile() re-routes a .flow.json path to the flow component on
-          // its own (see the check added there), so 'flow' needs no branch
-          // of its own here beyond being let through this condition.
+          // its own (see the check added there) — including the flow
+          // canvas's "Open as text" escape hatch, which restores as
+          // component 'editor' with a .flow.json path (componentOf keys off
+          // its `text:` id prefix) and which openFile special-cases back to
+          // a no-op reactivation via that same prefix. Neither case needs a
+          // branch of its own here beyond being let through this condition.
           if (typeof params.path === 'string' && (await fileExists(params.path))) {
             if (component === 'doc' && !DOC_MODES.has(params.mode)) removePanel(p)
             else await openFile(params.path, p)
@@ -580,8 +597,19 @@ export function spawnTerminal({ kind, cwd, airgap, wsName, saved, target }) {
 // landed in the prompt and presses Enter themselves. Flows v1 has no
 // allowRun-equivalent override — there is no path in this codebase that
 // makes a flow submit a command on the user's behalf (plan §4).
+//
+// composeBootstrapPrompt embeds several hand-editable flow.json string
+// fields verbatim (instructions/expects/produces, edge labels, output
+// names) — a literal "\n" inside any of them would submit whatever text
+// came before it the instant that byte reaches the pty (a bare embedded LF
+// submits a shell line on its own, same as a trailing "\r" does), which
+// would defeat the no-auto-submit contract above for exactly the case it
+// exists to protect: a `kind: 'terminal'` node's pty is a plain shell.
+// stripControlChars is conductor's own equivalent guard for model-typed text
+// with auto-run off (see runTool's type_in_terminal in conductor.js) —
+// reusing it here closes the same hole for flows.
 export function typeIntoPanel(panel, text) {
-  tome.pty.write(panel.params.ptyId, text)
+  tome.pty.write(panel.params.ptyId, stripControlChars(text))
 }
 
 export function addChat(target) {
@@ -644,10 +672,90 @@ function spawnHistory(dir, saved, target) {
   })
 }
 
+// Scans .tome/flows for existing `untitled-<n>.flow.json` files so a second
+// (or third…) assistant-created flow doesn't collide with the first — same
+// "lowest unused integer" rationale as flow-model.js's lowestUnusedId,
+// applied to filenames instead of node/edge ids because a brand-new flow has
+// no open panel yet to hold that bookkeeping in memory.
+async function lowestUnusedFlowName(root) {
+  let entries = []
+  try {
+    entries = await tome.fs.readDir(`${root}/.tome/flows`)
+  } catch {
+    // .tome/flows doesn't exist yet — every name is unused
+  }
+  const used = new Set()
+  const re = /^untitled-(\d+)\.flow\.json$/
+  for (const e of entries) {
+    const m = re.exec(e.name)
+    if (m) used.add(Number(m[1]))
+  }
+  let n = 1
+  while (used.has(n)) n++
+  return `untitled-${n}`
+}
+
+// Shared by the conductor's 'flow' open request (below) and the ＋ menu's
+// "Flow diagram…" entry (menus.js) — both need to create a brand-new
+// flow.json on disk before they can open it. A flow panel's params are just
+// { path } (plan §2.4/§5): there's no such thing as a pathless flow pane the
+// way addChat/addBrain mint a bare id and let the panel invent its own
+// content, so componentOf() and restoreLayout would have nothing to point at
+// if the file didn't exist yet — it has to be created eagerly, not lazily on
+// first save.
+export async function createFlowFile(root, name, target) {
+  const path = `${root}/.tome/flows/${name}.flow.json`
+  try {
+    await tome.fs.mkdir(`${root}/.tome/flows`)
+    // Exclusive create first (same 'wx' guard tree.js's createFileIn uses)
+    // so a name collision surfaces as a clean toast instead of silently
+    // clobbering another flow's file; the real JSON body goes in via a
+    // second, ordinary write, since a brand-new flow isn't meant to start
+    // out empty the way a new text file is.
+    await tome.fs.createFile(path)
+  } catch (err) {
+    if (String(err.message).includes('EEXIST')) toast(`“${name}.flow.json” already exists`)
+    else toast(`couldn't create “${name}.flow.json”: ${err.message}`)
+    return
+  }
+  try {
+    await tome.fs.writeFile(path, JSON.stringify(createFlow(name), null, 2) + '\n')
+  } catch (err) {
+    toast(`created “${name}.flow.json” but couldn't write its contents: ${err.message}`)
+    return
+  }
+  openFile(path, undefined, target)
+}
+
+export async function addFlow(target) {
+  if (!wsState.activeRoot) {
+    toast('assistant asked for a flow pane, but no workspace folder is open')
+    return
+  }
+  const name = await lowestUnusedFlowName(wsState.activeRoot)
+  createFlowFile(wsState.activeRoot, name, target)
+}
+
 const IMG_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'])
 const CONV_EXT = new Set(['docx', 'xlsx', 'xls'])
 
 export async function openFile(path, saved, target, reveal) {
+  // Restoring the flow canvas's "Open as text" escape hatch (FlowPanel's
+  // openAsText): it deliberately persists under `text:<path>`, not
+  // `file:<path>`, precisely so it can coexist as its own tab alongside the
+  // canvas. Every other caller either passes no `saved` at all, or a `saved`
+  // whose id already IS the canonical `file:<path>` this function computes
+  // just below — this is the one case where the persisted id doesn't match
+  // that pattern, and falling through to the generic id/routing logic would
+  // re-derive 'flow' from the .flow.json suffix and spawn/reattach an
+  // uninvited flow canvas under `file:<path>`, instead of leaving this pane
+  // alone (dock.fromJSON already recreated it under its own id — restoring
+  // it is a no-op, exactly like the happy path below for every other kind).
+  if (typeof saved?.id === 'string' && saved.id.startsWith('text:') && path.endsWith('.flow.json')) {
+    dock.getPanel(saved.id)?.api.setActive()
+    return
+  }
+
   const id = `file:${path}`
   const existing = dock.getPanel(id)
   if (existing) {

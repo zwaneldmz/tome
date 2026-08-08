@@ -11,10 +11,12 @@ import {
   addNode,
   addEdge,
   edgeError,
+  removeNode,
   validateFlow,
   topoSort,
   composeBootstrapPrompt,
   flowRoot,
+  unsafeFolderName,
 } from '../src/renderer/flow-model.js'
 
 describe('createFlow', () => {
@@ -103,6 +105,93 @@ describe('addEdge / edgeError', () => {
     expect(edgeError(flow, edge)).toBeNull()
     expect(flow.edges).toHaveLength(0)
   })
+
+  // The duplicate check compares all four of (from, to, fromOutput, toInput).
+  // A regression that drops any ONE of those four comparisons would start
+  // wrongly rejecting a legitimate edge that only shares the other three —
+  // each case below shares exactly 3 of 4 fields with the base edge and
+  // differs in only the one named, so dropping that field's comparison (and
+  // only that one) is what would turn this test red.
+  function nearDuplicateFixture() {
+    const flow = createFlow('f')
+    addNode(flow, { id: 'n1', kind: 'claude', name: 'A', outputs: [{ name: 'report' }, { name: 'report2' }], inputs: [] })
+    addNode(flow, { id: 'n2', kind: 'claude', name: 'B', outputs: [{ name: 'report' }], inputs: [] })
+    addNode(flow, {
+      id: 'n3',
+      kind: 'claude',
+      name: 'C',
+      outputs: [],
+      inputs: [{ name: 'findings' }, { name: 'findings2' }],
+    })
+    addNode(flow, { id: 'n4', kind: 'claude', name: 'D', outputs: [], inputs: [{ name: 'findings' }] })
+    addEdge(flow, { from: 'n1', to: 'n3', fromOutput: 'report', toInput: 'findings', label: 'base' })
+    return flow
+  }
+
+  it('does not reject a near-duplicate that differs only in "from"', () => {
+    const flow = nearDuplicateFixture()
+    expect(edgeError(flow, { from: 'n2', to: 'n3', fromOutput: 'report', toInput: 'findings' })).toBeNull()
+  })
+
+  it('does not reject a near-duplicate that differs only in "to"', () => {
+    const flow = nearDuplicateFixture()
+    expect(edgeError(flow, { from: 'n1', to: 'n4', fromOutput: 'report', toInput: 'findings' })).toBeNull()
+  })
+
+  it('does not reject a near-duplicate that differs only in "fromOutput"', () => {
+    const flow = nearDuplicateFixture()
+    expect(edgeError(flow, { from: 'n1', to: 'n3', fromOutput: 'report2', toInput: 'findings' })).toBeNull()
+  })
+
+  it('does not reject a near-duplicate that differs only in "toInput"', () => {
+    const flow = nearDuplicateFixture()
+    expect(edgeError(flow, { from: 'n1', to: 'n3', fromOutput: 'report', toInput: 'findings2' })).toBeNull()
+  })
+})
+
+describe('removeNode', () => {
+  it('removes the node and every edge touching it (either endpoint), keeping unrelated edges', () => {
+    const flow = createFlow('f')
+    addNode(flow, { id: 'n1', kind: 'claude', name: 'A', outputs: [{ name: 'o' }], inputs: [] })
+    addNode(flow, { id: 'n2', kind: 'claude', name: 'B', outputs: [{ name: 'o' }], inputs: [{ name: 'i' }] })
+    addNode(flow, { id: 'n3', kind: 'claude', name: 'C', outputs: [], inputs: [{ name: 'i' }] })
+    addEdge(flow, { from: 'n1', to: 'n2', fromOutput: 'o', toInput: 'i', label: 'a' }) // n2 is the target
+    addEdge(flow, { from: 'n2', to: 'n3', fromOutput: 'o', toInput: 'i', label: 'b' }) // n2 is the source
+    addEdge(flow, { from: 'n1', to: 'n3', fromOutput: 'o', toInput: 'i', label: 'c' }) // untouched by n2's removal
+
+    removeNode(flow, 'n2')
+
+    expect(flow.nodes.map((n) => n.id)).toEqual(['n1', 'n3'])
+    expect(flow.edges.map((e) => e.label)).toEqual(['c'])
+  })
+
+  it('is a no-op when the node id is not present', () => {
+    const flow = twoNodeFlow()
+    addEdge(flow, { from: 'n1', to: 'n2', fromOutput: 'report', toInput: 'findings', label: 'x' })
+    removeNode(flow, 'n99')
+    expect(flow.nodes).toHaveLength(2)
+    expect(flow.edges).toHaveLength(1)
+  })
+})
+
+describe('unsafeFolderName', () => {
+  it('rejects a name containing "/" or "\\\\"', () => {
+    expect(unsafeFolderName('a/b')).toBe(true)
+    expect(unsafeFolderName('a\\b')).toBe(true)
+  })
+
+  it('rejects a bare ".."', () => {
+    expect(unsafeFolderName('..')).toBe(true)
+  })
+
+  it('accepts an ordinary name', () => {
+    expect(unsafeFolderName('review-pipeline')).toBe(false)
+  })
+
+  it('does not flag a non-string (e.g. a missing name) as unsafe', () => {
+    expect(unsafeFolderName(undefined)).toBe(false)
+    expect(unsafeFolderName(2)).toBe(false)
+  })
 })
 
 describe('validateFlow', () => {
@@ -164,12 +253,31 @@ describe('validateFlow', () => {
     expect(result.warnings).toContain('node "n1" has unknown kind "gpt"')
   })
 
+  it('does not warn on the "terminal" kind — it is exempt from the unknown-kind check', () => {
+    const flow = baseFlow()
+    flow.nodes[0].kind = 'terminal'
+    expect(validateFlow(flow)).toEqual({ errors: [], warnings: [] })
+  })
+
   it('warns (does not error) on an unrecognized version', () => {
     const flow = baseFlow()
     flow.version = 2
     const result = validateFlow(flow)
     expect(result.errors).toEqual([])
     expect(result.warnings).toContain('unknown flow version "2" (expected 1)')
+  })
+
+  it('errors on a flow name that is not safe to use as a folder name', () => {
+    const flow = baseFlow()
+    flow.name = '../escape'
+    const result = validateFlow(flow)
+    expect(result.errors).toContain(
+      'flow name "../escape" can\'t be used as a folder name (no "/", "\\", or "..")'
+    )
+  })
+
+  it('does not error on an ordinary flow name', () => {
+    expect(validateFlow(baseFlow()).errors).toEqual([])
   })
 })
 
@@ -207,6 +315,22 @@ describe('topoSort', () => {
 
     expect(topoSort(flow).map((n) => n.id)).toEqual(['n1', 'n2', 'n3'])
   })
+
+  it('resolves ties by array insertion order, not by id string value', () => {
+    const flow = createFlow('ids-out-of-lexical-order')
+    // Explicit, deliberately non-lexically-sorted ids: every other test in
+    // this file builds ids via addNode, which only ever produces already
+    // sorted n1, n2, n3… sequences, so array order and id-string order always
+    // happen to agree there. Inserted here in this order — "n2" before
+    // "n10" — while lexicographically "n10" < "n2" (comparing the second
+    // character, "1" < "2"), the opposite of insertion order. A regression
+    // that reimplements the tie-break as "sort runnable ids as strings"
+    // instead of preserving flow.nodes order would flip this pair and still
+    // pass every other topoSort test here.
+    addNode(flow, { id: 'n2', kind: 'claude', name: 'A', outputs: [], inputs: [] })
+    addNode(flow, { id: 'n10', kind: 'claude', name: 'B', outputs: [], inputs: [] })
+    expect(topoSort(flow).map((n) => n.id)).toEqual(['n2', 'n10'])
+  })
 })
 
 describe('flowRoot', () => {
@@ -216,6 +340,13 @@ describe('flowRoot', () => {
 
   it('handles .tome nested more than one level deep in the workspace', () => {
     expect(flowRoot('/a/b/c/.tome/flows/f.flow.json')).toBe('/a/b/c')
+  })
+
+  it('walks back to the CLOSEST .tome when the path contains more than one (a nested workspace)', () => {
+    // A repo-in-a-repo layout: "nested" is itself a workspace root with its
+    // own .tome/flows/. The outer .tome (indexOf's answer) is NOT what
+    // contains this flow.json — the inner one, right before "flows/f...", is.
+    expect(flowRoot('/repoA/.tome/flows/nested/.tome/flows/f.flow.json')).toBe('/repoA/.tome/flows/nested')
   })
 
   it('falls back to the dirname when the path never passes through .tome', () => {
@@ -296,6 +427,25 @@ describe('composeBootstrapPrompt', () => {
     )
     expect(composeBootstrapPrompt(flow, researcher)).toContain(
       'Hand off "report" by writing it to .tome/flows/review-pipeline/n1-report.md, then tell the user when you\'re done.'
+    )
+  })
+
+  it('falls back to a generic hand-off instruction when the node declares no outputs', () => {
+    // A sink/terminal node is a normal case with outputs: [] — every fixture
+    // above gives both nodes at least one output, so only the per-output
+    // branch is ever exercised without this test.
+    const flow = createFlow('sink-flow')
+    const sink = addNode(flow, {
+      kind: 'claude',
+      name: 'Sink',
+      instructions: 'Consume everything, produce nothing.',
+      expects: 'Whatever upstream sends.',
+      produces: '',
+      inputs: [{ name: 'in', description: 'anything' }],
+      outputs: [],
+    })
+    expect(composeBootstrapPrompt(flow, sink)).toContain(
+      'Hand off by writing each output to .tome/flows/sink-flow/n1-<output name>.md, then tell the user when you\'re done.'
     )
   })
 })

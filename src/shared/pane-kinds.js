@@ -9,7 +9,9 @@
 export const AGENTS = ['claude', 'opencode', 'pi']
 
 // Kinds the conductor's open_pane tool may ask for; anything else gets
-// toasted as unknown by the renderer.
-export const OPENABLE_KINDS = ['terminal', ...AGENTS, 'chat', 'brain']
+// toasted as unknown by the renderer. 'flow' opens the flow canvas (a new
+// untitled flow when no file is given) — lets the assistant show a flow it
+// just wrote to disk (plan §2.6).
+export const OPENABLE_KINDS = ['terminal', ...AGENTS, 'chat', 'brain', 'flow']
 
 export const OPENABLE_KINDS_DESCRIPTION = `kind is one of: ${OPENABLE_KINDS.map((k) => `'${k}'`).join(', ')}.`

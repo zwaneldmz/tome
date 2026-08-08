@@ -6,7 +6,17 @@
 // add/delete, save + dirty guard, and a live disk-change watch. Run (§2.5)
 // is still a later commit.
 import { tome, el, toast } from '../util.js'
-import { validateFlow, addNode, addEdge, edgeError, topoSort, composeBootstrapPrompt, flowRoot } from '../flow-model.js'
+import {
+  validateFlow,
+  addNode,
+  addEdge,
+  edgeError,
+  removeNode,
+  topoSort,
+  composeBootstrapPrompt,
+  flowRoot,
+  unsafeFolderName,
+} from '../flow-model.js'
 import { dock, spawnTerminal, typeIntoPanel } from '../panes.js'
 import { modalShell, confirmModal } from '../modals.js'
 import { AGENTS } from '../../shared/pane-kinds.js'
@@ -172,6 +182,17 @@ export class FlowPanel {
       // whatever node/edge happens to be selected underneath it.
       const tag = e.target?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      // The tag check above only catches focus that landed inside a text
+      // field. Tab (or a click) can leave focus on one of the modal's own
+      // buttons instead — Save, Cancel, a port row's ✕, "+ input"/"+
+      // output" — without ever landing in an INPUT/TEXTAREA/SELECT, and
+      // Backspace there must not fall through to deleting the node/edge the
+      // still-open editor has selected underneath it (for a node with no
+      // edges that's an un-confirmed delete that silently detaches the very
+      // object the modal is still editing). modalShell always names its
+      // overlay 'ag-overlay' and keeps only one open at a time — same check
+      // onDiskChanged uses below to detect "something is being edited".
+      if (doc.getElementById('ag-overlay')) return
       if (!this.selectedNodeId && !this.selectedEdgeId) return
       e.preventDefault()
       this.deleteSelection()
@@ -588,8 +609,7 @@ export class FlowPanel {
     // before mutating (the user could have picked something else, or the
     // file could have reloaded, while the prompt was up).
     if (this.selectedNodeId !== nodeId) return
-    this.flow.nodes = this.flow.nodes.filter((n) => n.id !== nodeId)
-    this.flow.edges = this.flow.edges.filter((edge) => edge.from !== nodeId && edge.to !== nodeId)
+    removeNode(this.flow, nodeId)
     for (const key of this.portKeysByNode.get(nodeId) || []) this.portDots.delete(key)
     this.portKeysByNode.delete(nodeId)
     this.nodeCards.get(nodeId)?.remove()
@@ -885,7 +905,17 @@ export class FlowPanel {
     }
     this.savedText = json
     this.diskConflict = false
-    this.clearDirty()
+    // Re-derive dirty from the LIVE graph rather than unconditionally
+    // clearing it. `json` is a snapshot taken before the writeFile await, and
+    // a drag/edit/delete can mutate this.flow while that IPC round-trip is in
+    // flight (wireNodeInteraction's onUp calls markDirty() straight from a
+    // pointerup handler, with no await of its own). Comparing the CURRENT
+    // graph against what was actually written — the same way editor.js's
+    // save() re-runs markDirty() against the live buffer instead of trusting
+    // its own pre-await snapshot — is what keeps the ● title and the
+    // close-guard honest about whether disk truly matches memory.
+    if (JSON.stringify(this.flow, null, 2) + '\n' === this.savedText) this.clearDirty()
+    else this.markDirty()
     this.refreshWarningStrip()
   }
 
@@ -898,6 +928,16 @@ export class FlowPanel {
     if (!this.flow) return
     if (this.flow.nodes.length === 0) {
       toast('this flow has no nodes')
+      return
+    }
+    // Belt-and-suspenders alongside validateFlow's hard error on an unsafe
+    // name (flow-model.js): a bad flow.name should never reach this far —
+    // load time already refuses to render a flow whose name would escape
+    // .tome/flows/ once it becomes the mkdir target below — but this is the
+    // one place that actually touches the filesystem, so it re-checks right
+    // at the point of danger instead of only trusting an upstream gate.
+    if (unsafeFolderName(this.flow.name)) {
+      toast(`flow name "${this.flow.name}" can't be used as a folder name`)
       return
     }
     const order = topoSort(this.flow)
@@ -946,7 +986,15 @@ export class FlowPanel {
       // the user reviews every prompt before pressing Enter, so a garbled
       // paste is visible and correctable, never dangerous.
       const delay = 1500 + i * 400
-      setTimeout(() => typeIntoPanel(panel, composeBootstrapPrompt(this.flow, node)), delay)
+      // The composed prompt is multi-line for readability on disk and in
+      // tests, but typeIntoPanel strips LF outright (an embedded newline
+      // would submit a shell line on its own — see its comment). Stripping
+      // alone would glue words together at every line join ("…done.You
+      // must produce:…"), and the typed prompt is exactly what the user is
+      // asked to review — so flatten newlines to single spaces first and
+      // let typeIntoPanel's strip stay a pure conductor-mirror.
+      const prompt = composeBootstrapPrompt(this.flow, node).replace(/\s*\n+\s*/g, ' ')
+      setTimeout(() => typeIntoPanel(panel, prompt), delay)
     })
 
     toast(
@@ -1034,12 +1082,12 @@ export class FlowPanel {
       title: `${this.name} (text)`,
       params: { path: this.path },
     })
-    // After a restart this tab collapses back into the flow panel:
-    // componentOf() classifies any params.path ending in .flow.json as
-    // 'flow' regardless of which id it was saved under, and the restore path
-    // calls openFile(), which always dedupes to `file:<path>`. So the
-    // `text:` pane and the flow pane merge into one on next launch —
-    // accepted v1 behavior (plan §5's restore note, taken one step further).
+    // This tab survives a restart on its own, independent of the flow
+    // canvas: componentOf() and openFile() (panes.js) both special-case the
+    // `text:` id prefix so restoring a workspace that persisted this pane —
+    // whether or not the canvas tab was also open — reactivates this exact
+    // editor tab instead of misreading its { path } as the canvas's and
+    // spawning/colliding with an uninvited `file:<path>` flow panel.
   }
 
   dispose() {
