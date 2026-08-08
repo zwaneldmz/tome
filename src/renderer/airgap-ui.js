@@ -7,6 +7,7 @@ import { strips } from './regs.js'
 import { modalShell } from './modals.js'
 
 const blockedThrottle = new Map()
+const blockedCounts = new Map() // paneId -> blocked attempts since last click/unlock
 
 export function stripRender(paneId) {
   const strip = strips.get(paneId)
@@ -15,14 +16,29 @@ export function stripRender(paneId) {
   const label = strip.querySelector('.ag-label')
   if (!st || st.mode === 'providers') {
     strip.classList.remove('open')
-    label.textContent = '⛨ providers only — click to free'
+    label.textContent = '⛨ model APIs only — click to allow internet'
   } else {
     strip.classList.add('open')
     const left = Math.max(0, st.expiresAt - Date.now())
     const m = Math.floor(left / 60000)
     const s = String(Math.floor((left % 60000) / 1000)).padStart(2, '0')
-    label.textContent = `⛉ open internet · relocks in ${m}:${s} — click to relock`
+    label.textContent = `⛉ internet open · relocks in ${m}:${s} — click to relock`
   }
+  // the tally only lives on the strip while the pane is providers-only
+  if (st?.mode === 'open') setBlockedCount(paneId, 0)
+  else renderBlockedCount(paneId)
+}
+
+function renderBlockedCount(paneId) {
+  const countEl = strips.get(paneId)?.querySelector('.ag-count')
+  if (!countEl) return
+  const n = blockedCounts.get(paneId) || 0
+  countEl.textContent = n > 0 ? `· ${n} blocked` : ''
+}
+
+function setBlockedCount(paneId, n) {
+  blockedCounts.set(paneId, n)
+  renderBlockedCount(paneId)
 }
 setInterval(() => {
   for (const id of strips.keys()) {
@@ -35,6 +51,8 @@ tome.airgap.onState((s) => {
   for (const id of strips.keys()) stripRender(id)
 })
 tome.airgap.onBlocked(({ paneId, host }) => {
+  // the tally counts every attempt; the flash/toast stay throttled per host
+  setBlockedCount(paneId, (blockedCounts.get(paneId) || 0) + 1)
   const key = paneId + host
   if (Date.now() - (blockedThrottle.get(key) || 0) < 5000) return
   blockedThrottle.set(key, Date.now())
@@ -55,20 +73,23 @@ export async function airgapModal(paneId) {
   if (!state.auth.configured) return setupModal(paneId)
   const st = state.panes[paneId]
 
+  // opening the modal acknowledges the tally — clear it on strip click
+  setBlockedCount(paneId, 0)
+
   if (st?.mode === 'open') {
-    const m = modalShell('⛉ pane is on open internet')
-    m.note('Relock now to return this pane to providers-only mode.')
+    const m = modalShell('⛉ pane is on the open internet')
+    m.note('Relock now to return this pane to model-APIs-only mode.')
     m.button('Relock now', async () => {
       await tome.airgap.relock(paneId)
       m.close()
-      toast('Pane relocked', 'ok')
+      toast('Internet closed — back to model APIs only', 'ok')
     })
     return
   }
 
-  const m = modalShell('⛨ free this pane')
+  const m = modalShell('⛨ allow internet for this pane')
   m.note(`Grants this pane open internet for a limited time, then relocks itself.`)
-  // app login already proved the passphrase — freeing a pane wants the second
+  // app login already proved the passphrase — opening a pane wants the second
   // factor: the authenticator code when enrolled, the passphrase otherwise
   let pass = null
   let code = null
@@ -102,12 +123,12 @@ export async function airgapModal(paneId) {
     })
     if (r.ok) {
       m.close()
-      toast(`Pane freed for ${mins.value} min`, 'ok')
+      toast(`Internet allowed for ${mins.value} min`, 'ok')
     } else {
       m.err.textContent = r.error
     }
   }
-  m.button('Unlock', go)
+  m.button('Allow internet', go)
   const field = code || pass
   field.addEventListener('keydown', (e) => e.key === 'Enter' && go())
   setTimeout(() => field.focus(), 0)
@@ -115,7 +136,7 @@ export async function airgapModal(paneId) {
 
 function setupModal(paneId) {
   const m = modalShell('⛨ set up air-gap unlock')
-  m.note('Choose the passphrase that frees air-gapped panes. Stored as a salted hash.')
+  m.note('Choose the passphrase that allows internet on air-gapped panes. Stored as a salted hash.')
   const p1 = m.input('passphrase')
   const p2 = m.input('repeat passphrase')
   m.button('Set passphrase', async () => {
