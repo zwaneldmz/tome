@@ -24,6 +24,14 @@ export function closeActivePanel() {
   if (panel) closePanel(panel) // goes through the dirty close-guard in panes.js
 }
 
+// ⌘S is a native menu accelerator, which consumes the key before the page
+// sees it — so the menu, not CodeMirror's own binding, drives save on mac.
+export function saveActivePanel() {
+  const panel = dock.activePanel || activeGroup()?.activePanel
+  const view = panel?.view?.content
+  if (typeof view?.save === 'function') view.save()
+}
+
 function focusNthPanel(n) {
   const panel = activeGroup()?.panels[n]
   panel?.api.setActive()
@@ -241,6 +249,7 @@ export function quickOpen() {
 const SHORTCUTS = [
   [MOD + 'B', 'Toggle the sidebar'],
   [MOD + 'S', 'Save the active editor'],
+  [MOD + '⌥S', 'Save every editor with unsaved changes'],
   [MOD + 'W', 'Close the active pane (asks if unsaved)'],
   [MOD + 'P', 'Quick-open a file'],
   [MOD + ',', 'Preferences'],

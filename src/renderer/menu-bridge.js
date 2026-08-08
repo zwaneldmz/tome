@@ -7,8 +7,9 @@ import { tome, toast } from './util.js'
 import { addTerminal, addChat, addBrain } from './panes.js'
 import { activeWorkspace } from './workspaces.js'
 import { toggleSidebar, openThemeMenu } from './chrome.js'
-import { quickOpen, shortcutsModal, closeActivePanel } from './keys.js'
+import { quickOpen, shortcutsModal, closeActivePanel, saveActivePanel } from './keys.js'
 import { preferencesModal } from './preferences.js'
+import { saveAllEditors } from './panels/editor.js'
 import { AGENTS } from '../shared/pane-kinds.js'
 
 // 'New Pane' sends the kind through blindly (the menu is static); check the
@@ -54,6 +55,12 @@ tome.menu.onAction((action) => {
       break
     case 'close-pane':
       closeActivePanel()
+      break
+    case 'save':
+      saveActivePanel()
+      break
+    case 'save-all':
+      saveAllEditors().then((n) => n && toast(`saved ${n} file${n === 1 ? '' : 's'}`, 'ok'))
       break
   }
 })

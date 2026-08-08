@@ -6,6 +6,7 @@ import { prefs } from './state.js'
 import { modalShell } from './modals.js'
 import { setTheme, themeState, THEME_ORDER, THEME_GLYPH } from './theme.js'
 import { TERM_FONT, setTermFontSize } from './panels/terminal.js'
+import { editorPrefs, setEditorPrefs } from './panels/editor.js'
 import { totpModal } from './airgap-ui.js'
 
 const THEME_LABEL = { system: 'Match system', light: 'Light', dark: 'Dark' }
@@ -102,6 +103,46 @@ export async function preferencesModal() {
   minus.disabled = fontSize <= TERM_FONT.min
   plus.disabled = fontSize >= TERM_FONT.max
   m.body.appendChild(terminal)
+
+  // ---------- editor ----------
+  const editor = el('section', 'prefs-section')
+  editor.append(el('h4', '', 'Editor'))
+  const tabStep = el('div', 'prefs-stepper')
+  const tabValue = el('span', 'prefs-value', String(editorPrefs.tabSize))
+  const setTab = (n) => {
+    const size = Math.min(8, Math.max(1, n))
+    setEditorPrefs({ tabSize: size })
+    tabValue.textContent = String(size)
+    tabMinus.disabled = size <= 1
+    tabPlus.disabled = size >= 8
+  }
+  const tabMinus = el('button', '', '−')
+  tabMinus.type = 'button'
+  tabMinus.setAttribute('aria-label', 'Decrease indent size')
+  tabMinus.addEventListener('click', () => setTab(editorPrefs.tabSize - 1))
+  const tabPlus = el('button', '', '+')
+  tabPlus.type = 'button'
+  tabPlus.setAttribute('aria-label', 'Increase indent size')
+  tabPlus.addEventListener('click', () => setTab(editorPrefs.tabSize + 1))
+  tabStep.append(tabMinus, tabValue, tabPlus)
+  row(editor, 'Indent size', tabStep, 'spaces per Tab · 1–8')
+  tabMinus.disabled = editorPrefs.tabSize <= 1
+  tabPlus.disabled = editorPrefs.tabSize >= 8
+  toggleRow(
+    editor,
+    'Wrap long lines',
+    'soft-wrap instead of scrolling sideways',
+    () => editorPrefs.wrap,
+    (v) => setEditorPrefs({ wrap: v })
+  )
+  toggleRow(
+    editor,
+    'Trim trailing whitespace on save',
+    'applied to the buffer, so the pane stays clean',
+    () => editorPrefs.trimOnSave,
+    (v) => setEditorPrefs({ trimOnSave: v })
+  )
+  m.body.appendChild(editor)
 
   // ---------- security ----------
   const security = el('section', 'prefs-section')

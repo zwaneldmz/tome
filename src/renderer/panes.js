@@ -75,7 +75,18 @@ class GroupActions {
 }
 
 export const dock = createDockview(document.getElementById('dock'), {
-  theme: { name: 'tome', className: 'dockview-theme-tome', gap: 8 },
+  // dndOverlayMounting must be 'absolute' — it is what leaves dockview's
+  // drop-target anchor container enabled. On the default 'relative' the
+  // anchor a popped-out group gets is created disabled, so nothing but the
+  // tab strip accepts a drop from another window. Every built-in theme with
+  // a gap sets this pair for the same reason.
+  theme: {
+    name: 'tome',
+    className: 'dockview-theme-tome',
+    gap: 8,
+    dndOverlayMounting: 'absolute',
+    dndPanelOverlay: 'group',
+  },
   popoutUrl: POPOUT_URL,
   createWatermarkComponent: () => new Watermark(),
   createRightHeaderActionComponent: (group) => new GroupActions(group),
@@ -154,14 +165,15 @@ window.addEventListener('drop', (e) => {
 
 // Awaitable so callers closing several panes can do it one at a time — the
 // discard prompt is a modal, and only one modal exists at a time.
-export async function closePanel(panel) {
+export async function closePanel(panel, doc) {
   if (!panel) return
   const view = panel.view?.content
   if (typeof view?.isDirty === 'function' && view.isDirty()) {
     const ok = await confirmModal(
       'Discard unsaved changes?',
       `“${panel.title.replace(/^● /, '')}” has changes that have not been saved. Closing it discards them.`,
-      'Discard'
+      'Discard',
+      doc
     )
     if (!ok) return
   }
@@ -248,6 +260,10 @@ tome.popout.onCloseRequest(async ({ id, name }) => {
   )
   const panels = group ? [...group.panels] : []
   if (!panels.length) return tome.popout.close(id) // nothing to lose, just go
+  // The prompt is about *that* window, so it belongs in it — asking back in
+  // the main window points at the wrong place, and may be behind it. A popout
+  // group's location carries its own window, so no id bookkeeping is needed.
+  const doc = group.api.location.getWindow?.().document
 
   const one = panels.length === 1
   const what = one ? `“${panels[0].title.replace(/^● /, '')}”` : `${panels.length} panes`
@@ -257,7 +273,8 @@ tome.popout.onCloseRequest(async ({ id, name }) => {
     [
       { label: one ? 'Move pane to main window' : 'Move panes to main window', value: 'move' },
       { label: one ? 'Close pane' : `Close ${panels.length} panes`, value: 'close', cls: 'danger' },
-    ]
+    ],
+    doc
   )
   if (!choice) return // dismissed — leave the window exactly as it was
 
@@ -265,7 +282,7 @@ tome.popout.onCloseRequest(async ({ id, name }) => {
     // Sequential: closePanel can raise its own discard prompt, and only one
     // modal exists at a time. A pane whose discard is refused stays open and
     // rides back to the main window when the window closes below.
-    for (const p of panels) await closePanel(p)
+    for (const p of panels) await closePanel(p, doc)
   }
   tome.popout.close(id)
 })

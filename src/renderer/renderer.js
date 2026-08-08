@@ -15,6 +15,7 @@ import { activeWorkspace } from './workspaces.js'
 import { bootAuth } from './lock.js'
 import { bootTheme } from './theme.js'
 import { bootChrome } from './chrome.js'
+import { loadEditorPrefs } from './panels/editor.js'
 import './airgap-ui.js' // wires the air-gap event listeners + strip ticker
 import './keys.js' // the keyboard spine: pane keys, quick open, zoom, reference
 import './menu-bridge.js' // native menu bar actions → the same functions the buttons use
@@ -41,6 +42,7 @@ tome.brain.onChanged(({ ws: bws, index }) => brains.get(bws)?.onChanged(index))
     if (wsState.ws.active >= wsState.ws.workspaces.length)
       wsState.ws.active = wsState.ws.workspaces.length - 1
   }
+  await loadEditorPrefs() // before restoreLayout, so reopened editors get them
   const agPref = await tome.store.get('airgap-default')
   if (agPref !== null) prefs.airgapDefault = !!agPref
   if (await tome.store.get('conductor-run')) {
