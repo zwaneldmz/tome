@@ -342,7 +342,12 @@ function createWindow() {
       overrideBrowserWindowOptions: {
         minWidth: 320,
         minHeight: 200,
-        titleBarStyle: 'hiddenInset',
+        // A real title bar, unlike the main window's hiddenInset. popout.html
+        // has no topbar to inset the traffic lights or to offer as a drag
+        // region, so hiding the bar left dockview's tab strip covering the
+        // window buttons with no way to move the window. Keeping the bar also
+        // leaves the whole tab strip free as a drop target for panes dragged
+        // in from another window — a drag region there would swallow them.
         backgroundColor: WINDOW_BG[uiTheme],
         webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: true },
       },
