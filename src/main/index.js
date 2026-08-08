@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, systemPreferences, nativeTheme } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, systemPreferences, nativeTheme, Menu } from 'electron'
 import { join, resolve, extname, sep } from 'node:path'
 import { readdir, readFile, writeFile, mkdir, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -422,6 +422,7 @@ app.whenReady().then(async () => {
   brain.setEventSink((ws, index) => win?.webContents.send('brain:changed', { ws, index }))
 
   createWindow()
+  buildMenu()
   conductor.init({
     ptys,
     send: (channel, payload) => win?.webContents.send(channel, payload),
@@ -801,6 +802,147 @@ app.whenReady().then(async () => {
     }
   })
 })
+
+// ---- native menu bar ----
+// mac-first: standard roles cover the free/correct items; every custom Tome
+// action goes over ONE channel ('menu:action') with an id the renderer's
+// menu-bridge switches on. The renderer owns the features — the menu is
+// just a discoverable shortcut surface in front of the same code paths the
+// topbar buttons and ⌘ keys already use. Agent kinds are sent through
+// blindly: the renderer checks tome.agents.list() and toasts when the CLI
+// isn't installed.
+function buildMenu() {
+  if (process.platform !== 'darwin') return
+  const send = (action) => () => win?.webContents.send('menu:action', action)
+  const template = [
+    {
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        {
+          label: 'Preferences…',
+          accelerator: 'CmdOrCtrl+,',
+          click: send({ id: 'open-preferences' }),
+        },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        {
+          label: 'Toggle Sidebar',
+          accelerator: 'CmdOrCtrl+B',
+          click: send({ id: 'toggle-sidebar' }),
+        },
+        {
+          label: 'Appearance',
+          submenu: [
+            {
+              label: 'Light',
+              type: 'radio',
+              checked: uiTheme === 'light',
+              click: send({ id: 'set-theme', pref: 'light' }),
+            },
+            {
+              label: 'Dark',
+              type: 'radio',
+              checked: uiTheme === 'dark',
+              click: send({ id: 'set-theme', pref: 'dark' }),
+            },
+            {
+              label: 'Match System',
+              type: 'radio',
+              click: send({ id: 'set-theme', pref: 'system' }),
+            },
+          ],
+        },
+        { type: 'separator' },
+        {
+          label: 'Quick Open',
+          accelerator: 'CmdOrCtrl+P',
+          click: send({ id: 'quick-open' }),
+        },
+        {
+          label: 'Keyboard Shortcuts',
+          accelerator: 'CmdOrCtrl+/',
+          click: send({ id: 'shortcuts' }),
+        },
+        { type: 'separator' },
+        ...(app.isPackaged
+          ? []
+          : [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }]),
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Pane',
+      submenu: [
+        {
+          label: 'New Pane',
+          submenu: [
+            {
+              label: 'Terminal',
+              click: send({ id: 'new-pane', kind: 'terminal' }),
+            },
+            {
+              label: 'Assistant Chat',
+              click: send({ id: 'new-pane', kind: 'chat' }),
+            },
+            {
+              label: 'Brain',
+              click: send({ id: 'new-pane', kind: 'brain' }),
+            },
+            { type: 'separator' },
+            ...AGENTS.map((name) => ({
+              label: name,
+              click: send({ id: 'new-pane', kind: name }),
+            })),
+          ],
+        },
+        { type: 'separator' },
+        {
+          label: 'Close Pane',
+          accelerator: 'CmdOrCtrl+W',
+          click: send({ id: 'close-pane' }),
+        },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { role: 'close' },
+        { type: 'separator' },
+        { role: 'front' },
+      ],
+    },
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
 
 // ---- quit handshake ----
 // Give the renderer one beat to persist the dockview layout before the
