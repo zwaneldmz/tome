@@ -23,7 +23,9 @@ export class TerminalPanel {
       label.className = 'ag-label'
       const flash = document.createElement('span')
       flash.className = 'ag-flash'
-      strip.append(label, flash)
+      const count = document.createElement('span')
+      count.className = 'ag-count'
+      strip.append(label, flash, count)
       strip.addEventListener('click', () => airgapModal(this.ptyId))
       termHost = document.createElement('div')
       termHost.className = 'termbox'
