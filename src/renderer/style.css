@@ -1095,8 +1095,15 @@ body.tree-anim #tree {
   font-size: var(--fs-meta);
   white-space: nowrap;
 }
-.flow-open-text {
+.flow-toolbar-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.flow-add-node,
+.flow-save,
+.flow-open-text {
   color: var(--accent);
   background: transparent;
   border: 1px solid var(--line);
@@ -1107,9 +1114,19 @@ body.tree-anim #tree {
   cursor: pointer;
   white-space: nowrap;
 }
+.flow-add-node:hover,
 .flow-open-text:hover {
   border-color: var(--accent-ring);
   background: var(--accent-soft);
+}
+.flow-save {
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-color: transparent;
+  font-weight: 600;
+}
+.flow-save:hover {
+  box-shadow: var(--accent-glow);
 }
 
 .flow-warning-strip {
@@ -1210,6 +1227,28 @@ body.tree-anim #tree {
   stroke: var(--line-2);
   stroke-width: 1.5;
 }
+.flow-edge-path.selected {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+/* Invisible twin drawn over each edge path with a much wider stroke — the
+   classic SVG "hit area" trick. The visible line above is only 1.5px wide
+   (too thin to click reliably); pointer-events: stroke means only this wide
+   stroked outline is hit-testable, not the transparent fill in between. */
+.flow-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 14px;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.flow-edge-temp {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+}
 .flow-edge-label {
   fill: var(--muted);
   font-family: var(--sans);
@@ -1232,6 +1271,16 @@ body.tree-anim #tree {
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   box-shadow: var(--shadow-1);
+  cursor: grab;
+}
+.flow-node.dragging {
+  cursor: grabbing;
+  box-shadow: var(--shadow-2);
+  z-index: 2; /* ride above sibling cards while being dragged over them */
+}
+.flow-node.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
 }
 .flow-node-head {
   display: flex;
@@ -1274,7 +1323,10 @@ body.tree-anim #tree {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  pointer-events: none; /* v1 has no port interaction — edge drawing is a later slice */
+  /* The column itself stays click-through so it never steals a card drag —
+     only the dots re-enable pointer-events (below), since those are the only
+     part of a port that starts or receives an edge drag. */
+  pointer-events: none;
 }
 .flow-ports-in {
   left: 0;
@@ -1297,6 +1349,14 @@ body.tree-anim #tree {
   border-radius: 50%;
   background: var(--accent);
   border: 2px solid var(--surface);
+  pointer-events: auto; /* re-enable hit-testing despite .flow-ports above */
+}
+.flow-ports-out .flow-port-dot {
+  cursor: crosshair; /* pointerdown here starts drawing an edge */
+}
+.flow-port-dot.flow-port-hover {
+  background: var(--spark);
+  box-shadow: 0 0 0 4px var(--spark-soft);
 }
 .flow-ports-in .flow-port-dot {
   margin-left: -4px; /* straddle the card's left border — the port belongs to the edge, not the inside */
@@ -1318,6 +1378,78 @@ body.tree-anim #tree {
   left: 16px;
   color: var(--muted);
   font-size: var(--fs-meta);
+}
+
+/* ---- flow: node editor modal ---- */
+/* Compound selector (not just .flow-node-modal) so this wins over the base
+   .ag-box width rule regardless of source order — .prefs-box below gets away
+   with a single class only because it happens to be declared after .ag-box. */
+.ag-box.flow-node-modal {
+  width: 560px;
+  max-width: 92vw;
+}
+.flow-field-label {
+  color: var(--muted);
+  font-size: var(--fs-meta);
+}
+.flow-modal-ports {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.flow-port-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.flow-port-editor-head {
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.flow-port-editor-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.flow-port-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+.flow-port-row input {
+  min-width: 0;
+  padding: 5px 7px;
+  font-size: var(--fs-meta);
+}
+.flow-port-row-remove {
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: var(--fs-ui);
+  line-height: 1;
+  padding: 2px 4px;
+}
+.flow-port-row-remove:hover {
+  color: var(--g-del);
+}
+.flow-port-editor-add {
+  align-self: flex-start;
+  color: var(--accent);
+  background: transparent;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-xs);
+  padding: 4px 10px;
+  font-size: var(--fs-meta);
+  cursor: pointer;
+}
+.flow-port-editor-add:hover {
+  border-color: var(--accent-ring);
+  background: var(--accent-soft);
 }
 
 /* ---- brain ---- */
@@ -1717,13 +1849,18 @@ canvas.brain-graph {
   gap: 9px;
 }
 .ag-body input,
-.ag-body select {
+.ag-body select,
+.ag-body textarea {
   font: inherit;
   color: var(--bright);
   background: var(--bg);
   border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
   padding: 8px 10px;
+}
+.ag-body textarea {
+  min-height: 60px;
+  resize: vertical;
 }
 .ag-body input:focus {
   outline: none;
