@@ -271,13 +271,21 @@ textarea:focus-visible,
   font-size: var(--fs-ui);
   line-height: 1;
 }
-.icon-btn:hover {
+.icon-btn:hover:not(:disabled) {
   color: var(--bright);
   background: var(--hover);
 }
 .icon-btn.on {
   color: var(--accent);
   background: var(--accent-soft);
+}
+/* the tree-header new-file/new-folder buttons are the first .icon-btn ever
+   disabled (no active workspace root) — Chromium still matches :hover on a
+   disabled button, so without the :not(:disabled) guard above this rule
+   would never get a chance to dim it back down under the cursor */
+.icon-btn:disabled {
+  color: var(--faint);
+  cursor: not-allowed;
 }
 
 /* inline SVG icons scale to their host; default chrome size */
@@ -693,7 +701,9 @@ body.tree-collapsed #btn-sidebar .chev {
   -webkit-backdrop-filter: saturate(180%) blur(20px);
 }
 /* slim header inside the navigator — the minimizer lives with what it
-   controls instead of lost in the topbar traffic lights */
+   controls instead of lost in the topbar traffic lights. New-file/new-folder
+   are plain .icon-btn — disabled styling lives with that shared rule above,
+   not here, so any future header button gets it for free too. */
 #tree-head {
   display: flex;
   align-items: center;
@@ -781,6 +791,16 @@ body.tree-anim #tree {
   color: var(--accent);
   background: var(--accent-soft);
 }
+/* holds the per-root ＋ and × together so .root-head's space-between puts one
+   pair flush right — three loose flex children would split evenly instead,
+   stranding ＋ in the middle of the row */
+.root-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+.root-head .root-add,
 .root-head .root-rm {
   color: var(--muted);
   background: none;
@@ -789,8 +809,12 @@ body.tree-anim #tree {
   padding: 0 3px;
   visibility: hidden;
 }
+.root-head:hover .root-add,
 .root-head:hover .root-rm {
   visibility: visible;
+}
+.root-head .root-add:hover {
+  color: var(--accent);
 }
 .root-head .root-rm:hover {
   color: var(--g-del);

@@ -6,7 +6,7 @@ import { activeWorkspace, saveWs, renderWsChip } from './workspaces.js'
 import { addTerminal, addChat, addBrain, openFile } from './panes.js'
 import { confirmModal, promptModal } from './modals.js'
 import { renderStatusbar } from './statusbar.js'
-import { renderTree } from './tree.js'
+import { renderTree, createFileIn, createFolderIn } from './tree.js'
 import { refreshGit } from './git.js'
 import { shortcutsModal } from './keys.js'
 import { preferencesModal } from './preferences.js'
@@ -365,6 +365,18 @@ export async function populateAddMenu(menu, target) {
       const p = await tome.pickFile()
       if (p) openFile(p, undefined, target)
     },
+  })
+  menuItem(menu, {
+    label: 'New file…',
+    hint: wsState.activeRoot ? '' : 'needs a workspace folder',
+    disabled: !wsState.activeRoot,
+    onClick: () => createFileIn(wsState.activeRoot, target),
+  })
+  menuItem(menu, {
+    label: 'New folder…',
+    hint: wsState.activeRoot ? '' : 'needs a workspace folder',
+    disabled: !wsState.activeRoot,
+    onClick: () => createFolderIn(wsState.activeRoot, target),
   })
   menuRule(menu)
   menuItem(menu, { label: 'Preferences…', hint: '⌘,', onClick: () => preferencesModal() })
