@@ -1268,7 +1268,6 @@ body.tree-anim #tree {
   position: absolute;
   z-index: 1;
   width: 220px;
-  min-height: 140px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1312,20 +1311,37 @@ body.tree-anim #tree {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.flow-node-body {
-  flex: 1;
+/* Hover tooltip carrying the node's one-line summary (buildNodeCard in
+   panels/flow.js) — the card itself stays compact: kind + name + ports. */
+.flow-node-tip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 240px;
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  box-shadow: var(--shadow-2);
   color: var(--muted);
   font-size: var(--fs-meta);
   line-height: 1.4;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  opacity: 0;
+  pointer-events: none; /* never steals a card drag or a port drop */
+  transition: opacity 0.12s ease 0.25s; /* small delay so sweeping the cursor across the canvas doesn't strobe tips */
+  z-index: 3;
+}
+.flow-node:hover .flow-node-tip {
+  opacity: 1;
+}
+.flow-node.dragging .flow-node-tip {
+  opacity: 0;
+  transition: none;
 }
 .flow-ports {
   position: absolute;
-  top: 40px;
-  bottom: 10px;
+  top: 14px;
+  bottom: 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;

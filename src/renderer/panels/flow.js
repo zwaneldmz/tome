@@ -26,9 +26,12 @@ const SVG_NS = 'http://www.w3.org/2000/svg'
 // Fixed card footprint. v1 has no auto-layout (plan §4 non-goal), so a node
 // keeps exactly the x/y the file gives it — PAD is just margin around the
 // computed bounding box so cards near (0,0) aren't flush against the
-// viewport edge.
+// viewport edge. Cards are deliberately compact: kind badge + name + ports
+// only, with the instructions surfaced in a hover tooltip (see
+// buildNodeCard) — the old always-on body text wrapped and overflowed the
+// card once every field was filled.
 const NODE_W = 220
-const NODE_H = 140
+const NODE_H = 64
 const PAD = 56
 
 // Smallest bounding box that contains every node's card, plus the offset
@@ -63,6 +66,14 @@ function anchorOf(dot, wrapperRect) {
 function edgePathD(a, b) {
   const pull = Math.max(40, Math.abs(b.x - a.x) / 2)
   return `M ${a.x} ${a.y} C ${a.x + pull} ${a.y}, ${b.x - pull} ${b.y}, ${b.x} ${b.y}`
+}
+
+// One-line summary for the hover tooltip: the first non-empty line of the
+// node's instructions, capped so a wall-of-text brief can't produce a
+// wall-of-text tooltip.
+function firstLine(text) {
+  const line = String(text).split('\n').map((l) => l.trim()).find(Boolean) || ''
+  return line.length > 140 ? line.slice(0, 139) + '…' : line
 }
 
 function buildEdgePath(a, b) {
@@ -368,7 +379,14 @@ export class FlowPanel {
       el('span', 'flow-kind-badge', node.kind || '?'),
       el('span', 'flow-node-name', node.name || node.id || '')
     )
-    const body = el('div', 'flow-node-body', node.instructions || '')
+    // The card shows only the name; the node's own summary of what it does
+    // appears on hover. Native `title` is suppressed under pointer capture
+    // mid-drag and can't be styled, so this is a small custom tooltip that
+    // also hides while dragging (a floating box would otherwise chase the
+    // card across the canvas).
+    if (node.instructions && node.instructions.trim()) {
+      card.appendChild(el('div', 'flow-node-tip', firstLine(node.instructions)))
+    }
 
     const portsIn = el('div', 'flow-ports flow-ports-in')
     for (const input of node.inputs || []) portsIn.appendChild(this.buildPort(node.id, input?.name, 'in'))
@@ -376,7 +394,7 @@ export class FlowPanel {
     const portsOut = el('div', 'flow-ports flow-ports-out')
     for (const output of node.outputs || []) portsOut.appendChild(this.buildPort(node.id, output?.name, 'out'))
 
-    card.append(head, body, portsIn, portsOut)
+    card.append(head, portsIn, portsOut)
     this.nodeCards.set(node.id, card)
     this.wireNodeInteraction(card, node)
     return card
