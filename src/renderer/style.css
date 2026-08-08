@@ -593,7 +593,6 @@ body.tree-collapsed #btn-sidebar .chev {
   max-width: 480px;
   flex: none;
   overflow: auto;
-  resize: horizontal;
   border-right: 1px solid var(--line);
   padding: 8px 0 20px;
   user-select: none;
@@ -601,7 +600,23 @@ body.tree-collapsed #btn-sidebar .chev {
   backdrop-filter: saturate(180%) blur(20px);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
 }
-/* minimizer: !important beats the inline width the native resize handle sets,
+/* full-height drag handle between the tree and the dock — the width itself
+   is set by chrome.js while dragging */
+#tree-divider {
+  width: 5px;
+  margin-left: -2px;
+  flex: none;
+  cursor: col-resize;
+  z-index: 5;
+}
+#tree-divider:hover,
+#tree-divider.dragging {
+  background: var(--accent-ring);
+}
+body.tree-collapsed #tree-divider {
+  display: none;
+}
+/* minimizer: !important beats the inline width the drag handle sets,
    so releasing the collapse restores whatever width you dragged to */
 body.tree-collapsed #tree {
   width: 0 !important;
@@ -612,7 +627,7 @@ body.tree-collapsed #tree {
   overflow: hidden;
 }
 /* the width transition is only armed around a toggle — otherwise it lags the
-   native resize handle */
+   drag handle on every pointermove frame */
 body.tree-anim #tree {
   transition: width 240ms var(--ease);
 }
@@ -793,10 +808,17 @@ body.tree-anim #tree {
   cursor: pointer;
   font-size: var(--fs-meta);
   line-height: 1;
-  opacity: 0;
+  /* dim at rest so the per-group tab/tear-off actions are discoverable */
+  opacity: 0.4;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .grp-btn {
+    transition: opacity 140ms var(--ease);
+  }
 }
 .dv-groupview:hover .grp-btn,
-.dv-active-group .grp-btn {
+.dv-active-group .grp-btn,
+.grp-btn:hover {
   opacity: 1;
 }
 .grp-btn:hover {
@@ -1201,6 +1223,15 @@ canvas.brain-graph {
 .airgap-strip .ag-flash {
   color: var(--g-del);
   opacity: 0;
+}
+/* persistent blocked-attempt tally — cleared on click or unlock/relock */
+.airgap-strip .ag-count {
+  color: var(--g-del);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+}
+.airgap-strip .ag-count:empty {
+  display: none;
 }
 .airgap-strip .ag-flash.show {
   animation: agflash 4s ease-out 1;
