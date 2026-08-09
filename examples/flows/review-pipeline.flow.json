@@ -6,12 +6,12 @@
       "id": "n1",
       "kind": "claude",
       "name": "planner",
-      "instructions": "Pick one open issue (or ask the user which). Produce an implementation plan: file-level slices, the exact interfaces each slice touches, and a list of security-sensitive surfaces the reviewer should attack.\nKeep it under 400 lines — a plan nobody reads is worse than no plan.",
-      "expects": "an issue to plan for (ask the user if none is given)",
+      "instructions": "Take triage's brief for the chosen issue. Produce an implementation plan: file-level slices, the exact interfaces each slice touches, and a list of security-sensitive surfaces the reviewer should attack.\nKeep it under 400 lines — a plan nobody reads is worse than no plan.",
+      "expects": "triage's brief: one issue, its symptom, and the files it likely touches",
       "produces": "an implementation plan with file-level slices and a threat list",
-      "inputs": [],
+      "inputs": [{ "name": "brief" }],
       "outputs": [{ "name": "plan" }],
-      "x": 40,
+      "x": 340,
       "y": 160
     },
     {
@@ -23,7 +23,7 @@
       "produces": "the diff, plus a changelog of any deviations from the plan",
       "inputs": [{ "name": "plan" }],
       "outputs": [{ "name": "code" }],
-      "x": 340,
+      "x": 640,
       "y": 60
     },
     {
@@ -35,7 +35,7 @@
       "produces": "a SHIP/FIX verdict with findings",
       "inputs": [{ "name": "plan" }, { "name": "code" }],
       "outputs": [{ "name": "verdict" }],
-      "x": 640,
+      "x": 940,
       "y": 160
     },
     {
@@ -47,7 +47,20 @@
       "produces": "a release-readiness report: tests, build, unresolved findings",
       "inputs": [{ "name": "verdict" }],
       "outputs": [],
-      "x": 940,
+      "x": 1240,
+      "y": 160
+    },
+    {
+      "id": "n5",
+      "kind": "claude",
+      "name": "triage",
+      "model": "haiku",
+      "instructions": "List the open issues and pick the one to work on (ask the user when it is ambiguous). Normalise it into a short brief: the symptom in the reporter's words, the files it most likely touches, and any linked discussion.\nNo plan and no code — this node exists so the planner spends its context on the plan instead of on re-reading the tracker.",
+      "expects": "nothing — this is the first node",
+      "produces": "a short brief for one issue: symptom, likely files, links",
+      "inputs": [],
+      "outputs": [{ "name": "brief" }],
+      "x": 40,
       "y": 160
     }
   ],
@@ -55,6 +68,7 @@
     { "id": "e1", "from": "n1", "to": "n2", "fromOutput": "plan", "toInput": "plan" },
     { "id": "e2", "from": "n1", "to": "n3", "fromOutput": "plan", "toInput": "plan" },
     { "id": "e3", "from": "n2", "to": "n3", "fromOutput": "code", "toInput": "code" },
-    { "id": "e4", "from": "n3", "to": "n4", "fromOutput": "verdict", "toInput": "verdict" }
+    { "id": "e4", "from": "n3", "to": "n4", "fromOutput": "verdict", "toInput": "verdict" },
+    { "id": "e5", "from": "n5", "to": "n1", "fromOutput": "brief", "toInput": "brief" }
   ]
 }

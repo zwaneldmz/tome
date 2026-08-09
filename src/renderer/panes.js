@@ -517,7 +517,12 @@ export async function restoreLayout() {
         const component = componentOf(p)
         if (component === 'terminal') {
           const kind = AGENTS.includes(params.kind) || params.kind === 'terminal' ? params.kind : 'terminal'
-          spawnTerminal({ kind, cwd: params.cwd, airgap: params.airgap, wsName: params.ws, saved: p })
+          // `model` passes through unchecked on purpose, unlike `kind`: kind
+          // decides what this side builds, while a model only ever reaches a
+          // command line in main, which vets it against the same allowlist and
+          // falls back to the CLI default on a miss (lib/agent-spawn.js).
+          // Screening it here too would fork that rule into two copies.
+          spawnTerminal({ kind, cwd: params.cwd, airgap: params.airgap, wsName: params.ws, model: params.model, saved: p })
         } else if (component === 'chat') {
           spawnChat(p)
         } else if (component === 'brain') {
@@ -582,7 +587,7 @@ export function addTerminal(kind, target) {
 // the returned panel to read back .group so subsequent nodes in the same run
 // stack as tabs alongside the first). `saved` carries the persisted id/title
 // when recreating a pane from a stored layout.
-export function spawnTerminal({ kind, cwd, airgap, wsName, saved, target }) {
+export function spawnTerminal({ kind, cwd, airgap, wsName, saved, target, model }) {
   const id = `pty-${++counters.seq}`
   cwd = cwd || paneCwd()
   const name = cwd.split('/').pop() || cwd
@@ -593,7 +598,13 @@ export function spawnTerminal({ kind, cwd, airgap, wsName, saved, target }) {
     component: 'terminal',
     title: saved?.title || (isAgent ? `${gapped ? '⛨ ' : ''}${kind} — ${name}` : `zsh — ${name}`),
     position: saved ? { referencePanel: saved.id } : place(target),
-    params: { ptyId: id, kind, cwd, airgap: gapped, ws: wsName ?? activeWorkspace()?.name },
+    // `model` (a flow node's pinned model) rides in params rather than being
+    // passed straight to the pty, because params is what survives layout
+    // persistence: a reopened window respawns its ptys from these and would
+    // otherwise silently restore an agent on the wrong model. Written only
+    // when set, so a persisted layout carries no key for the default case —
+    // absent is the schema's spelling of "the CLI's own default".
+    params: { ptyId: id, kind, cwd, airgap: gapped, ws: wsName ?? activeWorkspace()?.name, ...(model ? { model } : {}) },
   })
 }
 

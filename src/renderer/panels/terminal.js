@@ -85,6 +85,9 @@ export class TerminalPanel {
         cwd: params.cwd,
         airgap: params.airgap,
         ws: params.ws,
+        // Undefined for every pane but a flow node that pinned one; main
+        // treats absent as "the agent CLI's own default".
+        model: params.model,
       })
       .catch((err) => {
         console.error('pty:create failed:', err)

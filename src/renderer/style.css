@@ -1303,6 +1303,16 @@ body.tree-anim #tree {
   font-size: var(--fs-micro);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  /* A pinned model rides in this badge too ("claude · haiku", buildNodeCard).
+     The listed aliases are short, but a hand-edited flow can carry a long
+     `provider/model` string, and the card's width is fixed — clip it here
+     rather than let it spill across the card border onto its neighbours. The
+     cap is generous enough that no real kind + alias pair reaches it, so the
+     name still gets the rest of the row in every ordinary case. */
+  max-width: 78%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .flow-node-name {
   color: var(--bright);
@@ -1413,6 +1423,17 @@ body.tree-anim #tree {
 .flow-field-label {
   color: var(--muted);
   font-size: var(--fs-meta);
+}
+/* The Model field only exists for kinds with a non-empty allowlist, so it is
+   shown/hidden as Kind changes (openNodeEditor). `display: contents` makes the
+   wrapper a pure toggle handle: label and select remain flex items of .ag-body,
+   so spacing matches every other field. The two-class rule below wins over it
+   without needing !important. */
+.flow-model-field {
+  display: contents;
+}
+.flow-model-field.hidden {
+  display: none;
 }
 .flow-modal-ports {
   display: grid;

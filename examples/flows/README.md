@@ -3,7 +3,7 @@
 Starter `.flow.json` files — the same shape Tome saves when you build a flow on the canvas.
 
 - **airgap-demo** — the 60-second demo as a flow: a scout probes the air-gap proxy, a builder codes offline, a terminal verifies.
-- **review-pipeline** — planner (claude) → implementer (opencode) → adversarial reviewer (pi) → verify (terminal).
+- **review-pipeline** — triage (claude on haiku) → planner (claude) → implementer (opencode) → adversarial reviewer (pi) → verify (terminal).
 - **docs-sweep** — read docs, grep for stale claims, draft minimal fixes.
 
 ## Use one
@@ -14,6 +14,7 @@ Copy a file into your project's `.tome/flows/` and open it from the Flows tree. 
 
 - A flow is `{ version: 1, name, nodes, edges }`; `name` becomes a folder name, so no `/`, `\`, or `..`.
 - Nodes carry `kind` (`claude`, `opencode`, `pi`, `terminal`), `instructions`, `expects`/`produces` (the human-readable contract), and named `inputs`/`outputs` ports.
+- A node may pin `model` — that is how review-pipeline's triage node runs on `haiku` while the rest of the pipeline takes whatever the CLI would have chosen. Leave the key out rather than writing `""`; an alias Tome doesn't recognise only warns, and that node spawns unpinned.
 - Edges wire ports, not nodes: `{ from, to, fromOutput, toInput }` — both port names must exist on their nodes or validation warns.
 - Handoff is a file per output: `.tome/flows/<name>/<node>-<output>.md`. Downstream nodes read upstream files; that's the whole mechanism.
 

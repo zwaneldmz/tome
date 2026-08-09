@@ -20,6 +20,7 @@ import {
 import { dock, spawnTerminal, typeIntoPanel } from '../panes.js'
 import { modalShell, confirmModal } from '../modals.js'
 import { AGENTS } from '../../shared/pane-kinds.js'
+import { AGENT_MODELS } from '../../shared/agent-models.js'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 
@@ -375,8 +376,14 @@ export class FlowPanel {
     card.style.top = `${y}px`
 
     const head = el('div', 'flow-node-head')
+    // A pinned model changes what Run actually spawns, so it belongs on the
+    // face of the card rather than one modal away — folded into the kind badge
+    // ("claude · haiku") because it qualifies the kind rather than standing
+    // beside it, and because a second badge would cost the name the width it
+    // needs on a 220px card.
+    const badge = node.model ? `${node.kind || '?'} · ${node.model}` : node.kind || '?'
     head.append(
-      el('span', 'flow-kind-badge', node.kind || '?'),
+      el('span', 'flow-kind-badge', badge),
       el('span', 'flow-node-name', node.name || node.id || '')
     )
     // The card shows only the name; the node's own summary of what it does
@@ -649,6 +656,9 @@ export class FlowPanel {
     const rect = this.viewportEl.getBoundingClientRect()
     const contentX = rect.width / 2 - this.pan.x - NODE_W / 2
     const contentY = rect.height / 2 - this.pan.y - NODE_H / 2
+    // No `model` key here on purpose — a new node inherits whatever the agent
+    // CLI defaults to, and writing one out would make every generated flow
+    // pin a version of that default the moment it changed.
     const node = addNode(this.flow, {
       kind: 'claude',
       name: 'untitled',
@@ -747,6 +757,55 @@ export class FlowPanel {
       kindSelect.appendChild(opt)
     }
     kindSelect.value = node.kind || kindOptions[0]
+    // What Kind reads as on open, which is what the node's saved model belongs
+    // to — not node.kind, which may be missing entirely on a hand-written node
+    // and would then make a perfectly valid pin look like it belonged to some
+    // other kind.
+    const openKind = kindSelect.value
+
+    // Model is the only field here that doesn't apply to every kind: the
+    // allowlist is per kind and several are deliberately empty (see
+    // agent-models.js — `terminal` has no entry at all, and the agents whose
+    // model catalogs are resolved dynamically ship empty lists in v1), and an
+    // empty select would just be a dead control inviting a click. So the whole
+    // field comes and goes. Label and select share one wrapper purely to give
+    // that toggle a single handle — it's `display: contents`, so both stay
+    // direct flex items of the modal body and the column spacing is unchanged.
+    // `hidden` is also the class modalShell's focus trap filters on, so a
+    // hidden Model select leaves the Tab cycle instead of lingering as an
+    // invisible stop.
+    const modelWrap = el('div', 'flow-model-field')
+    const modelSelect = el('select')
+    modelWrap.append(el('label', 'flow-field-label', 'Model'), modelSelect)
+    m.body.appendChild(modelWrap)
+
+    // Rebuilt on every Kind change, because the offer depends on the kind. The
+    // node's saved value is restored only while Kind still reads as openKind:
+    // an alias means nothing under a different agent, so switching away drops
+    // the pin — and switching back restores it, since nothing is written until
+    // Save. `(default)` carries an empty value so Save can tell "pin nothing"
+    // from "pin this" without inventing a sentinel string.
+    const fillModels = () => {
+      const kind = kindSelect.value
+      const models = [...(AGENT_MODELS[kind]?.models || [])]
+      // Same trick as Kind above, for the same reason: a hand-edited flow can
+      // pin an alias this build doesn't list — validateFlow warns rather than
+      // blocks — and for the kinds with dynamic catalogs a hand-written
+      // `provider/model` is the *only* way to pin one right now. Keeping it
+      // selectable is what stops opening this modal and saving an untouched
+      // node from quietly rewriting that choice back to the CLI default.
+      if (node.model && kind === openKind && !models.includes(node.model)) models.unshift(node.model)
+      modelWrap.classList.toggle('hidden', models.length === 0)
+      modelSelect.replaceChildren()
+      for (const name of ['', ...models]) {
+        const opt = el('option', null, name || '(default)')
+        opt.value = name
+        modelSelect.appendChild(opt)
+      }
+      modelSelect.value = kind === openKind ? node.model || '' : ''
+    }
+    fillModels()
+    kindSelect.addEventListener('change', fillModels)
 
     const instructionsInput = field('Instructions', el('textarea'))
     instructionsInput.value = node.instructions || ''
@@ -764,6 +823,13 @@ export class FlowPanel {
     m.button('Save', () => {
       node.name = nameInput.value.trim() || node.id
       node.kind = kindSelect.value
+      // Deleted rather than set to '' when defaulted: absent is the schema's
+      // only way of saying "whatever the CLI does" (flow-model.js), and an
+      // empty string would be a second spelling of it — noise in a file people
+      // hand-edit, and one more falsy case for every reader to remember.
+      const model = modelSelect.value
+      if (model) node.model = model
+      else delete node.model
       node.instructions = instructionsInput.value
       node.expects = expectsInput.value
       node.produces = producesInput.value
@@ -990,7 +1056,11 @@ export class FlowPanel {
     // Run must not special-case or bypass that.
     let group
     order.forEach((node, i) => {
-      const panel = spawnTerminal({ kind: node.kind, cwd: root, target: group ? { group } : undefined })
+      // Only an agent kind carries a model: a 'terminal' node spawns a plain
+      // login shell, which has no --model to take. Main drops it either way,
+      // but sending it would imply a pin means something there.
+      const model = AGENTS.includes(node.kind) ? node.model : undefined
+      const panel = spawnTerminal({ kind: node.kind, cwd: root, model, target: group ? { group } : undefined })
       if (!group) group = panel.group
 
       // The pty spawns asynchronously and an agent CLI takes a beat to print

@@ -2,10 +2,11 @@
 // `<name>.flow.json` (see docs/FEATURE-PLAN-file-creation-and-flows.md §2.2).
 // No DOM, no IPC: the FlowPanel (a later slice) drives the canvas, this file
 // only knows the shape of the document and the rules that keep it usable.
-// Pure on purpose — imports only the shared kind list, so vitest exercises
-// it directly and the renderer can call the exact same edge-refusal check
-// the UI needs while dragging a wire between two ports.
+// Pure on purpose — imports only the shared kind and model lists, so vitest
+// exercises it directly and the renderer can call the exact same edge-refusal
+// check the UI needs while dragging a wire between two ports.
 import { AGENTS } from '../shared/pane-kinds.js'
+import { AGENT_MODELS } from '../shared/agent-models.js'
 
 export function createFlow(name) {
   return { version: 1, name, nodes: [], edges: [] }
@@ -136,6 +137,22 @@ export function validateFlow(flow) {
     if (node.kind !== 'terminal' && !AGENTS.includes(node.kind)) {
       warnings.push(`node "${node.id}" has unknown kind "${node.kind}"`)
     }
+
+    // A pinned model is a declared contract like a port name, not structure,
+    // so it warns for the same reason an unknown kind does: a flow written
+    // against a newer build — or by hand, against an alias this one hasn't
+    // heard of — must still open and render. Nothing is lost by loading it
+    // either, because main vets the value again against this same list at
+    // spawn time and falls back to the CLI's default on a miss, so the worst
+    // an unrecognized model costs is a node that runs on defaults. Kinds with
+    // no entry here (terminal, and anything unrecognized) have no allowlist at
+    // all, so any model on them warns — a plain login shell takes no --model.
+    // Falsy is treated as absent rather than as a bad value: '' pins nothing
+    // and spawns exactly the default the author asked for, so warning about it
+    // would be a false alarm.
+    if (node.model && !(AGENT_MODELS[node.kind]?.models || []).includes(node.model)) {
+      warnings.push(`node "${node.id}" has unknown model "${node.model}" for kind "${node.kind}"`)
+    }
   }
 
   const seenEdgeIds = new Set()
@@ -251,7 +268,14 @@ export function composeBootstrapPrompt(flow, node) {
     const upstream = nodeById.get(edge.from)
     const upstreamName = upstream ? upstream.name : edge.from
     const path = handoffPath(flow.name, edge.from, edge.fromOutput)
-    lines.push(`- "${edge.fromOutput}" from ${upstreamName}: ${edge.label} (read from ${path})`)
+    // The label is optional and in practice almost always missing — the
+    // edge-drag UI writes label: '' (flow.js) and nothing edits it afterwards
+    // — so it can't be interpolated unconditionally: that typed a literal
+    // "from Researcher: undefined" at every agent in every real run, and only
+    // the always-labelled test fixture hid it. Absent label, the port name and
+    // the handoff path already say everything the line needs to.
+    const described = edge.label ? `: ${edge.label}` : ''
+    lines.push(`- "${edge.fromOutput}" from ${upstreamName}${described} (read from ${path})`)
   }
   lines.push('')
   lines.push('You must produce:')

@@ -19,6 +19,7 @@ import * as conductor from './conductor'
 import * as events from './events'
 import * as lsp from './lsp'
 import { AGENTS } from '../shared/pane-kinds.js'
+import { buildAgentSpawn } from './lib/agent-spawn.js'
 
 const ptys = new Map()
 
@@ -501,11 +502,12 @@ app.whenReady().then(async () => {
   ipcMain.on('conductor:allowRun', (e, v) => conductor.setAllowRun(v))
 
   // ---- pty ----
-  // The renderer names a vetted pane kind; the command line is built HERE so a
-  // compromised renderer can't request arbitrary binaries or arguments.
-  ipcMain.handle('pty:create', async (e, { id, kind, cwd, airgap: gapped, ws }) => {
+  // The renderer names a vetted pane kind, and may ask for a model off the
+  // shared allowlist; the command line is built HERE so a compromised renderer
+  // can't request arbitrary binaries or arguments.
+  ipcMain.handle('pty:create', async (e, { id, kind, cwd, airgap: gapped, ws, model }) => {
     try {
-      return await createPty({ id, kind, cwd, gapped, ws })
+      return await createPty({ id, kind, cwd, gapped, ws, model })
     } catch (err) {
       // The renderer fires this without awaiting, so a throw here used to
       // surface as nothing but a blank pane. Say what broke.
@@ -521,11 +523,16 @@ app.whenReady().then(async () => {
     }
   })
 
-  async function createPty({ id, kind, cwd, gapped, ws }) {
+  async function createPty({ id, kind, cwd, gapped, ws, model }) {
     const isAgent = AGENTS.includes(kind)
     if (!isAgent && kind !== 'terminal') return
     let spawnCmd = SHELL
-    let spawnArgs = isAgent ? ['-l', '-c', kind] : ['-l']
+    // A flow node may pin a model (src/shared/agent-models.js), which is the
+    // only renderer-supplied value that has ever influenced this command line
+    // — so the assembly lives in one vetted, unit-tested place rather than
+    // inline here. It returns null for 'terminal', i.e. a bare login shell.
+    const agentCmd = buildAgentSpawn(kind, { model })
+    let spawnArgs = agentCmd ? ['-l', '-c', agentCmd] : ['-l']
     // Await the login shell before spawning so the agent lands in the user's
     // real PATH (first spawn pays for the shell-out; later spawns get the cache).
     await ensureLoginEnv()

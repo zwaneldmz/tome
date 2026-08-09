@@ -1,11 +1,16 @@
 // Pins flow-model.js: the id-generation scheme (lowest unused, not a
 // counter), the exact edge refusals a future canvas UI must reuse verbatim
 // (self-loop / dangling / duplicate port pair), the error-vs-warning split
-// in validateFlow (hand-edited flow.json files must still open — plan
-// §2.2), topoSort's deterministic tie-break, and the literal text of the
-// bootstrap prompt a flow run pastes into each spawned agent (plan §2.5),
-// including the upstream handoff path an edge line must point at.
+// in validateFlow (an unrecognized kind or pinned model only warns —
+// hand-edited flow.json files must still open, plan §2.2), topoSort's
+// deterministic tie-break, and the literal text of the bootstrap prompt a
+// flow run pastes into each spawned agent (plan §2.5), including the
+// upstream handoff path an edge line must point at and the label clause it
+// must leave out when the edge has no label. Also the one check here that
+// reads the tree instead of a fixture: the starter flows shipped in
+// examples/flows/ have to keep satisfying those same rules.
 import { describe, it, expect } from 'vitest'
+import { readFileSync, readdirSync } from 'node:fs'
 import {
   createFlow,
   addNode,
@@ -259,6 +264,65 @@ describe('validateFlow', () => {
     expect(validateFlow(flow)).toEqual({ errors: [], warnings: [] })
   })
 
+  it('accepts a node with no model at all — absent means the agent CLI\'s own default', () => {
+    // baseFlow pins nothing, which is the shape of every flow written before
+    // the field existed and of every node the editor saves as "(default)":
+    // the common case has to stay silent, or opting out would look broken.
+    expect(validateFlow(baseFlow())).toEqual({ errors: [], warnings: [] })
+  })
+
+  it('treats an empty-string model as absent, not as a bad value', () => {
+    // The other half of a cross-layer contract: main's spawn vetting
+    // short-circuits on a falsy model before it ever consults the allowlist
+    // (buildAgentSpawn, pinned in agent-spawn.test.js), so '' spawns exactly
+    // the default its author asked for. If this side started treating '' as a
+    // *present* value the two layers would disagree about what the empty
+    // string means — a banner here calling the model unknown, and a process
+    // over there running happily on the default. A tightening as small as
+    // `'model' in node` in place of the falsy check is all it takes, and the
+    // README has to warn people off writing '' precisely because it is a
+    // spelling hand-edited files do reach for.
+    const flow = baseFlow()
+    flow.nodes[0].model = ''
+    expect(validateFlow(flow)).toEqual({ errors: [], warnings: [] })
+  })
+
+  it('accepts a model that is on the allowlist for the node\'s kind', () => {
+    const flow = baseFlow()
+    flow.nodes[0].model = 'haiku'
+    expect(validateFlow(flow)).toEqual({ errors: [], warnings: [] })
+  })
+
+  it('warns (does not error) on a model outside the allowlist for the node\'s kind', () => {
+    const flow = baseFlow()
+    flow.nodes[0].model = 'gpt-5'
+    const result = validateFlow(flow)
+    expect(result.errors).toEqual([])
+    expect(result.warnings).toContain('node "n1" has unknown model "gpt-5" for kind "claude"')
+  })
+
+  it('warns on a model pinned to a "terminal" node — a login shell takes no model flag', () => {
+    const flow = baseFlow()
+    flow.nodes[0].kind = 'terminal'
+    flow.nodes[0].model = 'haiku'
+    const result = validateFlow(flow)
+    expect(result.errors).toEqual([])
+    expect(result.warnings).toContain('node "n1" has unknown model "haiku" for kind "terminal"')
+  })
+
+  it('warns on a model pinned to an unknown kind, which has no allowlist entry to look up', () => {
+    // The kind that isn't in the allowlist map at all is the case a naive
+    // AGENT_MODELS[kind].models lookup would throw on, taking the whole
+    // validate — and with it the file's ability to open — down with it.
+    const flow = baseFlow()
+    flow.nodes[0].kind = 'gpt'
+    flow.nodes[0].model = 'gpt-5'
+    const result = validateFlow(flow)
+    expect(result.errors).toEqual([])
+    expect(result.warnings).toContain('node "n1" has unknown kind "gpt"')
+    expect(result.warnings).toContain('node "n1" has unknown model "gpt-5" for kind "gpt"')
+  })
+
   it('warns (does not error) on an unrecognized version', () => {
     const flow = baseFlow()
     flow.version = 2
@@ -333,6 +397,34 @@ describe('topoSort', () => {
   })
 })
 
+// The shipped starters, checked against the rules above. Every mistake these
+// files can carry — a port name that no longer matches its edge, a model alias
+// this build no longer lists, an unrecognized kind — is a *warning*, by
+// design: hand-edited flows must still open. Which means nothing else in this
+// suite, the build, or the app would ever go red over a broken example; it
+// would just quietly ship, and greet everyone who copies it into .tome/flows/
+// (as examples/flows/README.md tells them to) with a banner on the file the
+// repo advertises as the reference shape. Read off disk rather than restated
+// as a fixture, because a fixture that drifts from the shipped file is the
+// very bug this exists to catch.
+describe('shipped example flows', () => {
+  const dir = new URL('../examples/flows/', import.meta.url)
+  const examples = readdirSync(dir).filter((f) => f.endsWith('.flow.json'))
+
+  it('finds the examples the README points people at', () => {
+    // it.each over an empty list is a silent pass, so the discovery gets its
+    // own assertion: a renamed or moved folder has to fail loudly rather than
+    // turn the checks below into zero tests.
+    expect(examples.length).toBeGreaterThan(0)
+  })
+
+  it.each(examples)('%s validates clean and topo-sorts', (file) => {
+    const flow = JSON.parse(readFileSync(new URL(file, dir), 'utf8'))
+    expect(validateFlow(flow)).toEqual({ errors: [], warnings: [] })
+    expect(topoSort(flow)).not.toBeNull() // a starter that Run refuses is not a starter
+  })
+})
+
 describe('flowRoot', () => {
   it('walks back to the folder containing .tome for a flow saved under it', () => {
     expect(flowRoot('/Users/x/proj/.tome/flows/review-pipeline.flow.json')).toBe('/Users/x/proj')
@@ -403,6 +495,26 @@ describe('composeBootstrapPrompt', () => {
     expect(prompt).toContain(
       '- "report" from Researcher: findings report (read from .tome/flows/review-pipeline/n1-report.md)'
     )
+  })
+
+  it('drops the label clause when the edge label is empty, rather than typing "undefined"', () => {
+    // The labelled fixture above is the exception, not the rule: the
+    // edge-drag UI writes label: '' and nothing in the app ever edits it, so
+    // this is the line every real run actually pastes into the terminal.
+    const { flow, editor } = pipeline()
+    flow.edges[0].label = ''
+    const prompt = composeBootstrapPrompt(flow, editor)
+    expect(prompt).toContain('- "report" from Researcher (read from .tome/flows/review-pipeline/n1-report.md)')
+    expect(prompt).not.toContain('undefined')
+  })
+
+  it('drops the label clause for an edge with no label property at all', () => {
+    // The hand-written flow.json shape — the key simply isn't there.
+    const { flow, editor } = pipeline()
+    delete flow.edges[0].label
+    const prompt = composeBootstrapPrompt(flow, editor)
+    expect(prompt).toContain('- "report" from Researcher (read from .tome/flows/review-pipeline/n1-report.md)')
+    expect(prompt).not.toContain('undefined')
   })
 
   it('has no incoming-edge line for a node with no incoming edges', () => {

@@ -6,7 +6,7 @@ following the system by default.
 
 <!-- The tests badge is static — bump the count by hand when the suite grows. -->
 [![CI](https://github.com/zwaneldmz/tome/actions/workflows/build.yml/badge.svg)](https://github.com/zwaneldmz/tome/actions/workflows/build.yml)
-[![tests: 181 passing](https://img.shields.io/badge/tests-181_passing-brightgreen)](test)
+[![tests: 176 passing](https://img.shields.io/badge/tests-176_passing-brightgreen)](test)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ![Tome](docs/screenshot.png)
@@ -119,7 +119,14 @@ spoken aloud (macOS voices); dictate into the box with the macOS mic key
   drag nodes, draw edges, edit a node's brief in a modal. **Run** topologically
   sorts the graph and spawns one terminal per node with its brief pasted in —
   nothing is ever auto-submitted, so you review and press Enter yourself.
-  Starter graphs live in [examples/flows/](examples/flows/).
+  A node can also pin the **model** its agent spawns on — a select in the node
+  editor, `(default)` meaning whatever the CLI would have chosen — so the cheap
+  nodes (triage, formatting) run a smaller model of the same family while the
+  heavy ones keep the default; a pinned node wears it on its card as
+  `claude · haiku`. Claude's aliases are listed today; opencode and pi resolve
+  models from their own dynamic catalogs, so their select stays hidden until
+  those lists are filled in. Starter graphs live in
+  [examples/flows/](examples/flows/).
 - **Pane grid** — dockview tiling: drag to rearrange, drop one pane onto
   another to stack as named tabs. Every pane header carries a `＋` that opens
   a new pane *as a tab in that group* — so an agent and the helpers it needs
