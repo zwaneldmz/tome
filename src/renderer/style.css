@@ -403,6 +403,75 @@ body.tree-collapsed #btn-sidebar .chev {
     box-shadow: 0 0 0 10px transparent;
   }
 }
+
+/* voice chat toggle — one button, four states. The state classes are set by
+   voice.js alongside title/aria-label; the static ring/dot double as the
+   reduced-motion fallback (animations below are gated on no-preference). */
+#btn-voice.listening {
+  color: var(--accent);
+  background: var(--accent-soft);
+  position: relative; /* anchors the ::after dot */
+}
+#btn-voice.listening::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+#btn-voice.thinking {
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
+}
+#btn-voice.speaking {
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+#btn-voice.speaking .icon {
+  fill: currentColor; /* filled mic while the assistant talks */
+}
+@media (prefers-reduced-motion: no-preference) {
+  #btn-voice.listening {
+    animation: voice-listen 1.6s ease-out infinite;
+  }
+  @keyframes voice-listen {
+    0% {
+      box-shadow: 0 0 0 0 var(--accent-ring);
+    }
+    100% {
+      box-shadow: 0 0 0 9px transparent;
+    }
+  }
+  #btn-voice.thinking {
+    animation: voice-think 1.1s ease-in-out infinite;
+  }
+  @keyframes voice-think {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+  #btn-voice.speaking {
+    animation: voice-speak 0.9s ease-in-out infinite;
+  }
+  @keyframes voice-speak {
+    0%,
+    100% {
+      box-shadow: inset 0 0 0 1px var(--accent);
+    }
+    50% {
+      box-shadow:
+        inset 0 0 0 1px var(--accent),
+        0 0 0 3px var(--accent-soft);
+    }
+  }
+}
 #git-chip.hidden {
   display: none;
 }

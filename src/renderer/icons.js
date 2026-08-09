@@ -101,6 +101,13 @@ export const popoutIcon = () =>
 // plus (used at larger stroke for the add button)
 export const plusIcon = () => svg('M8 2.5 V13.5 M2.5 8 H13.5')
 
+// microphone — capsule on a cradle stand, for the topbar voice toggle
+export const micIcon = () =>
+  svg([
+    'M8 1.8 A2.2 2.2 0 0 0 5.8 4 V7.6 A2.2 2.2 0 0 0 10.2 7.6 V4 A2.2 2.2 0 0 0 8 1.8 Z',
+    'M4 7.2 A4 4 0 0 0 12 7.2 M8 11.2 V14.2 M5.6 14.2 H10.4',
+  ])
+
 // status-bar context: terminal prompt, chat bubble, note/brain, history clock
 export const terminalIcon = () =>
   svg(['M2.6 3 H13.4 A1.2 1.2 0 0 1 14.6 4.2 V11.8 A1.2 1.2 0 0 1 13.4 13 H2.6 A1.2 1.2 0 0 1 1.4 11.8 V4.2 A1.2 1.2 0 0 1 2.6 3 Z', 'M4 6 L6.5 8 L4 10 M8 10.5 H12'])
