@@ -298,7 +298,6 @@ window.addEventListener('keydown', (e) => {
   }
   const mod = e.metaKey || e.ctrlKey
   if (!mod || e.altKey) return
-  const key = e.key.toLowerCase()
 
   // ⌘W (close pane) and ⌘P (quick open) are native menu accelerators — the
   // menu-bridge routes them here; the renderer must not also handle them or
