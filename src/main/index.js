@@ -1174,6 +1174,10 @@ function buildMenu() {
           accelerator: 'CmdOrCtrl+,',
           click: send({ id: 'open-preferences' }),
         },
+        {
+          label: 'Setup wizard…',
+          click: send({ id: 'open-onboarding' }),
+        },
         { type: 'separator' },
         { role: 'hide' },
         { role: 'hideOthers' },
@@ -1249,6 +1253,13 @@ function buildMenu() {
           label: 'Keyboard Shortcuts',
           accelerator: 'CmdOrCtrl+/',
           click: send({ id: 'shortcuts' }),
+        },
+        {
+          // The renderer bridge for this action lands with WS-A; menu-bridge
+          // ignores unknown ids, so shipping the menu item first is safe.
+          label: 'Voice chat',
+          accelerator: 'CmdOrCtrl+Shift+V',
+          click: send({ id: 'toggle-voice' }),
         },
         { type: 'separator' },
         ...(app.isPackaged

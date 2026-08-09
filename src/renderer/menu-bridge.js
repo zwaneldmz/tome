@@ -10,6 +10,7 @@ import { toggleSidebar, openThemeMenu } from './chrome.js'
 import { quickOpen, shortcutsModal, closeActivePanel, saveActivePanel } from './keys.js'
 import { preferencesModal } from './preferences.js'
 import { toggleVoice } from './voice.js'
+import { showOnboarding } from './onboarding.js'
 import { saveAllEditors } from './panels/editor.js'
 import { AGENTS } from '../shared/pane-kinds.js'
 
@@ -35,6 +36,9 @@ tome.menu.onAction((action) => {
   switch (action?.id) {
     case 'open-preferences':
       preferencesModal()
+      break
+    case 'open-onboarding':
+      showOnboarding()
       break
     case 'toggle-sidebar':
       toggleSidebar()

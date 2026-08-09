@@ -15,6 +15,7 @@ import { startGitPolling, initGitMenu } from './git.js'
 import { activeWorkspace, syncFolders } from './workspaces.js'
 import { checkRepoAirgap } from './repo-airgap.js'
 import { bootAuth } from './lock.js'
+import { maybeShowOnboarding } from './onboarding.js'
 import { bootTheme } from './theme.js'
 import { bootChrome } from './chrome.js'
 import { initVoice, voiceActive, VOICE_CHAT_ID } from './voice.js'
@@ -59,6 +60,7 @@ mark('module evaluation start')
   await bootChrome()
   mark('bootChrome done')
   await initVoice() // topbar mic + chat-voice event listeners (inert until toggled)
+  maybeShowOnboarding() // first run only — checks 'onboarded-v1' itself
   const saved = await tome.store.get('workspaces')
   if (saved && Array.isArray(saved.workspaces)) {
     wsState.ws = saved

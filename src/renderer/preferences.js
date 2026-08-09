@@ -8,6 +8,7 @@ import { setTheme, themeState, THEME_ORDER, THEME_GLYPH } from './theme.js'
 import { TERM_FONT, setTermFontSize } from './panels/terminal.js'
 import { editorPrefs, setEditorPrefs } from './panels/editor.js'
 import { totpModal } from './airgap-ui.js'
+import { showOnboarding } from './onboarding.js'
 
 const THEME_LABEL = { system: 'Match system', light: 'Light', dark: 'Dark' }
 const SIDEBAR_DEFAULT = 236
@@ -436,4 +437,16 @@ export async function preferencesModal() {
   })
   sidebar.appendChild(reset)
   m.body.appendChild(sidebar)
+
+  // ---------- onboarding ----------
+  const onboarding = el('section', 'prefs-section')
+  onboarding.append(el('h4', '', 'Onboarding'))
+  const replay = el('button', 'ag-btn ghost', 'Replay setup wizard…')
+  replay.type = 'button'
+  replay.addEventListener('click', () => {
+    m.close()
+    showOnboarding()
+  })
+  onboarding.appendChild(replay)
+  m.body.appendChild(onboarding)
 }
