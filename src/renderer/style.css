@@ -671,6 +671,10 @@ body.tree-collapsed #btn-sidebar .chev {
 }
 #statusbar .sb-ctx-icon {
   display: inline-flex;
+  /* centres a one-character glyph as happily as it does a 13px SVG — some
+     panels draw their icon, some just have a symbol (runs.js) */
+  align-items: center;
+  justify-content: center;
   width: 13px;
   height: 13px;
   color: var(--muted);
@@ -678,6 +682,20 @@ body.tree-collapsed #btn-sidebar .chev {
 #statusbar .sb-ctx-icon .icon {
   width: 13px;
   height: 13px;
+}
+/* Background runs: a button, because clicking it opens the runs pane — the
+   only interactive item in the bar. Stripped back to look like its
+   neighbours, since a chrome-heavy button in a 26px bar reads as an error. */
+#sb-runs {
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+#sb-runs:hover {
+  color: var(--bright);
 }
 #sb-airgap.sb-open {
   color: var(--spark);
@@ -1132,6 +1150,31 @@ body.tree-anim #tree {
 }
 .flow-save:hover,
 .flow-run:hover {
+  box-shadow: var(--accent-glow);
+}
+/* Run is a split control: the two buttons read as one, divided by a hairline
+   rather than a gap, so the ▾ is visibly part of Run and not a fourth
+   toolbar action. */
+.flow-run-split {
+  display: inline-flex;
+}
+.flow-run-split .flow-run {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.flow-run-more {
+  color: var(--accent-fg);
+  background: var(--accent);
+  border: 1px solid transparent;
+  border-left: 1px solid var(--accent-ring);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  padding: 5px 9px;
+  font: inherit;
+  font-size: var(--fs-meta);
+  line-height: 1;
+  cursor: pointer;
+}
+.flow-run-more:hover {
   box-shadow: var(--accent-glow);
 }
 
@@ -2432,6 +2475,341 @@ canvas.brain-graph {
 }
 .events-err,
 .events-empty {
+  color: var(--muted);
+  padding: 8px 15px;
+}
+
+/* ================= flow runs =================
+   A CI pipeline in Tome's tokens: run rows that expand into layer columns of
+   node pills, joined by connectors on --graph-edge — the same colour the
+   brain graph draws its edges in, so "a line between two things that depend
+   on each other" means one thing across the app. Every colour here is a
+   token, so both themes come out of the same rules. */
+.panel-runs {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+}
+.runs-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.runs-title {
+  flex: 1;
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  padding-left: 6px;
+}
+.runs-refresh {
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 0 10px;
+  cursor: pointer;
+}
+.runs-refresh:hover {
+  border-color: var(--accent-ring);
+  background: var(--accent-soft);
+}
+.runs-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 6px 10px;
+}
+.runs-run + .runs-run {
+  border-top: 1px solid var(--line);
+}
+.runs-rowbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 8px;
+}
+.runs-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-meta);
+  text-align: left;
+  cursor: pointer;
+}
+.runs-row:hover {
+  background: var(--hover);
+}
+/* The row's disclosure affordance — same idiom as .airgap-strip.open: the
+   state lives on the row, the glyph turns with it. Blockified by the flex
+   parent, which is what makes the transform apply at all to a span. */
+.runs-caret {
+  flex: none;
+  color: var(--faint);
+}
+.runs-row.open .runs-caret {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .runs-caret {
+    transition: transform 120ms var(--ease);
+  }
+}
+.runs-badge {
+  flex: none;
+  color: var(--muted);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  padding: 0 8px;
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+}
+.runs-badge.runs-st-running {
+  color: var(--accent);
+  border-color: var(--accent-ring);
+  background: var(--accent-soft);
+}
+.runs-badge.runs-st-done {
+  color: var(--g-add);
+  border-color: var(--g-add);
+}
+.runs-badge.runs-st-failed {
+  color: var(--g-del);
+  border-color: var(--g-del);
+}
+/* Written out rather than left to inherit the base badge: 'canceling…' is
+   deliberately the quiet state between 'running' and 'canceled', and a later
+   change to the base must not silently give it a colour of its own. */
+.runs-badge.runs-st-canceling {
+  color: var(--muted);
+  border-color: var(--line-2);
+}
+.runs-flow {
+  color: var(--bright);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runs-id {
+  flex: none;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+}
+/* Whether the run's agents were sandboxed. Same treatment #sb-airgap uses for
+   the same fact — accent for gated, --spark for open — so "on the open
+   internet" reads identically wherever the app admits to it. */
+.runs-gap {
+  flex: none;
+  color: var(--accent);
+  font-size: var(--fs-micro);
+}
+.runs-gap.open {
+  color: var(--spark);
+  text-shadow: var(--spark-text-glow);
+}
+.runs-when {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+}
+.runs-cancel {
+  flex: none;
+  color: var(--g-del);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 3px 10px;
+  font: inherit;
+  font-size: var(--fs-micro);
+  cursor: pointer;
+}
+.runs-cancel:hover:not(:disabled) {
+  border-color: var(--g-del);
+  background: var(--g-del-soft);
+}
+/* Mid-cancel: the button stays where it was clicked and says what it is doing,
+   rather than vanishing and leaving a row that still reads 'running'. */
+.runs-cancel:disabled {
+  color: var(--muted);
+  border-color: var(--line-2);
+  cursor: default;
+}
+/* The pipeline can be wider than the pane — it scrolls sideways rather than
+   wrapping, because a layer that wrapped would stop meaning "one column, one
+   step of the graph". */
+.runs-body:not(:empty) {
+  padding: 4px 10px 12px;
+  overflow-x: auto;
+}
+.runs-pipeline {
+  position: relative;
+}
+.runs-edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+.runs-conn {
+  fill: none;
+  stroke: var(--graph-edge);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.runs-pill {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  font: inherit;
+  font-size: var(--fs-meta);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+}
+.runs-pill:hover {
+  border-color: var(--line-2);
+}
+.runs-pill.runs-st-running {
+  border-color: var(--accent-ring);
+}
+.runs-pill.runs-st-failed {
+  border-color: var(--g-del);
+}
+.runs-pill.runs-st-skipped {
+  color: var(--faint);
+}
+.runs-pill.open {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.runs-pill-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.runs-pill-model {
+  flex: none;
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+}
+/* One 13px dot per status. done/failed/canceled are glyphs; pending, skipped
+   and running are drawn with borders — a hollow ring, a dashed one, and an
+   accent ring with a brighter quarter that spins. */
+.runs-dot {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+}
+.runs-dot.runs-st-pending {
+  border: 1px solid var(--line-2);
+}
+.runs-dot.runs-st-skipped {
+  border: 1px dashed var(--line-2);
+}
+.runs-dot.runs-st-done {
+  color: var(--g-add);
+}
+.runs-dot.runs-st-failed {
+  color: var(--g-del);
+}
+.runs-dot.runs-st-canceled {
+  color: var(--muted);
+}
+/* The static form is already legible — a ring with one bright quarter reads
+   as "in progress" without moving — so reduced motion drops the animation
+   and keeps the shape, rather than needing a separate rule to undo it. */
+.runs-dot.runs-st-running {
+  border: 2px solid var(--accent-ring);
+  border-top-color: var(--accent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .runs-dot.runs-st-running {
+    animation: runs-spin 0.9s linear infinite;
+  }
+  @keyframes runs-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}
+.runs-log {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.runs-log-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+.runs-log-name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runs-log-close {
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  padding: 0 4px;
+  font: inherit;
+  cursor: pointer;
+}
+.runs-log-close:hover {
+  color: var(--bright);
+}
+.runs-log-body {
+  margin: 0;
+  padding: 9px 11px;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.runs-err,
+.runs-empty {
   color: var(--muted);
   padding: 8px 15px;
 }

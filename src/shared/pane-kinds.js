@@ -11,7 +11,9 @@ export const AGENTS = ['claude', 'opencode', 'pi']
 // Kinds the conductor's open_pane tool may ask for; anything else gets
 // toasted as unknown by the renderer. 'flow' opens the flow canvas (a new
 // untitled flow when no file is given) — lets the assistant show a flow it
-// just wrote to disk (plan §2.6).
-export const OPENABLE_KINDS = ['terminal', ...AGENTS, 'chat', 'brain', 'flow']
+// just wrote to disk (plan §2.6). 'runs' opens the background-run pipelines
+// page, which is read-only: the assistant can show what is running, and has
+// no way to start or stop it.
+export const OPENABLE_KINDS = ['terminal', ...AGENTS, 'chat', 'brain', 'flow', 'runs']
 
 export const OPENABLE_KINDS_DESCRIPTION = `kind is one of: ${OPENABLE_KINDS.map((k) => `'${k}'`).join(', ')}.`

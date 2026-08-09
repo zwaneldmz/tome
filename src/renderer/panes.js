@@ -18,6 +18,7 @@ import { ChatPanel } from './panels/chat.js'
 import { BrainPanel } from './panels/brain.js'
 import { FlowPanel } from './panels/flow.js'
 import { EventsPanel } from './panels/events.js'
+import { RunsPanel } from './panels/runs.js'
 import { HistoryPanel } from './history.js'
 import { renderStatusbar, setStatusbarDock } from './statusbar.js'
 import { plusIcon, popoutIcon } from './icons.js'
@@ -109,6 +110,8 @@ export const dock = createDockview(document.getElementById('dock'), {
         return new HistoryPanel()
       case 'events':
         return new EventsPanel()
+      case 'runs':
+        return new RunsPanel()
       case 'flow':
         return new FlowPanel()
       default:
@@ -387,6 +390,9 @@ tome.conductor.onOpen(({ kind, file, source }) => {
   if (kind === 'chat') return addChat(target)
   if (kind === 'brain') return addBrain(target)
   if (kind === 'flow') return addFlow(target)
+  // Read-only, like the event log the assistant can already be asked about:
+  // opening the runs page shows what is running, it starts nothing.
+  if (kind === 'runs') return addRuns(target)
   if (kind === 'terminal' || AGENTS.includes(kind)) return addTerminal(kind, target)
   toast(`assistant asked for unknown pane: ${kind}`)
 })
@@ -445,6 +451,7 @@ function componentOf(panel) {
   if (params.ws) return 'brain'
   if (params.dir) return 'history'
   if (params.events) return 'events'
+  if (params.runs) return 'runs'
   // Must precede the generic path&&mode / bare-path fallthroughs below, or a
   // flow's params (which are just { path }, same shape as an editor's) get
   // classified as 'editor' and the panel silently opens the raw JSON on
@@ -535,6 +542,11 @@ export async function restoreLayout() {
         } else if (component === 'events') {
           // main owns the log file (userData) — nothing to existence-check.
           spawnEvents(p)
+        } else if (component === 'runs') {
+          // Runs live in main's memory for the life of the app, so a restored
+          // pane comes back empty after a restart rather than stale — which is
+          // the honest state: those child processes died with the last window.
+          spawnRuns(p)
         } else if (component === 'editor' || component === 'doc' || component === 'flow') {
           // openFile() re-routes a .flow.json path to the flow component on
           // its own (see the check added there) — including the flow
@@ -608,13 +620,22 @@ export function spawnTerminal({ kind, cwd, airgap, wsName, saved, target, model 
   })
 }
 
-// A flow's Run action types a node's bootstrap prompt into its freshly
-// spawned terminal via this — and ONLY this. It never appends '\r'. This is
-// the same no-auto-submit contract as the conductor's type_in_terminal with
-// auto-run off (see conductor.js's allowRun gate): the user reviews what
-// landed in the prompt and presses Enter themselves. Flows v1 has no
-// allowRun-equivalent override — there is no path in this codebase that
-// makes a flow submit a command on the user's behalf (plan §4).
+// A flow's "Run in terminals" types a node's bootstrap prompt into its
+// freshly spawned terminal via this — and ONLY this. It never appends '\r'.
+// This is the same no-auto-submit contract as the conductor's
+// type_in_terminal with auto-run off (see conductor.js's allowRun gate): the
+// user reviews what landed in the prompt and presses Enter themselves.
+// Nothing typed into an interactive pane is ever submitted for the user, by
+// a flow or by anything else.
+//
+// The narrowed contract, since background runs landed
+// (docs/FEATURE-PLAN-background-flow-runs.md): the plain Run no longer comes
+// through here at all — it hands the flow to main's runner, which submits the
+// composed brief and nothing else, on an explicit Run click and nothing else,
+// headless (`-p`, a process that answers and exits, leaving no session to
+// type into), inside the same air gap a pane gets, with every transition in
+// the event log. This path is what stayed: an interactive agent, driven by
+// the user, with the brief pre-typed and unsubmitted.
 //
 // composeBootstrapPrompt embeds several hand-editable flow.json string
 // fields verbatim (instructions/expects/produces, edge labels, output
@@ -709,6 +730,29 @@ function spawnEvents(saved, target) {
     title: saved?.title || 'event log',
     position: saved ? { referencePanel: saved.id } : place(target),
     params: { events: true },
+  })
+}
+
+export function addRuns(target) {
+  spawnRuns(undefined, target)
+}
+
+// One runs pane at a time, same fixed-id dedupe as the event log: both are
+// app-wide views of main's state rather than views of a file, so a second
+// request means "show me that", not "give me another one".
+function spawnRuns(saved, target) {
+  const id = 'runs:list'
+  const existing = dock.getPanel(id)
+  if (existing) {
+    existing.api.setActive()
+    return
+  }
+  dock.addPanel({
+    id,
+    component: 'runs',
+    title: saved?.title || '▶ flow runs',
+    position: saved ? { referencePanel: saved.id } : place(target),
+    params: { runs: true },
   })
 }
 

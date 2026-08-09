@@ -34,6 +34,25 @@ describe('summary', () => {
     )
   })
 
+  it('flow-run — flow · node · status, with the exit code when a node ended', () => {
+    // Background runs write one record per transition; the node-level ones
+    // carry a node id and the run-level ones do not, so both read as one line.
+    expect(
+      summary({ kind: 'flow-run', event: 'run', run: 'm1h2k3', flow: 'release-notes', status: 'running', nodes: 3 })
+    ).toBe('release-notes · running')
+    expect(
+      summary({ kind: 'flow-run', event: 'node', run: 'm1h2k3', flow: 'release-notes', node: 'n2', agent: 'claude', status: 'failed', exit: 1 })
+    ).toBe('release-notes · n2 · failed · exit 1')
+    // exit 0 is a value, not an absence — `!= null`, not truthiness.
+    expect(
+      summary({ kind: 'flow-run', event: 'node', flow: 'release-notes', node: 'n1', status: 'done', exit: 0 })
+    ).toBe('release-notes · n1 · done · exit 0')
+    // The cancel record has no status of its own; the verb is the event.
+    expect(summary({ kind: 'flow-run', event: 'cancel', run: 'm1h2k3', flow: 'release-notes' })).toBe(
+      'release-notes · cancel'
+    )
+  })
+
   it('default branch joins non-ts/kind field values', () => {
     expect(summary({ kind: 'something:new', ts: 't1', a: 'x', b: 'y' })).toBe('x · y')
   })

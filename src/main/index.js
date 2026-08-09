@@ -17,6 +17,7 @@ import * as authlock from './authlock'
 import * as brain from './brain'
 import * as conductor from './conductor'
 import * as events from './events'
+import * as flowRunner from './flow-runner'
 import * as lsp from './lsp'
 import { AGENTS } from '../shared/pane-kinds.js'
 import { buildAgentSpawn } from './lib/agent-spawn.js'
@@ -523,6 +524,42 @@ app.whenReady().then(async () => {
     }
   })
 
+  // ---- agent environment ----
+  // Everything an agent process needs beyond its own command line: the login
+  // shell's real PATH, the provider secrets a non-interactive shell never
+  // reads, the workspace's brain vault, and — when the pane is gapped — the
+  // per-pane proxy plus the seatbelt wrap that makes that proxy the only way
+  // out. Factored out of createPty because background flow runs spawn agents
+  // too (flow-runner.js) and must land in EXACTLY this environment: a
+  // background agent that quietly skipped the sandbox would be the one
+  // process in this app with unfiltered egress, and a duplicated copy of this
+  // block is how that happens six months from now.
+  //
+  // Returns the env plus the wrap rather than a finished command line,
+  // because the two callers spawn differently — createPty runs a login shell
+  // through node-pty, the runner runs the CLI headless through
+  // child_process.spawn — while needing the identical wrap around whatever
+  // they spawn.
+  async function buildAgentEnv({ paneId, agent, gapped, ws }) {
+    // Await the login shell before spawning so the agent lands in the user's
+    // real PATH (first spawn pays for the shell-out; later spawns get the cache).
+    await ensureLoginEnv()
+    const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
+    if (agent) Object.assign(env, await resolveAgentSecrets())
+    if (ws) {
+      env.TOME_BRAIN = await brain.ensureBrain(ws)
+      const info = await brain.coreInfo(await readStore('core-vault'))
+      if (info.configured) env.TOME_CORE_VAULT = info.root
+    }
+    if (!(gapped && process.platform === 'darwin')) return { env, sandbox: null }
+    const { port } = await airgap.createPaneProxy(paneId)
+    const proxy = `http://127.0.0.1:${port}`
+    for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY'])
+      env[k] = proxy
+    env.NO_PROXY = env.no_proxy = 'localhost,127.0.0.1'
+    return { env, sandbox: { cmd: '/usr/bin/sandbox-exec', args: ['-p', airgap.seatbeltProfile(userData)] } }
+  }
+
   async function createPty({ id, kind, cwd, gapped, ws, model }) {
     const isAgent = AGENTS.includes(kind)
     if (!isAgent && kind !== 'terminal') return
@@ -533,24 +570,10 @@ app.whenReady().then(async () => {
     // inline here. It returns null for 'terminal', i.e. a bare login shell.
     const agentCmd = buildAgentSpawn(kind, { model })
     let spawnArgs = agentCmd ? ['-l', '-c', agentCmd] : ['-l']
-    // Await the login shell before spawning so the agent lands in the user's
-    // real PATH (first spawn pays for the shell-out; later spawns get the cache).
-    await ensureLoginEnv()
-    const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
-    if (isAgent) Object.assign(env, await resolveAgentSecrets())
-    if (ws) {
-      env.TOME_BRAIN = await brain.ensureBrain(ws)
-      const info = await brain.coreInfo(await readStore('core-vault'))
-      if (info.configured) env.TOME_CORE_VAULT = info.root
-    }
-    if (gapped && process.platform === 'darwin') {
-      const { port } = await airgap.createPaneProxy(id)
-      const proxy = `http://127.0.0.1:${port}`
-      for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY'])
-        env[k] = proxy
-      env.NO_PROXY = env.no_proxy = 'localhost,127.0.0.1'
-      spawnArgs = ['-p', airgap.seatbeltProfile(userData), spawnCmd, ...spawnArgs]
-      spawnCmd = '/usr/bin/sandbox-exec'
+    const { env, sandbox } = await buildAgentEnv({ paneId: id, agent: isAgent, gapped, ws })
+    if (sandbox) {
+      spawnArgs = [...sandbox.args, spawnCmd, ...spawnArgs]
+      spawnCmd = sandbox.cmd
     }
     const p = pty.spawn(spawnCmd, spawnArgs, {
       name: 'xterm-256color',
@@ -932,6 +955,31 @@ app.whenReady().then(async () => {
     return Promise.all(AGENTS.map(check))
   })
 
+  // ---- background flow runs ----
+  // A flow's Run executes the graph here instead of typing briefs into panes:
+  // one headless child per node, sequenced by the graph, every transition in
+  // the event log. This is the one path in the app that submits anything on
+  // the user's behalf, and it is allowed to only because of how narrow it is
+  // — the composed brief and nothing else, on an explicit Run and nothing
+  // else, headless (no interactive session to hijack), inside the same air
+  // gap a pane gets. Registered after the lock gate like every other channel:
+  // a locked app must not be able to start, stop, or enumerate agent
+  // processes. The renderer hands over a path and an id; main owns the
+  // command lines, the children, and run.json.
+  flowRunner.init({
+    canOpenFile: isConfinedPath,
+    buildAgentEnv,
+    closeAgentEnv: airgap.closePane,
+    // Same key the renderer's own default reads (menus.js writes it) — a
+    // background node is gapped exactly when a freshly spawned agent pane
+    // would be, and absent means on.
+    airgapDefault: async () => (await readStore('airgap-default')) !== false,
+    logEvent: events.logEvent,
+  })
+  ipcMain.handle('runs:start', (e, flowPath) => flowRunner.startRun(flowPath, win))
+  ipcMain.handle('runs:cancel', (e, id) => flowRunner.cancelRun(id))
+  ipcMain.handle('runs:list', () => flowRunner.snapshotAll())
+
   // ---- chat (Claude API, streamed from main so the key never enters the renderer) ----
   // Resolved per send so a key added to the shell after boot is picked up on
   // the next message; the SDK client itself is built once (anthropic ??=).
@@ -1146,8 +1194,23 @@ ipcMain.on('app:quit-ready', () => {
   if (quitting) app.quit()
 })
 
+// Background flow nodes are children of this process but of no pane — nothing
+// else here would ever kill them, and an orphaned headless agent keeps working
+// (and billing) with no window left to show for it. PTYs get away with the
+// window-all-closed hook alone because node-pty SIGHUPs its child when the
+// master fd closes; a child_process child is simply reparented to init.
+//
+// So it hangs off will-quit, which is the ONLY hook that fires on every quit
+// path: window-all-closed never fires for Cmd+Q or the menu's Quit, and
+// before-quit above is preventDefault'ed for the layout handshake. will-quit
+// runs last, after the windows are gone and the handshake resolved.
+// window-all-closed keeps its call as belt and braces — killAll is idempotent
+// (a signal to an exited child is a no-op), so paying for it twice is free.
+app.on('will-quit', () => flowRunner.killAll())
+
 app.on('window-all-closed', () => {
   lsp.shutdownAll()
   for (const p of ptys.values()) p.kill()
+  flowRunner.killAll()
   app.quit()
 })

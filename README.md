@@ -116,9 +116,21 @@ spoken aloud (macOS voices); dictate into the box with the macOS mic key
   directed graph of agent nodes: what each expects from upstream, what it
   produces, and the edges wiring one node's output to another's input. The
   `＋` menu's **Flow diagram…** creates one; opening it draws the canvas —
-  drag nodes, draw edges, edit a node's brief in a modal. **Run** topologically
-  sorts the graph and spawns one terminal per node with its brief pasted in —
-  nothing is ever auto-submitted, so you review and press Enter yourself.
+  drag nodes, draw edges, edit a node's brief in a modal. **Run** executes the
+  graph in the background: one headless agent per node, sequenced so a node
+  starts only once every upstream exited 0, two at a time. The **Flow runs**
+  page draws it as a pipeline — layers left to right, a node's log one click
+  away — and the status bar counts what is still going. The contract, stated
+  plainly: *a flow submits only the composed brief, only on Run, only headless,
+  inside the same air gap a freshly spawned agent pane would get, every step in
+  the event log* — nothing interactive is ever submitted for you. The air gap
+  clause is exactly as strong as the `＋` menu's **spawn agents air-gapped**
+  default, no stronger: turn that off and background nodes run on the open
+  internet like a freed pane would, and the runs page says so on the row (`⛨`
+  against `⛉ open internet`), because a background node has no pane strip to
+  say it for itself. Run's `▾` keeps the original behaviour as an explicit
+  choice, **Run in terminals**: a pane per node with the brief typed at the
+  prompt for you to read and press Enter on yourself.
   A node can also pin the **model** its agent spawns on — a select in the node
   editor, `(default)` meaning whatever the CLI would have chosen — so the cheap
   nodes (triage, formatting) run a smaller model of the same family while the

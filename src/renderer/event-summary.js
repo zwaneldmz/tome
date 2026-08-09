@@ -25,6 +25,18 @@ export function summary(rec) {
       return [rec.paneId, rec.minutes != null ? `${rec.minutes}m` : ''].filter(Boolean).join(' · ')
     case 'airgap:relock':
       return rec.paneId || ''
+    // Background flow runs: node-level records carry a node id, run-level
+    // ones don't, and the same field order reads for both ("release-notes ·
+    // n2 · failed · exit 1" / "release-notes · canceled").
+    case 'flow-run':
+      return [
+        rec.flow,
+        rec.node,
+        rec.status || rec.event,
+        rec.exit != null ? `exit ${rec.exit}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ')
     case 'airgap:blocked':
       return [
         rec.host,

@@ -2,9 +2,14 @@
 // docs/FEATURE-PLAN-file-creation-and-flows.md §2.4, §5, and the "Slice 5"
 // entry in §3's build order). Nodes are absolutely-positioned cards; edges
 // are a single SVG layer underneath them; panning translates a content
-// wrapper. This slice adds node drag, edge drawing, a node editor modal,
-// add/delete, save + dirty guard, and a live disk-change watch. Run (§2.5)
-// is still a later commit.
+// wrapper. Node drag, edge drawing, a node editor modal, add/delete, save +
+// dirty guard, and a live disk-change watch all live here.
+//
+// Run is a split button with two quite different halves
+// (docs/FEATURE-PLAN-background-flow-runs.md §3): runFlow() hands the saved
+// file to main's runner, which executes the graph headlessly in the
+// background; runInTerminals() is the original path, spawning a pane per node
+// with its brief typed in and left unsubmitted for the user to read.
 import { tome, el, toast } from '../util.js'
 import {
   validateFlow,
@@ -18,6 +23,7 @@ import {
   unsafeFolderName,
 } from '../flow-model.js'
 import { dock, spawnTerminal, typeIntoPanel } from '../panes.js'
+import { floatingMenu, menuItem } from '../menus.js'
 import { modalShell, confirmModal } from '../modals.js'
 import { AGENTS } from '../../shared/pane-kinds.js'
 import { AGENT_MODELS } from '../../shared/agent-models.js'
@@ -304,13 +310,36 @@ export class FlowPanel {
     const saveBtn = el('button', 'flow-save', 'Save')
     saveBtn.type = 'button'
     saveBtn.addEventListener('click', () => this.save())
+    // Run is a split button: the primary half is the background run, the ▾
+    // half is the older behaviour, which is now a deliberate choice rather
+    // than the default. Two real <button>s rather than one with a hit-test,
+    // so both are reachable from the keyboard and announce separately.
+    const runSplit = el('div', 'flow-run-split')
     const runBtn = el('button', 'flow-run', 'Run')
     runBtn.type = 'button'
+    runBtn.title = 'Run this flow in the background — watch it on the Flow runs page'
     runBtn.addEventListener('click', () => this.runFlow())
+    const runMore = el('button', 'flow-run-more', '▾')
+    runMore.type = 'button'
+    runMore.title = 'Other ways to run'
+    runMore.setAttribute('aria-label', 'Other ways to run this flow')
+    runMore.setAttribute('aria-haspopup', 'true')
+    runMore.setAttribute('aria-expanded', 'false')
+    runMore.addEventListener('click', (e) => {
+      e.stopPropagation() // the document click handler would close it again
+      floatingMenu(runMore, (menu) =>
+        menuItem(menu, {
+          label: 'Run in terminals',
+          hint: 'you press Enter',
+          onClick: () => this.runInTerminals(),
+        })
+      )
+    })
+    runSplit.append(runBtn, runMore)
     const openText = el('button', 'flow-open-text', 'Open as text')
     openText.type = 'button'
     openText.addEventListener('click', () => this.openAsText())
-    actions.append(addBtn, saveBtn, runBtn, openText)
+    actions.append(addBtn, saveBtn, runSplit, openText)
     bar.appendChild(actions)
     return bar
   }
@@ -1016,32 +1045,86 @@ export class FlowPanel {
     this.refreshWarningStrip()
   }
 
-  // Run (plan §2.5): topo-sort the graph, spawn one terminal per node stacked
-  // as tabs in a single group, and type each node's bootstrap prompt into its
-  // terminal. Runs the IN-MEMORY graph, not a re-read of the file — Save is a
-  // separate, deliberate action, and what you see on the canvas (possibly
-  // ahead of disk) is what a run should reflect.
-  async runFlow() {
-    if (!this.flow) return
+  // The three refusals both run paths share, in one place so they cannot
+  // drift apart — a graph that is safe to hand to main's runner and a graph
+  // that is safe to spawn panes for are the same graph. Returns the
+  // topological order (which the terminal path needs) or null, having already
+  // said why.
+  runGuards() {
+    if (!this.flow) return null
     if (this.flow.nodes.length === 0) {
       toast('this flow has no nodes')
-      return
+      return null
     }
     // Belt-and-suspenders alongside validateFlow's hard error on an unsafe
     // name (flow-model.js): a bad flow.name should never reach this far —
     // load time already refuses to render a flow whose name would escape
-    // .tome/flows/ once it becomes the mkdir target below — but this is the
-    // one place that actually touches the filesystem, so it re-checks right
-    // at the point of danger instead of only trusting an upstream gate.
+    // .tome/flows/ once it becomes a directory — but both run paths turn it
+    // into a real folder, so it is re-checked right at the point of danger
+    // instead of only trusting an upstream gate. (Main's runner re-checks it
+    // a third time, on its own side of IPC, for the same reason.)
     if (unsafeFolderName(this.flow.name)) {
       toast(`flow name "${this.flow.name}" can't be used as a folder name`)
-      return
+      return null
     }
     const order = topoSort(this.flow)
     if (!order) {
       toast('flow has a cycle — cannot run')
+      return null
+    }
+    return order
+  }
+
+  // Run (docs/FEATURE-PLAN-background-flow-runs.md §3): hand the flow to
+  // main's runner, which executes the graph headlessly — one `claude -p`
+  // child per node, sequenced by the graph, no panes opened and nothing typed
+  // into an interactive session. The Flow runs page is where it becomes
+  // visible; this toast is the pointer to it.
+  //
+  // Unlike the terminal path below, this runs what is ON DISK: the runner
+  // reads the file itself (it has to — it is the only side that may build a
+  // command line). So a dirty canvas is asked to save first rather than
+  // silently running a stale graph, which is the one way this could quietly
+  // do something other than what the user is looking at.
+  async runFlow() {
+    if (!this.runGuards()) return
+    if (this.isDirty()) {
+      const ok = await confirmModal(
+        'Save and run?',
+        'A background run reads the file on disk, so this canvas has to be saved before it can run.',
+        'Save and run',
+        this.element.ownerDocument
+      )
+      if (!ok) return
+      await this.save()
+      if (this.isDirty()) return // the save failed and already said so
+    }
+    let res
+    try {
+      res = await tome.runs.start(this.path)
+    } catch (err) {
+      toast(`could not start the run: ${err.message}`)
       return
     }
+    // Main refuses for reasons this side cannot always see (a kind with no
+    // headless template, a path outside the workspace) and names them.
+    if (res?.error) {
+      toast(res.error)
+      return
+    }
+    toast(`${this.flow.name} running — open Flow runs to watch`, 'ok')
+  }
+
+  // The original Run, now an explicit choice behind the ▾ (plan §3): topo-sort
+  // the graph, spawn one terminal per node stacked as tabs in a single group,
+  // and type each node's bootstrap prompt into its terminal without submitting
+  // it. Runs the IN-MEMORY graph, not a re-read of the file — nothing is
+  // executed here, so what you see on the canvas (possibly ahead of disk) is
+  // what the prompts should reflect, and the user reads every one before
+  // pressing Enter.
+  async runInTerminals() {
+    const order = this.runGuards()
+    if (!order) return
 
     // composeBootstrapPrompt's handoff paths are relative to the folder that
     // contains this flow's own .tome — not to the flow.json's own folder,
@@ -1083,7 +1166,7 @@ export class FlowPanel {
       // and arrive garbled. A real readiness signal (wait for a shell
       // prompt, or the pty's first pty:data) is future work; v1 uses a fixed,
       // per-node-staggered delay instead. That's an acceptable tradeoff only
-      // because nothing here auto-submits (see typeIntoPanel in panes.js) —
+      // because nothing on this path auto-submits (typeIntoPanel, panes.js) —
       // the user reviews every prompt before pressing Enter, so a garbled
       // paste is visible and correctable, never dangerous.
       const delay = 1500 + i * 400

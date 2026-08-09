@@ -98,6 +98,22 @@ contextBridge.exposeInMainWorld('tome', {
       return () => ipcRenderer.removeListener('events:appended', l)
     },
   },
+  // Background flow runs: main owns the child processes and is the single
+  // writer of run.json, so the renderer only ever starts, stops, and reads
+  // snapshots. start resolves to { id } or { error }.
+  runs: {
+    start: (flowPath) => ipcRenderer.invoke('runs:start', flowPath),
+    cancel: (id) => ipcRenderer.invoke('runs:cancel', id),
+    list: () => ipcRenderer.invoke('runs:list'),
+    // Returns an unsubscribe, like events.onAppended: the runs pane and the
+    // status bar both subscribe, and a disposed pane must stop receiving
+    // pushes (ipcRenderer.on returns the emitter, which has no .dispose).
+    onChanged: (cb) => {
+      const l = (e, m) => cb(m)
+      ipcRenderer.on('runs:changed', l)
+      return () => ipcRenderer.removeListener('runs:changed', l)
+    },
+  },
   chat: {
     send: (id, messages, brainWs) => ipcRenderer.invoke('chat:send', { id, messages, brainWs }),
     abort: (id) => ipcRenderer.send('chat:abort', id),
