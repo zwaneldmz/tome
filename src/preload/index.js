@@ -98,6 +98,11 @@ contextBridge.exposeInMainWorld('tome', {
       return () => ipcRenderer.removeListener('events:appended', l)
     },
   },
+  stt: {
+    // one finished WAV buffer in, { text } or { error } out — main owns the
+    // whisper binary, model path, and temp file; errors are advice, not throws
+    transcribe: (wav) => ipcRenderer.invoke('stt:transcribe', wav),
+  },
   chat: {
     send: (id, messages, brainWs) => ipcRenderer.invoke('chat:send', { id, messages, brainWs }),
     abort: (id) => ipcRenderer.send('chat:abort', id),

@@ -4,6 +4,7 @@
 // the "assistant may run commands" toggle (allowRun) on.
 import { stripAnsi, stripControlChars } from '../shared/terminal-text.js'
 import { AGENTS, OPENABLE_KINDS_DESCRIPTION } from '../shared/pane-kinds.js'
+import { readFlowTool, draftFlowTool } from './lib/flow-tools.js'
 
 let ptys = null // Map shared with index.js
 let send = () => {} // (channel, payload) -> renderer
@@ -11,6 +12,7 @@ let panes = [] // renderer's pane snapshot [{ id, title }]
 let allowRun = false
 let canOpenFile = () => false // main's workspace confinement check
 let logEvent = () => {} // main's persistent event log (events.js)
+let getRoots = () => [] // open workspace folders, [] until ws:sync lands
 
 const meta = new Map() // ptyId -> { kind, cwd, airgap, exited }
 const scrolls = new Map() // ptyId -> recent raw output
@@ -21,6 +23,7 @@ export function init(opts) {
   send = opts.send
   if (typeof opts.canOpenFile === 'function') canOpenFile = opts.canOpenFile
   if (typeof opts.logEvent === 'function') logEvent = opts.logEvent
+  if (typeof opts.getRoots === 'function') getRoots = opts.getRoots
 }
 
 export function register(id, info) {
@@ -101,6 +104,34 @@ const TOOLS = [
       required: ['path'],
     },
   },
+  {
+    name: 'read_flow',
+    description:
+      'Read a saved flow. Without a name, lists the flows that exist in the workspace. With a name, returns the raw JSON of .tome/flows/<name>.flow.json.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'flow name without the .flow.json suffix' },
+        root: { type: 'string', description: 'workspace folder (only needed when several are open)' },
+      },
+    },
+  },
+  {
+    name: 'draft_flow',
+    description:
+      'Create or overwrite a flow at .tome/flows/<name>.flow.json; a flow pane opens and live-updates as you refine it. `flow` is the whole document: {version: 1, name, nodes: [], edges: []}. Node: {id, kind, name, instructions, expects, produces, inputs: [{name}], outputs: [{name}], x, y, model?} — kind is "terminal" or an agent CLI (' +
+      AGENTS.join(', ') +
+      '); give every node a unique short id like "n1"; omit x/y for auto-layout. Edge: {id, from, to, fromOutput, toInput} joining an output port name to an input port name. Structural errors are refused outright; contract warnings come back for you to raise with the user. Only call this after the user agrees to start (or change) a draft.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'flow name without the .flow.json suffix' },
+        flow: { type: 'object', description: 'the entire flow document' },
+        root: { type: 'string', description: 'workspace folder (only needed when several are open)' },
+      },
+      required: ['name', 'flow'],
+    },
+  },
 ]
 
 export const SYSTEM =
@@ -112,7 +143,17 @@ export const SYSTEM =
   'type_in_terminal only submits when the user has enabled auto-run; otherwise the text is left ' +
   'for them to press Enter on — say so when it happens. ' +
   'Your replies may be read aloud, so keep them focused, brief, and speakable. ' +
-  'Plain text only — no markdown tables.'
+  'Plain text only — no markdown tables. ' +
+  'When the user wants to design a workflow, act as a flow architect. Flows are graphs of ' +
+  'agent nodes saved as .tome/flows/<name>.flow.json; you shape them with read_flow and ' +
+  'draft_flow. Restate the goal in one sentence, then ask one question at a time — never a ' +
+  'questionnaire. Draft early and refine as you go: once the user agrees to start, call ' +
+  'draft_flow as soon as a shape exists, then say what you added and what you assumed. ' +
+  'Every node needs instructions, expects, and produces; a blank contract is a question to ' +
+  'ask, not a field to invent, so challenge vagueness and voice every warning draft_flow ' +
+  'returns. Never overwrite a flow you did not draft in this conversation without asking. ' +
+  'You cannot run flows: when the user approves the final shape, say it is saved and that ' +
+  'they press Run on the flow pane.'
 
 // `chatId` rides along so the renderer can open what the assistant asks for
 // as a tab in the requesting pane's own group instead of resplitting the grid.
@@ -160,6 +201,15 @@ function runTool(name, input, chatId) {
         return 'Refused: open_file is confined to the open workspace folders and brain vaults.'
       send('conductor:open', { file, source: chatId })
       return 'Requested.'
+    }
+    case 'read_flow':
+      return readFlowTool(getRoots(), input)
+    case 'draft_flow': {
+      const { text, openPath } = draftFlowTool(getRoots(), input)
+      // Open the pane only on create; overwrites reach the already-open pane
+      // through the disk watcher, so re-opening would just churn the grid.
+      if (openPath) send('conductor:open', { file: openPath, source: chatId })
+      return text
     }
     default:
       return 'Unknown tool.'
@@ -226,7 +276,7 @@ export async function runChat(anthropic, { id, model, system, messages, betas, f
       msgs.push({ role: 'assistant', content: final.content })
       const results = []
       for (const block of final.content.filter((b) => b.type === 'tool_use')) {
-        const hint = block.input?.pane_id || block.input?.kind || block.input?.path || ''
+        const hint = block.input?.pane_id || block.input?.kind || block.input?.path || block.input?.name || ''
         send('chat:tool', { id, tool: block.name, hint })
         let out
         let ok = true

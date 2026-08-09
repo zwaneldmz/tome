@@ -2486,6 +2486,34 @@ canvas.brain-graph {
   border-color: var(--accent-ring);
   background: var(--accent-soft);
 }
+.chat-form .chat-mic {
+  flex: none;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 0 10px;
+  cursor: pointer;
+}
+.chat-form .chat-mic.rec {
+  color: var(--spark);
+  border-color: var(--spark);
+  background: var(--spark-soft);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .chat-form .chat-mic.rec {
+    animation: mic-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes mic-pulse {
+    50% {
+      box-shadow: var(--spark-glow);
+    }
+  }
+}
+.chat-form .chat-mic.busy {
+  opacity: 0.5;
+  pointer-events: none;
+}
 .chat-form .chat-stop {
   flex: none;
   color: var(--spark);

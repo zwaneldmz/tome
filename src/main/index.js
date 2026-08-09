@@ -20,6 +20,7 @@ import * as events from './events'
 import * as lsp from './lsp'
 import { AGENTS } from '../shared/pane-kinds.js'
 import { buildAgentSpawn } from './lib/agent-spawn.js'
+import * as stt from './lib/stt.js'
 
 const ptys = new Map()
 
@@ -482,6 +483,9 @@ app.whenReady().then(async () => {
     send: (channel, payload) => win?.webContents.send(channel, payload),
     canOpenFile: isConfinedPath,
     logEvent: events.logEvent,
+    // Same source of truth as isConfinedPath; [] until ws:sync, so the flow
+    // tools refuse with "no workspace folder" instead of guessing a root.
+    getRoots: () => (foldersSynced ? [...openFolders] : []),
   })
   // The renderer resolves 'system' itself and reports both the preference
   // (so native chrome can keep following the OS) and the resolved mode.
@@ -930,6 +934,27 @@ app.whenReady().then(async () => {
         )
       })
     return Promise.all(AGENTS.map(check))
+  })
+
+  // ---- stt (push-to-talk; local whisper.cpp sidecar, no egress) ----
+  // The renderer sends one finished WAV buffer and nothing else — main picks
+  // the binary, the model path, and the temp filename itself. Failures come
+  // back as { error } values, not throws: "install whisper" is advice for the
+  // user, not an exception for the console.
+  ipcMain.handle('stt:transcribe', async (e, wav) => {
+    // ~10 minutes of 16 kHz mono int16; anything bigger is not push-to-talk
+    if (typeof wav?.byteLength !== 'number' || !wav.byteLength || wav.byteLength > 20_000_000)
+      return { error: 'stt: bad audio payload' }
+    const bin = stt.whisperBin()
+    const model = stt.modelPath(app.getPath('userData'))
+    const why = stt.sttUnavailable(bin, model)
+    if (why) return { error: why }
+    try {
+      return { text: await stt.transcribe({ wav, bin, model, tempDir: app.getPath('temp') }) }
+    } catch (err) {
+      if (err?.code === 'ENOENT') return { error: stt.NO_BIN }
+      return { error: 'stt: ' + (err?.message || String(err)) }
+    }
   })
 
   // ---- chat (Claude API, streamed from main so the key never enters the renderer) ----

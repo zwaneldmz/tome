@@ -22,7 +22,7 @@ import {
   composeBootstrapPrompt,
   flowRoot,
   unsafeFolderName,
-} from '../src/renderer/flow-model.js'
+} from '../src/shared/flow-model.js'
 
 describe('createFlow', () => {
   it('returns a fresh, empty, version-1 document', () => {

@@ -22,7 +22,7 @@ import { HistoryPanel } from './history.js'
 import { renderStatusbar, setStatusbarDock } from './statusbar.js'
 import { plusIcon, popoutIcon } from './icons.js'
 import { AGENTS } from '../shared/pane-kinds.js'
-import { createFlow } from './flow-model.js'
+import { createFlow } from '../shared/flow-model.js'
 import { stripControlChars } from '../shared/terminal-text.js'
 
 class Watermark {
