@@ -21,7 +21,6 @@ import * as events from './events'
 import * as flowRunner from './flow-runner'
 import * as lsp from './lsp'
 import { AGENTS } from '../shared/pane-kinds.js'
-<<<<<<< HEAD
 import { CHAT_PROVIDERS, DEFAULT_CHAT_PROVIDER } from '../shared/chat-providers.js'
 import { resolveChatProvider } from './lib/chat-client.js'
 import { buildAgentSpawnFrom } from './lib/agent-spawn.js'
