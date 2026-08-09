@@ -20,6 +20,9 @@ export default [
         clearInterval: 'readonly',
         URL: 'readonly',
         URLSearchParams: 'readonly',
+        AbortController: 'readonly',
+        Response: 'readonly',
+        fetch: 'readonly',
       },
     },
     rules: {
@@ -60,6 +63,10 @@ export default [
         navigator: 'readonly',
         alert: 'readonly',
         confirm: 'readonly',
+        getComputedStyle: 'readonly',
+        cancelAnimationFrame: 'readonly',
+        matchMedia: 'readonly',
+        Element: 'readonly',
       },
     },
     rules: {

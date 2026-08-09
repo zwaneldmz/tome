@@ -5,7 +5,7 @@
 // changes. Module shape mirrors airgap.js: pure functions + module state.
 import { readFile, writeFile, mkdir, readdir, stat, unlink, copyFile, realpath } from 'node:fs/promises'
 import { watch } from 'node:fs'
-import { join, relative, dirname, basename } from 'node:path'
+import { join, relative, dirname, basename, sep } from 'node:path'
 import { homedir } from 'node:os'
 import { confine } from './lib/confine.js'
 
