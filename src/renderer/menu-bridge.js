@@ -9,6 +9,7 @@ import { activeWorkspace } from './workspaces.js'
 import { toggleSidebar, openThemeMenu } from './chrome.js'
 import { quickOpen, shortcutsModal, closeActivePanel, saveActivePanel } from './keys.js'
 import { preferencesModal } from './preferences.js'
+import { toggleVoice } from './voice.js'
 import { saveAllEditors } from './panels/editor.js'
 import { AGENTS } from '../shared/pane-kinds.js'
 
@@ -37,6 +38,11 @@ tome.menu.onAction((action) => {
       break
     case 'toggle-sidebar':
       toggleSidebar()
+      break
+    case 'toggle-voice':
+      // The native menu item (⌘⇧V) toggles the same ambient session the
+      // topbar mic button does.
+      toggleVoice()
       break
     case 'set-theme':
       // The native Appearance submenu can't render live radio state (the

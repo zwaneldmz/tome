@@ -5,12 +5,7 @@ import { renderMarkdown } from '../markdown.js'
 import { chats } from '../regs.js'
 import { activeWorkspace } from '../workspaces.js'
 import { encodeWav } from '../../shared/wav.js'
-
-// Transcripts persist to the main-process JSON store so a chat pane restored
-// from a saved layout comes back with its conversation. Writes are debounced
-// and capped — the log is a convenience, not an archive.
-const HISTORY_CAP = 100
-const SAVE_DEBOUNCE = 400
+import { loadHistory, persistHistory, flushHistory } from '../chat-history.js'
 
 export class ChatPanel {
   constructor() {
@@ -31,7 +26,6 @@ export class ChatPanel {
     this.chatId = params.chatId
     this.history = []
     this.busy = false
-    this.saveTimer = null
     this.brainOn = false
     chats.set(this.chatId, this)
     this.log = this.element.querySelector('.chat-log')
@@ -73,27 +67,12 @@ export class ChatPanel {
     // it. A brand-new chat has no log and starts empty.
     if (typeof this.chatId === 'string') this.loadHistory()
   }
-  // The store is untrusted on reload: validate the shape, then render through
-  // the same safe paths as live traffic (textContent for the user, the
-  // markdown renderer for the assistant — never innerHTML).
+  // Render the persisted transcript through the same safe paths as live
+  // traffic (textContent for the user, the markdown renderer for the
+  // assistant — never innerHTML).
   async loadHistory() {
-    let saved
-    try {
-      saved = await tome.store.get('chat-log-' + this.chatId)
-    } catch {
-      return
-    }
     if (this.chatId == null || this.history.length) return // not a fresh panel
-    if (!Array.isArray(saved)) return
-    const msgs = saved
-      .filter(
-        (m) =>
-          m &&
-          typeof m.content === 'string' &&
-          m.content &&
-          (m.role === 'user' || m.role === 'assistant')
-      )
-      .slice(-HISTORY_CAP)
+    const msgs = await loadHistory(this.chatId)
     if (!msgs.length) return
     this.history = msgs
     for (const m of msgs) {
@@ -109,13 +88,25 @@ export class ChatPanel {
     }
   }
   persistHistory() {
-    if (typeof this.chatId !== 'string' || !this.chatId) return
-    clearTimeout(this.saveTimer)
-    this.saveTimer = setTimeout(() => {
-      tome.store
-        .set('chat-log-' + this.chatId, this.history.slice(-HISTORY_CAP))
-        .catch(() => {})
-    }, SAVE_DEBOUNCE)
+    persistHistory(this.chatId, this.history)
+  }
+  // A turn that originated OUTSIDE this pane (the ambient voice session):
+  // push it into the shared history and render it, so the pane and voice.js
+  // never fork into two arrays over the same chat-log-store key. Returns
+  // without rendering when the pane is mid-reply — voice turns only arrive
+  // while the pane is idle (voice.js owns the busy turn), so no interleave.
+  pushExternal(role, content) {
+    this.history.push({ role, content })
+    this.persistHistory()
+    if (role === 'user') {
+      this.bubble('me', content)
+    } else {
+      const div = this.bubble('ai', '')
+      const body = document.createElement('div')
+      body.className = 'md'
+      div.appendChild(body)
+      renderMarkdown(body, content)
+    }
   }
   bubble(cls, text) {
     const div = document.createElement('div')
@@ -228,6 +219,8 @@ export class ChatPanel {
   }
   send() {
     const text = this.input.value.trim()
+    // `busy` also covers a voice-session turn in flight (voice.js sets it):
+    // typed messages only join the shared history while voice is idle.
     if (!text || this.busy) return
     this.busy = true
     this.stopBtn.classList.remove('hidden')
@@ -303,11 +296,7 @@ export class ChatPanel {
     this.stopRec(true)
     this.stopWait()
     // flush a pending debounced write so a quick close doesn't drop the tail
-    clearTimeout(this.saveTimer)
-    if (typeof this.chatId === 'string' && this.chatId && this.history.length)
-      tome.store
-        .set('chat-log-' + this.chatId, this.history.slice(-HISTORY_CAP))
-        .catch(() => {})
+    flushHistory(this.chatId, this.history)
     chats.delete(this.chatId)
   }
 }

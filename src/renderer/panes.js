@@ -665,18 +665,32 @@ export function typeIntoPanel(panel, text) {
   tome.pty.write(panel.params.ptyId, stripControlChars(text))
 }
 
-export function addChat(target) {
-  spawnChat(undefined, target)
+// `opts.chatId` pins the pane to a fixed id — the ambient voice session
+// uses it to open its transcript ('chat-voice'), which must dedupe like the
+// brain pane does: a second request focuses the existing tab instead of
+// forking the shared chat-log-store key across two panels.
+export function addChat(target, opts) {
+  spawnChat(undefined, target, opts)
 }
 
-function spawnChat(saved, target) {
+function spawnChat(saved, target, opts) {
   // A restored pane keeps its saved chatId so the persisted transcript
   // (chat-log-<chatId> in the store) lines back up with this pane.
-  const id = typeof saved?.params?.chatId === 'string' ? saved.params.chatId : `chat-${++counters.seq}`
-  dock.addPanel({
+  const id =
+    typeof saved?.params?.chatId === 'string'
+      ? saved.params.chatId
+      : typeof opts?.chatId === 'string'
+        ? opts.chatId
+        : `chat-${++counters.seq}`
+  const existing = dock.getPanel(id)
+  if (existing) {
+    existing.api.setActive()
+    return existing
+  }
+  return dock.addPanel({
     id,
     component: 'chat',
-    title: saved?.title || 'assistant',
+    title: saved?.title || opts?.title || 'assistant',
     position: saved ? { referencePanel: saved.id } : place(target),
     params: { chatId: id },
   })

@@ -17,6 +17,7 @@ import { checkRepoAirgap } from './repo-airgap.js'
 import { bootAuth } from './lock.js'
 import { bootTheme } from './theme.js'
 import { bootChrome } from './chrome.js'
+import { initVoice, voiceActive, VOICE_CHAT_ID } from './voice.js'
 import { loadEditorPrefs } from './panels/editor.js'
 import './airgap-ui.js' // wires the air-gap event listeners + strip ticker
 import './keys.js' // the keyboard spine: pane keys, quick open, zoom, reference
@@ -28,9 +29,17 @@ tome.pty.onData(({ id, data }) => terms.get(id)?.write(data))
 tome.pty.onExit(({ id, exitCode }) =>
   terms.get(id)?.write(`\r\n\x1b[2m[process exited ${exitCode}]\x1b[0m\r\n`)
 )
-tome.chat.onDelta(({ id, text }) => chats.get(id)?.appendDelta(text))
-tome.chat.onDone(({ id, error, aborted }) => chats.get(id)?.finish(error, aborted))
-tome.chat.onTool(({ id, tool, hint }) => chats.get(id)?.toolNote(tool, hint))
+// While the ambient voice session owns 'chat-voice' it renders the open
+// transcript pane itself (voice.js drives bubble/appendDelta/toolNote/finish
+// so history never forks) — fanning the same events out here too would
+// double every delta. When voice is idle, typed sends in that pane come
+// through this fan-out as usual.
+const voiceOwns = (id) => id === VOICE_CHAT_ID && voiceActive()
+tome.chat.onDelta(({ id, text }) => !voiceOwns(id) && chats.get(id)?.appendDelta(text))
+tome.chat.onDone(
+  ({ id, error, aborted }) => !voiceOwns(id) && chats.get(id)?.finish(error, aborted)
+)
+tome.chat.onTool(({ id, tool, hint }) => !voiceOwns(id) && chats.get(id)?.toolNote(tool, hint))
 tome.brain.onChanged(({ ws: bws, index }) => brains.get(bws)?.onChanged(index))
 
 // ---------- boot ----------
@@ -49,6 +58,7 @@ mark('module evaluation start')
   mark('bootAuth done')
   await bootChrome()
   mark('bootChrome done')
+  await initVoice() // topbar mic + chat-voice event listeners (inert until toggled)
   const saved = await tome.store.get('workspaces')
   if (saved && Array.isArray(saved.workspaces)) {
     wsState.ws = saved
