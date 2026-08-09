@@ -24,16 +24,15 @@
 // runs/<runId>/run.json. The renderer never writes it and never has to — it
 // reads the same snapshot pushed to it on every transition.
 //
-// flow-model.js lives under src/renderer/ but is a PURE module (no DOM, no
-// IPC — see its header), so main importing it is deliberate rather than a
-// layering slip: the brief a background node runs has to be the same bytes
-// the canvas would have typed, and a second copy of composeBootstrapPrompt is
-// exactly how that stops being true.
+// flow-model.js is shared between the canvas and this runner on purpose: the
+// brief a background node runs has to be the same bytes the canvas would have
+// typed, and a second copy of composeBootstrapPrompt is exactly how that
+// stops being true.
 import { spawn as childSpawn } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { composeBootstrapPrompt, flowRoot, topoSort, validateFlow } from '../renderer/flow-model.js'
+import { composeBootstrapPrompt, flowRoot, topoSort, validateFlow } from '../shared/flow-model.js'
 import { nextActions, runPaneId, runPlan, runStatus } from '../shared/flow-run-plan.js'
 import { buildHeadlessSpawn } from './lib/agent-spawn.js'
 

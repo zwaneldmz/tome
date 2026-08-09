@@ -5,8 +5,8 @@
 // Pure on purpose — imports only the shared kind and model lists, so vitest
 // exercises it directly and the renderer can call the exact same edge-refusal
 // check the UI needs while dragging a wire between two ports.
-import { AGENTS } from '../shared/pane-kinds.js'
-import { AGENT_MODELS } from '../shared/agent-models.js'
+import { AGENTS } from './pane-kinds.js'
+import { AGENT_MODELS } from './agent-models.js'
 
 export function createFlow(name) {
   return { version: 1, name, nodes: [], edges: [] }

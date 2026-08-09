@@ -4,6 +4,7 @@ import { tome, toast } from '../util.js'
 import { renderMarkdown } from '../markdown.js'
 import { chats } from '../regs.js'
 import { activeWorkspace } from '../workspaces.js'
+import { encodeWav } from '../../shared/wav.js'
 
 // Transcripts persist to the main-process JSON store so a chat pane restored
 // from a saved layout comes back with its conversation. Writes are debounced
@@ -20,6 +21,7 @@ export class ChatPanel {
       <form class="chat-form">
         <button type="button" class="chat-brain-toggle" title="Inject workspace brain context">◈ brain</button>
         <textarea rows="2" placeholder="Ask the assistant… (Enter to send · Shift+Enter newline · dictate with the 🎤 key)"></textarea>
+        <button type="button" class="chat-mic" title="Push to talk — local whisper transcription (click to start/stop · Esc cancels)">🎙</button>
         <button type="button" class="chat-speak" title="Speak replies aloud">🔊</button>
         <button type="button" class="chat-stop hidden" title="Stop the reply (aborts the assistant's current answer)">■</button>
         <button type="submit">Send</button>
@@ -48,6 +50,14 @@ export class ChatPanel {
     })
     this.stopBtn = this.element.querySelector('.chat-stop')
     this.stopBtn.addEventListener('click', () => tome.chat.abort(this.chatId))
+    this.micBtn = this.element.querySelector('.chat-mic')
+    this.micBtn.addEventListener('click', () => (this.rec ? this.stopRec() : this.startRec()))
+    this.element.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.rec) {
+        e.preventDefault()
+        this.stopRec(true)
+      }
+    })
     this.element.querySelector('form').addEventListener('submit', (e) => {
       e.preventDefault()
       this.send()
@@ -151,6 +161,71 @@ export class ChatPanel {
     this.waitDots = null
     this.waitElapsed = null
   }
+  // Push-to-talk. Raw Float32 capture + our own WAV encode, no MediaRecorder:
+  // it only emits webm/opus, which whisper.cpp can't read. The transcript
+  // lands in the composer and is NEVER auto-sent — the user reads what was
+  // heard, edits, and presses Enter (same posture as the auto-run guard).
+  async startRec() {
+    if (this.rec || this.transcribing) return
+    let stream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    } catch {
+      toast('microphone unavailable or permission denied')
+      return
+    }
+    // 16 kHz is what whisper.cpp expects; Chromium resamples the mic for us.
+    const ctx = new AudioContext({ sampleRate: 16000 })
+    const chunks = []
+    // ponytail: ScriptProcessor is deprecated but needs no worklet file; swap
+    // for an AudioWorklet when Chromium actually removes it.
+    const proc = ctx.createScriptProcessor(4096, 1, 1)
+    proc.onaudioprocess = (ev) => chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)))
+    ctx.createMediaStreamSource(stream).connect(proc)
+    proc.connect(ctx.destination)
+    this.rec = { stream, ctx, proc, chunks }
+    this.micBtn.classList.add('rec')
+    // runaway guard: a forgotten open mic stops (and transcribes) itself
+    this.recTimer = setTimeout(() => this.stopRec(), 120_000)
+  }
+  async stopRec(cancel) {
+    const rec = this.rec
+    if (!rec) return
+    this.rec = null
+    clearTimeout(this.recTimer)
+    this.micBtn.classList.remove('rec')
+    rec.proc.disconnect()
+    for (const t of rec.stream.getTracks()) t.stop()
+    // encode at the rate we actually got — a device that refused 16 kHz still
+    // produces a valid WAV, and whisper's own error then says what's wrong
+    const rate = rec.ctx.sampleRate
+    rec.ctx.close().catch(() => {})
+    if (cancel) return
+    const total = rec.chunks.reduce((n, c) => n + c.length, 0)
+    if (!total) return
+    const samples = new Float32Array(total)
+    let at = 0
+    for (const c of rec.chunks) {
+      samples.set(c, at)
+      at += c.length
+    }
+    this.transcribing = true
+    this.micBtn.classList.add('busy')
+    try {
+      const res = await tome.stt.transcribe(encodeWav(samples, rate))
+      if (res?.error) toast(res.error)
+      else if (!res?.text) toast('heard nothing')
+      else {
+        this.input.value = this.input.value ? this.input.value.trimEnd() + ' ' + res.text : res.text
+        this.input.focus()
+      }
+    } catch (err) {
+      toast('transcription failed: ' + (err?.message || err))
+    } finally {
+      this.transcribing = false
+      this.micBtn.classList.remove('busy')
+    }
+  }
   send() {
     const text = this.input.value.trim()
     if (!text || this.busy) return
@@ -225,6 +300,7 @@ export class ChatPanel {
     this.current = null
   }
   dispose() {
+    this.stopRec(true)
     this.stopWait()
     // flush a pending debounced write so a quick close doesn't drop the tail
     clearTimeout(this.saveTimer)

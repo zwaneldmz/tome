@@ -21,7 +21,7 @@ import {
   composeBootstrapPrompt,
   flowRoot,
   unsafeFolderName,
-} from '../flow-model.js'
+} from '../../shared/flow-model.js'
 import { dock, spawnTerminal, typeIntoPanel } from '../panes.js'
 import { floatingMenu, menuItem } from '../menus.js'
 import { modalShell, confirmModal } from '../modals.js'
