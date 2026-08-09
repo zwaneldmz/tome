@@ -108,7 +108,12 @@ let offRuns = null
 
 function countRuns(list) {
   runsLive = runningCount(list)
-  renderStatusbar()
+  // Deferred a microtask: the runs pane subscribes to this same push, and if
+  // this listener registered first, renderContext() would read the pane's
+  // statusMeta() before the pane swapped in the new snapshot — the bar then
+  // says "1 running" forever after the last run finishes. After the microtask
+  // every listener for this dispatch has run, whichever order they armed in.
+  queueMicrotask(renderStatusbar)
 }
 
 function watchRuns() {
