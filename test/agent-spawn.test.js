@@ -13,7 +13,7 @@
 // line — which is exactly why the brief may ride in it and a model still may
 // not ride in it unvetted.
 import { describe, it, expect } from 'vitest'
-import { buildAgentSpawn, buildHeadlessSpawn } from '../src/main/lib/agent-spawn.js'
+import { buildAgentSpawn, buildAgentSpawnFrom, buildHeadlessSpawn } from '../src/main/lib/agent-spawn.js'
 import { AGENT_MODELS } from '../src/shared/agent-models.js'
 import { AGENTS } from '../src/shared/pane-kinds.js'
 
@@ -129,6 +129,25 @@ describe('buildAgentSpawn — kinds with an empty allowlist', () => {
     const { result, warned } = captureWarnings(() => buildAgentSpawn(kind, { model: 'anthropic/claude-haiku' }))
     expect(result).toBe(kind)
     expect(warned).toContain('anthropic/claude-haiku')
+  })
+})
+
+describe('buildAgentSpawn — the wrapper and the generalized form agree', () => {
+  it('buildAgentSpawnFrom over the built-ins-only list matches buildAgentSpawn byte for byte', () => {
+    // The wrapper exists so pre-customs callers keep their semantics; this
+    // pins that it is EXACTLY that — same kind in, same command line out,
+    // including the model-pin path.
+    const builtins = AGENTS.map((name) => ({ id: name, bin: name, custom: false }))
+    for (const kind of AGENTS) {
+      expect(buildAgentSpawnFrom(builtins, kind)).toBe(buildAgentSpawn(kind))
+      const model = AGENT_MODELS[kind]?.models[0]
+      if (model)
+        expect(captureWarnings(() => buildAgentSpawnFrom(builtins, kind, { model })).result).toBe(
+          buildAgentSpawn(kind, { model })
+        )
+    }
+    expect(buildAgentSpawnFrom(builtins, 'terminal')).toBe(null)
+    expect(buildAgentSpawnFrom(builtins, 'gpt')).toBe(null)
   })
 })
 

@@ -384,7 +384,7 @@ const groupTarget = (paneId) => {
   return p?.group ? { group: p.group } : undefined
 }
 
-tome.conductor.onOpen(({ kind, file, source }) => {
+tome.conductor.onOpen(async ({ kind, file, source }) => {
   const target = groupTarget(source)
   if (file) return openFile(file, undefined, target)
   if (kind === 'chat') return addChat(target)
@@ -394,6 +394,12 @@ tome.conductor.onOpen(({ kind, file, source }) => {
   // opening the runs page shows what is running, it starts nothing.
   if (kind === 'runs') return addRuns(target)
   if (kind === 'terminal' || AGENTS.includes(kind)) return addTerminal(kind, target)
+  // Custom CLIs: the assistant learns them from the conductor's rebuilt
+  // kind description, so check the live merged list before toasting unknown.
+  // Main re-vets the kind at pty:create either way — this check is only
+  // about giving the user a sensible error instead of a blank pane.
+  const known = await tome.agents.list().catch(() => [])
+  if (known.some((a) => a.custom && a.name === kind)) return addTerminal(kind, target)
   toast(`assistant asked for unknown pane: ${kind}`)
 })
 tome.conductor.onActed(({ pane, ran }) =>
@@ -523,7 +529,15 @@ export async function restoreLayout() {
         const params = p.params || {}
         const component = componentOf(p)
         if (component === 'terminal') {
-          const kind = AGENTS.includes(params.kind) || params.kind === 'terminal' ? params.kind : 'terminal'
+          // Built-ins and 'terminal' restore as-is; anything else may be a
+          // custom CLI the layout predates — keep it if main still vets it,
+          // fall back to a plain shell if it doesn't (the store entry was
+          // removed, or never survived re-vetting).
+          let kind = AGENTS.includes(params.kind) || params.kind === 'terminal' ? params.kind : 'terminal'
+          if (kind === 'terminal' && params.kind && params.kind !== 'terminal') {
+            const known = await tome.agents.list().catch(() => [])
+            if (known.some((a) => a.custom && a.name === params.kind)) kind = params.kind
+          }
           // `model` passes through unchecked on purpose, unlike `kind`: kind
           // decides what this side builds, while a model only ever reaches a
           // command line in main, which vets it against the same allowlist and

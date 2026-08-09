@@ -81,17 +81,55 @@ function vetModel(cmd, model, where) {
 // (a plain 'terminal' pane, or anything unrecognized) — null rather than '' so
 // the caller branches on "is there a command" instead of on the emptiness of
 // one.
-export function buildAgentSpawn(kind, { model } = {}) {
-  const at = AGENTS.indexOf(kind)
-  if (at < 0) return null
-  const cmd = AGENTS[at]
+//
+// buildAgentSpawnFrom is the generalized form: it takes the agent list to
+// match against — mergeAgents' normalized entries (custom-agents.js) — so
+// main can resolve kind against built-ins PLUS vetted custom CLIs per spawn
+// without this file ever reading the store. The invariant at the top of the
+// file is unchanged: an incoming kind is only ever COMPARED against the list
+// and then thrown away, and the string that reaches the command line is the
+// list's own copies — the entry's bin, its (character-guarded) args, the
+// allowlist's model alias — never a byte the renderer handed us.
+export function buildAgentSpawnFrom(list, kind, { model } = {}) {
+  const entry = (Array.isArray(list) ? list : []).find((e) => e.id === kind)
+  if (!entry) return null
+  // The entry's own bin, never the caller's kind string — for built-ins they
+  // spell the same word, and for customs the bin is what vetCustomAgent
+  // already proved is a bare command name. Args ride along verbatim: they
+  // were vetted as inert single tokens (no spaces, no shell metacharacters)
+  // at the custom-agents.js door, which is the only reason joining them here
+  // is safe.
+  const base = [entry.bin, ...(entry.args || [])].join(' ')
   // Absent is the overwhelmingly common case and the schema's only way of
   // saying "whatever the CLI defaults to" (flow-model.js), so it short-circuits
   // before any of the vetting below. '' means the same thing.
-  if (!model) return cmd
-  const vetted = vetModel(cmd, model, 'pty')
-  if (!vetted) return cmd
-  return `${cmd} ${MODEL_FLAG} ${vetted}`
+  if (!model) return base
+  // Model pinning needs BOTH halves: the kind must declare which flag its
+  // CLI takes (customs only get one by declaring modelFlag, and AGENT_MODELS
+  // only lists aliases for kinds that speak --model) AND the model must be
+  // on the shared allowlist for the kind. Customs start with empty model
+  // lists — the same posture as opencode/pi — so a pin on a custom lands in
+  // vetModel as an ordinary miss and is dropped to the CLI's default.
+  const flag = entry.custom ? entry.modelFlag : MODEL_FLAG
+  if (!flag) {
+    console.warn(`pty: ignoring model "${typeof model === 'string' ? model : typeof model}" for ${entry.bin} — no model flag declared; spawning on the CLI default`)
+    return base
+  }
+  const vetted = vetModel(entry.id, model, 'pty')
+  if (!vetted) return base
+  return `${base} ${flag} ${vetted}`
+}
+
+// The built-in wrapper: every pre-customs caller (and the existing test
+// suite) keeps spelling it this way. AGENTS is mapped to the normalized
+// shape mergeAgents emits for built-ins, so both spellings of the list agree
+// exactly.
+export function buildAgentSpawn(kind, opts) {
+  return buildAgentSpawnFrom(
+    AGENTS.map((name) => ({ id: name, bin: name, custom: false })),
+    kind,
+    opts
+  )
 }
 
 // ---- headless (background flow runs) ----
