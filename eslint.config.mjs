@@ -66,6 +66,7 @@ export default [
         confirm: 'readonly',
         getComputedStyle: 'readonly',
         cancelAnimationFrame: 'readonly',
+        queueMicrotask: 'readonly',
         matchMedia: 'readonly',
         Element: 'readonly',
       },

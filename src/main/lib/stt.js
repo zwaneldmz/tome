@@ -61,6 +61,8 @@ export async function transcribe({ wav, bin, model, tempDir, timeoutMs = 60_000 
     // single run of prose.
     return String(stdout).replace(/\s+/g, ' ').trim()
   } finally {
-    unlink(file).catch(() => {})
+    // Awaited so a resolved transcribe() means the temp file is really gone —
+    // fire-and-forget here raced both the tests and any caller counting temps.
+    await unlink(file).catch(() => {})
   }
 }
