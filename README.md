@@ -103,6 +103,17 @@ typed text, so nothing runs without your Enter. Toggle `🔊` to have replies
 spoken aloud (macOS voices); dictate into the box with the macOS mic key
 (`🎤` / double-Fn).
 
+**Voice, fully local** — the `🎙` button records push-to-talk audio and
+transcribes it with a local whisper.cpp sidecar: audio never leaves your
+machine, and the transcript lands in the composer for you to edit and send —
+never auto-sent. One-time setup: `brew install whisper-cpp` (or point
+`TOME_WHISPER_BIN` at a binary), then the first click tells you the exact
+`curl` command for the model file. Combined with `🔊`, you can design a whole
+flow by talking: the assistant interviews you, drafts the graph into a flow
+pane node by node as you speak (`draft_flow`), challenges contracts it's
+unsure of, and when you approve, the finished flow waits for *you* to press
+Run.
+
 ## Features
 
 - **Workspaces** — named groups of project folders. The `▚` chip in the top

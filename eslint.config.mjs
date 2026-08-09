@@ -58,6 +58,7 @@ export default [
         Blob: 'readonly',
         SpeechSynthesisUtterance: 'readonly',
         speechSynthesis: 'readonly',
+        AudioContext: 'readonly',
         localStorage: 'readonly',
         location: 'readonly',
         navigator: 'readonly',
