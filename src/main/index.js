@@ -1215,6 +1215,27 @@ function buildMenu() {
       label: 'File',
       submenu: [
         {
+          label: 'Open File…',
+          accelerator: 'CmdOrCtrl+O',
+          click: send({ id: 'open-file' }),
+        },
+        {
+          label: 'Open Folder in Workspace…',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: send({ id: 'open-folder' }),
+        },
+        {
+          label: 'New File…',
+          accelerator: 'CmdOrCtrl+N',
+          click: send({ id: 'new-file' }),
+        },
+        { type: 'separator' },
+        {
+          label: 'New Workspace…',
+          click: send({ id: 'new-workspace' }),
+        },
+        { type: 'separator' },
+        {
           label: 'Save',
           accelerator: 'CmdOrCtrl+S',
           click: send({ id: 'save' }),
