@@ -2140,6 +2140,140 @@ canvas.brain-graph {
   background: var(--accent);
 }
 
+/* ---- onboarding wizard ---- */
+/* modalShell with a wider box, a dot-per-step header row, and a footer that
+   owns Back / Next / Skip so the steps themselves never render navigation. */
+.ob-box {
+  width: 440px;
+}
+/* no global .hidden utility exists — the wizard scopes its own */
+.ob-box .hidden {
+  display: none;
+}
+.ob-dots {
+  display: flex;
+  gap: 6px;
+  margin: -4px 0 12px;
+}
+.ob-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line-2);
+}
+.ob-dot.on {
+  background: var(--accent);
+}
+.ob-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+.ob-footer-gap {
+  flex: 1;
+}
+.ob-footer .ag-btn {
+  padding: 8px 16px;
+}
+/* label + hint on the left, control on the right — the wizard's rows reuse
+   Preferences' switch and text classes so the two surfaces read alike */
+.ob-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+}
+.ob-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.ob-agents {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ob-agent {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.ob-dot-avail {
+  flex: none;
+  font-size: var(--fs-micro);
+}
+.ob-dot-avail.ok {
+  color: var(--g-add);
+}
+.ob-dot-avail.off {
+  color: var(--muted);
+}
+.ob-agent-name {
+  color: var(--bright);
+  font-size: var(--fs-ui);
+}
+.ob-agent-hint {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  word-break: break-all;
+}
+.ob-providers {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.ob-provider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: var(--muted);
+  background: transparent;
+}
+.ob-provider + .ob-provider {
+  border-top: 1px solid var(--line);
+}
+.ob-provider:hover {
+  color: var(--bright);
+  background: var(--hover);
+}
+.ob-provider.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.ob-provider.on .ob-agent-name {
+  color: var(--accent);
+}
+.ob-link {
+  align-self: flex-start;
+  padding: 6px 12px;
+}
+.ob-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+}
+.ob-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+}
+
 /* ================= toasts ================= */
 #toasts {
   position: fixed;

@@ -9,6 +9,7 @@ import { activeWorkspace } from './workspaces.js'
 import { toggleSidebar, openThemeMenu } from './chrome.js'
 import { quickOpen, shortcutsModal, closeActivePanel, saveActivePanel } from './keys.js'
 import { preferencesModal } from './preferences.js'
+import { showOnboarding } from './onboarding.js'
 import { saveAllEditors } from './panels/editor.js'
 import { AGENTS } from '../shared/pane-kinds.js'
 
@@ -35,6 +36,11 @@ tome.menu.onAction((action) => {
     case 'open-preferences':
       preferencesModal()
       break
+    case 'open-onboarding':
+      showOnboarding()
+      break
+    // 'toggle-voice' has no case yet — the renderer bridge for it lands with
+    // WS-A; an unknown action id falls through this switch harmlessly.
     case 'toggle-sidebar':
       toggleSidebar()
       break
