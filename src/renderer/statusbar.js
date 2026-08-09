@@ -67,6 +67,11 @@ export function renderStatusbar() {
   // here. Empty when nothing is running, and `.sb-item:empty` hides it.
   runsEl.textContent = runsLive ? `▶ ${runsLive} running` : ''
   runsEl.title = `${runsLive} flow run${runsLive === 1 ? '' : 's'} in the background — open the runs page`
+  // Icon-only when empty would be an unlabeled button; keep the label in sync.
+  runsEl.setAttribute(
+    'aria-label',
+    runsLive ? `${runsLive} flow run${runsLive === 1 ? '' : 's'} running — open the runs page` : 'Flow runs'
+  )
 
   // air-gap network state: count panes currently open to the internet.
   //

@@ -14,11 +14,11 @@ export class ChatPanel {
     this.element.innerHTML = `
       <div class="chat-log"></div>
       <form class="chat-form">
-        <button type="button" class="chat-brain-toggle" title="Inject workspace brain context">◈ brain</button>
-        <textarea rows="2" placeholder="Ask the assistant… (Enter to send · Shift+Enter newline · dictate with the 🎤 key)"></textarea>
-        <button type="button" class="chat-mic" title="Push to talk — local whisper transcription (click to start/stop · Esc cancels)">🎙</button>
-        <button type="button" class="chat-speak" title="Speak replies aloud">🔊</button>
-        <button type="button" class="chat-stop hidden" title="Stop the reply (aborts the assistant's current answer)">■</button>
+        <button type="button" class="chat-brain-toggle" title="Inject workspace brain context" aria-label="Inject workspace brain context" aria-pressed="false">◈ brain</button>
+        <textarea rows="2" aria-label="Message the assistant" placeholder="Ask the assistant… (Enter to send · Shift+Enter newline · dictate with the 🎤 key)"></textarea>
+        <button type="button" class="chat-mic" title="Push to talk — local whisper transcription (click to start/stop · Esc cancels)" aria-label="Push to talk">🎙</button>
+        <button type="button" class="chat-speak" title="Speak replies aloud" aria-label="Speak replies aloud" aria-pressed="false">🔊</button>
+        <button type="button" class="chat-stop hidden" title="Stop the reply (aborts the assistant's current answer)" aria-label="Stop the reply">■</button>
         <button type="submit">Send</button>
       </form>`
   }
@@ -34,12 +34,14 @@ export class ChatPanel {
     this.brainToggle.addEventListener('click', () => {
       this.brainOn = !this.brainOn
       this.brainToggle.classList.toggle('active', this.brainOn)
+      this.brainToggle.setAttribute('aria-pressed', String(this.brainOn))
     })
     this.speak = false
     this.speakBtn = this.element.querySelector('.chat-speak')
     this.speakBtn.addEventListener('click', () => {
       this.speak = !this.speak
       this.speakBtn.classList.toggle('active', this.speak)
+      this.speakBtn.setAttribute('aria-pressed', String(this.speak))
       if (!this.speak) speechSynthesis.cancel()
     })
     this.stopBtn = this.element.querySelector('.chat-stop')
@@ -253,8 +255,18 @@ export class ChatPanel {
         this.waitDots.remove()
         this.waitDots = null
       }
-      renderMarkdown(this.currentBody, this.segText)
-      this.log.scrollTop = this.log.scrollHeight
+      // Deltas arrive per token (dozens/sec): re-rendering markdown on every
+      // one janks the main thread — and with it the speechSynthesis queue of
+      // the voice session sharing this pane. Paint at most one frame per
+      // animation frame; finish() always renders the complete final text.
+      if (!this.deltaRaf) {
+        this.deltaRaf = requestAnimationFrame(() => {
+          this.deltaRaf = null
+          if (!this.current) return // finish() already ran
+          renderMarkdown(this.currentBody, this.segText)
+          this.log.scrollTop = this.log.scrollHeight
+        })
+      }
     }
   }
   // a conductor tool ran between text segments: chip it, start a fresh bubble
@@ -270,6 +282,10 @@ export class ChatPanel {
     this.busy = false
     this.stopBtn.classList.add('hidden')
     this.stopWait()
+    if (this.deltaRaf) {
+      cancelAnimationFrame(this.deltaRaf)
+      this.deltaRaf = null
+    }
     if (this.current && !this.segText) this.current.remove()
     else if (this.current) renderMarkdown(this.currentBody, this.segText)
     if (error) {
@@ -295,6 +311,10 @@ export class ChatPanel {
   dispose() {
     this.stopRec(true)
     this.stopWait()
+    if (this.deltaRaf) {
+      cancelAnimationFrame(this.deltaRaf)
+      this.deltaRaf = null
+    }
     // flush a pending debounced write so a quick close doesn't drop the tail
     flushHistory(this.chatId, this.history)
     chats.delete(this.chatId)

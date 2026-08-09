@@ -1803,6 +1803,8 @@ canvas.brain-graph {
 .chat-log {
   flex: 1;
   overflow-y: auto;
+  /* keep the log's scroll momentum from chaining into the pane behind it */
+  overscroll-behavior: contain;
   padding: 14px;
   display: flex;
   flex-direction: column;

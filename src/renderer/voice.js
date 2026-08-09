@@ -104,26 +104,41 @@ function openTranscript() {
 // ---------- TTS ----------
 // Complete sentences are spoken as they stream in (long replies start
 // talking fast instead of waiting for chat:done); the remainder flushes on
-// done. Each queued chunk re-reads `speakRate` at speak time, so changing
-// voice-rate mid-reply takes effect on the next sentence.
+// done. Choppiness guard: speechSynthesis re-attacks on EVERY queued
+// utterance, so one-word sentences ("Yes.", "2.") each cost an audible gap.
+// The queue below coalesces: while an utterance is playing, new text
+// accumulates and ships as ONE follow-up utterance — at most two speech
+// segments in flight at any time, whatever the token rate.
+let speakBuf = '' // text arrived while an utterance was playing
+
 function speak(text) {
   if (!text.trim()) return
+  if (speakingNow) {
+    speakBuf += text
+    return
+  }
   speakingNow = true
   const u = new SpeechSynthesisUtterance(text)
-  u.rate = speakRate
+  u.rate = speakRate // read per utterance, so ⌘ voice-rate applies next chunk
   u.onend = u.onerror = () => {
     speakingNow = false
+    const next = speakBuf
+    speakBuf = ''
+    if (next.trim()) return speak(next)
     // Nothing left queued and the reply is over → back to the mic.
     if (active && state === 'speaking' && !speechSynthesis.pending) startListening()
   }
   speechSynthesis.speak(u)
 }
 
-// Longest complete sentence in the not-yet-spoken tail of the reply.
+// Complete sentences in the not-yet-spoken tail of the reply. Short
+// sentences ride along with the next one — a lone "Yes." is exactly the
+// fragment that makes streamed TTS sound choppy.
+const MIN_SPEAK_CHARS = 24
 function takeSentences() {
   const tail = reply.slice(spokenUpTo)
   const m = tail.match(/^[\s\S]*[.!?](?=\s|$)/)
-  if (!m) return ''
+  if (!m || m[0].length < MIN_SPEAK_CHARS) return ''
   spokenUpTo += m[0].length
   return m[0]
 }
@@ -131,6 +146,7 @@ function takeSentences() {
 function stopSpeaking() {
   speechSynthesis.cancel()
   speakingNow = false
+  speakBuf = ''
 }
 
 // ---------- mic capture ----------
