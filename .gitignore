@@ -8,4 +8,5 @@ build/icon.iconset/
 index.js
 tome-council-report.pdf
 reviews/
-docs/
+docs/*
+!docs/how-tome-works.html
