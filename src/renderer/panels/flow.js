@@ -401,6 +401,12 @@ export class FlowPanel {
     const portsOut = el('div', 'flow-ports flow-ports-out')
     for (const output of node.outputs || []) portsOut.appendChild(this.buildPort(node.id, output?.name, 'out'))
 
+    // The port columns are absolutely positioned (they must straddle the card
+    // borders), so they add no height of their own — the card reserves it
+    // here or port labels land on the head row ("listCLAUDE").
+    const portRows = Math.max((node.inputs || []).length, (node.outputs || []).length)
+    if (portRows) card.style.minHeight = `${40 + portRows * 22}px`
+
     card.append(head, portsIn, portsOut)
     this.nodeCards.set(node.id, card)
     this.wireNodeInteraction(card, node)
@@ -566,6 +572,7 @@ export class FlowPanel {
       addEdge(this.flow, edge)
       this.markDirty()
       this.recomputeEdges()
+      this.updateToolbarCounts()
     }
     const onUp = (ev) => finish(ev)
     const onKey = (ev) => {
@@ -640,6 +647,9 @@ export class FlowPanel {
     this.nodeCards.get(nodeId)?.remove()
     this.nodeCards.delete(nodeId)
     this.selectedNodeId = null
+    if (this.flow.nodes.length === 0) {
+      this.contentEl.appendChild(el('div', 'flow-empty', 'this flow has no nodes yet'))
+    }
     this.markDirty()
     this.recomputeEdges()
     this.updateToolbarCounts()
@@ -671,6 +681,9 @@ export class FlowPanel {
       y: contentY + this.origin.y - PAD / 2,
     })
     this.contentEl.appendChild(this.buildNodeCard(node))
+    // renderGraph only shows the empty-state line on a full rebuild — drop it
+    // here too, or the first added node sits under "this flow has no nodes yet".
+    this.contentEl.querySelector('.flow-empty')?.remove()
     this.markDirty()
     this.recomputeEdges()
     this.updateToolbarCounts()

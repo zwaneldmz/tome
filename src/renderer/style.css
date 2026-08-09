@@ -1350,8 +1350,10 @@ body.tree-anim #tree {
 }
 .flow-ports {
   position: absolute;
-  top: 14px;
-  bottom: 14px;
+  /* Below the head row, not over it — the badge + name own the top of the
+     card, and buildNodeCard gives the card a min-height so this column has
+     real room instead of overlapping ("listCLAUDE"). */
+  top: 38px;
   display: flex;
   flex-direction: column;
   gap: 8px;
