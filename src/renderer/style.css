@@ -2094,8 +2094,11 @@ canvas.brain-graph {
   overflow-y: auto;
   overscroll-behavior: contain;
   min-height: 0;
-  /* room for the last section's focus ring + the scroll shadow edge */
-  padding: 2px 2px 6px;
+  /* room for the last section's focus ring + the scroll shadow edge; the
+     right padding keeps row content (switches, steppers) clear of the
+     overlay scrollbar, which would otherwise overlap them */
+  padding: 2px 14px 6px 2px;
+  scrollbar-gutter: stable;
 }
 /* cluster heading directly above its rows, sections apart from each other */
 .prefs-box .ag-body .prefs-section + .prefs-section {
