@@ -618,13 +618,21 @@ app.whenReady().then(async () => {
       spawnArgs = [...sandbox.args, spawnCmd, ...spawnArgs]
       spawnCmd = sandbox.cmd
     }
-    const p = pty.spawn(spawnCmd, spawnArgs, {
-      name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
-      cwd: cwd || homedir(),
-      env,
-    })
+    let p
+    try {
+      p = pty.spawn(spawnCmd, spawnArgs, {
+        name: 'xterm-256color',
+        cols: 80,
+        rows: 24,
+        cwd: cwd || homedir(),
+        env,
+      })
+    } catch (err) {
+      // The proxy came up in buildAgentEnv before the spawn — a failed spawn
+      // (bad cwd, missing shell) must not strand it listening on loopback.
+      airgap.closePane(id)
+      throw err
+    }
     ptys.set(id, p)
     conductor.register(id, { kind, cwd: cwd || homedir(), airgap: !!gapped })
     p.onData((data) => {
@@ -1360,11 +1368,15 @@ ipcMain.on('app:quit-ready', () => {
 // runs last, after the windows are gone and the handshake resolved.
 // window-all-closed keeps its call as belt and braces — killAll is idempotent
 // (a signal to an exited child is a no-op), so paying for it twice is free.
-app.on('will-quit', () => flowRunner.killAll())
+app.on('will-quit', () => {
+  flowRunner.killAll()
+  airgap.closeAll() // proxies are children of no window — see closeAll
+})
 
 app.on('window-all-closed', () => {
   lsp.shutdownAll()
   for (const p of ptys.values()) p.kill()
   flowRunner.killAll()
+  airgap.closeAll()
   app.quit()
 })

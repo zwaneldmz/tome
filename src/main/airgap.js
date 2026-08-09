@@ -364,6 +364,20 @@ export function closePane(paneId) {
   pushState()
 }
 
+// Quit-time teardown: pane proxies are children of no window, so without
+// this an unclosed proxy (spawn failed after createPaneProxy, onExit never
+// fired) would keep its loopback port bound until the process exits.
+// server.close() only stops accepting — in-flight CONNECT tunnels die with
+// the process itself, which is where this is called from.
+export function closeAll() {
+  for (const [id, st] of panes) {
+    clearTimeout(st.timer)
+    st.server.close()
+    panes.delete(id)
+  }
+  pushState()
+}
+
 export function getState() {
   const out = {}
   for (const [id, st] of panes) out[id] = { mode: st.mode, expiresAt: st.expiresAt }
