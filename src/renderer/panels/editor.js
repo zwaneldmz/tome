@@ -3,8 +3,8 @@ import { basicSetup } from 'codemirror'
 import { EditorView, keymap } from '@codemirror/view'
 import { EditorState, Compartment } from '@codemirror/state'
 import { indentWithTab } from '@codemirror/commands'
-import { LanguageDescription, indentUnit } from '@codemirror/language'
-import { languages } from '@codemirror/language-data'
+import { indentUnit } from '@codemirror/language'
+import { langForFilename } from '../cm-lang.js'
 import { tome, toast } from '../util.js'
 import { confirmModal } from '../modals.js'
 import { cmTheme } from '../theme.js'
@@ -40,6 +40,14 @@ const indentExt = () => [
 export async function loadEditorPrefs() {
   const saved = await tome.store.get('editor')
   if (saved && typeof saved === 'object') Object.assign(editorPrefs, saved)
+}
+
+// Idle-time warm-up (called from renderer.js after first paint): pulls the
+// lazy language table and the common language chunks so the first editor the
+// user opens doesn't pay the load. Not awaited anywhere on the boot path.
+export function warmLanguages() {
+  for (const name of ['x.ts', 'x.js', 'x.json', 'x.md', 'x.css', 'x.html'])
+    langForFilename(name).catch(() => {})
 }
 
 // Persist and push to every open editor at once.
@@ -83,8 +91,8 @@ export class EditorPanel {
     }
     this.savedText = text
     this.api = api
-    const lang = LanguageDescription.matchFilename(languages, name)
-    const langExt = lang ? await lang.load() : []
+    // lazy: the language table loads on the first editor open, not at boot
+    const langExt = await langForFilename(name)
     const theme = cmTheme()
     this.view = new EditorView({
       doc: text,
