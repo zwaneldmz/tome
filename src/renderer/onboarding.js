@@ -8,7 +8,7 @@
 // Cross-workstream guards: tome.chat.providers (WS-B) and
 // tome.agents.customs (WS-D) are optional-chained, so the wizard works the
 // same before and after those bridges land.
-import { tome, el } from './util.js'
+import { tome, el, toast } from './util.js'
 import { prefs } from './state.js'
 import { modalShell } from './modals.js'
 import { totpModal } from './airgap-ui.js'
@@ -34,7 +34,14 @@ export async function maybeShowOnboarding() {
 }
 
 // Unconditional — the Preferences replay row and the app menu both land here.
-export function showOnboarding() {
+// Except while locked: the lock overlay rides at z-index 3000, a full 1000
+// above the wizard — a wizard opened under it looks present but every
+// control is dead to clicks, which reads exactly like "the toggles don't
+// work". bootAuth resolves before the auto-run path, so only the replay /
+// menu entries can ever hit this.
+export async function showOnboarding() {
+  const st = await tome.auth.status().catch(() => null)
+  if (st && !st.unlocked) return toast('Unlock the workspace first — then reopen the setup wizard.')
   // Choices collected along the way, replayed on the Done step.
   const state = {
     step: 0,
