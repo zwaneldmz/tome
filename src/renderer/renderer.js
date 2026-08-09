@@ -19,7 +19,7 @@ import { maybeShowOnboarding } from './onboarding.js'
 import { bootTheme } from './theme.js'
 import { bootChrome } from './chrome.js'
 import { initVoice, voiceActive, VOICE_CHAT_ID } from './voice.js'
-import { loadEditorPrefs } from './panels/editor.js'
+import { loadEditorPrefs, warmLanguages } from './panels/editor.js'
 import './airgap-ui.js' // wires the air-gap event listeners + strip ticker
 import './keys.js' // the keyboard spine: pane keys, quick open, zoom, reference
 import './menu-bridge.js' // native menu bar actions → the same functions the buttons use
@@ -99,7 +99,10 @@ mark('module evaluation start')
   const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1000))
   idle(() => {
     markdownLangExt()
-    import('./panels/editor.js').then((m) => m.warmLanguages?.())
+    // warmLanguages is exported from editor.js, which is already statically
+    // imported here (boot uses loadEditorPrefs) — call it directly; a
+    // dynamic import() of an already-static module just confuses the bundler.
+    warmLanguages()
   })
   // whisper-cli model warm-up for push-to-talk; main gates it on the
   // 'voice-warmup' store key (default off) and swallows all failures.
