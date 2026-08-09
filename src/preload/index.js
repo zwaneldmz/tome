@@ -130,6 +130,8 @@ contextBridge.exposeInMainWorld('tome', {
     // one whisper-cli run over generated silence so the first real dictation
     // skips the model load; main gates it on the 'voice-warmup' store key
     warmup: () => ipcRenderer.invoke('stt:warmup'),
+    // { ready, bin, model } — no spawn; the onboarding Voice step's status row
+    status: () => ipcRenderer.invoke('stt:status'),
   },
   chat: {
     send: (id, messages, brainWs) => ipcRenderer.invoke('chat:send', { id, messages, brainWs }),

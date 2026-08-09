@@ -301,6 +301,34 @@ export function showOnboarding() {
     const out = el('p', 'ag-note')
     out.setAttribute('role', 'status')
     m.body.append(btn, out)
+    // The whisper binary and the model file are separate one-time installs —
+    // say which side is missing instead of a bare "not ready". sttUnavailable
+    // is the same availability check main runs before every transcription, so
+    // the wizard can never claim ready when the mic test would fail.
+    const sttRow = el('div', 'ob-agent')
+    const sttDot = el('span', 'ob-dot-avail off', '…')
+    const sttName = el('span', 'ob-agent-name', 'Local whisper transcription')
+    const sttHint = el('span', 'ob-agent-hint', 'checking…')
+    sttRow.append(sttDot, sttName, sttHint)
+    m.body.appendChild(sttRow)
+    const myStep = state.step
+    tome.stt
+      .status()
+      .then((s) => {
+        if (state.step !== myStep) return // navigated away — body belongs to another step
+        if (s.ready) {
+          sttDot.className = 'ob-dot-avail ok'
+          sttDot.textContent = '●'
+          sttHint.textContent = 'ready'
+        } else {
+          sttDot.className = 'ob-dot-avail off'
+          sttDot.textContent = '○'
+          sttHint.textContent = !s.bin ? 'whisper-cli not installed' : 'speech model not downloaded'
+        }
+      })
+      .catch(() => {
+        if (state.step === myStep) sttHint.textContent = 'status unavailable'
+      })
     let ctx = null
     let stream = null
     const release = () => {
@@ -362,6 +390,35 @@ export function showOnboarding() {
         btn.disabled = false
       }
     })
+    // The wizard's other toggles write the exact keys Preferences uses — the
+    // model warm-up opt-in lives here too (Preferences → Voice mirrors it).
+    const warmupSw = el('button', 'prefs-switch')
+    warmupSw.type = 'button'
+    warmupSw.setAttribute('role', 'switch')
+    warmupSw.append(el('span', 'prefs-knob'))
+    const paintWarmup = () => {
+      warmupSw.classList.toggle('on', !!state.warmup)
+      warmupSw.setAttribute('aria-checked', String(!!state.warmup))
+    }
+    warmupSw.addEventListener('click', () => {
+      state.warmup = !state.warmup
+      state.dirty = true
+      tome.store.set('voice-warmup', state.warmup)
+      paintWarmup()
+    })
+    const warmupRow = el('div', 'ob-row')
+    const warmupText = el('div', 'ob-row-text')
+    warmupText.append(
+      el('span', 'prefs-label', 'Warm up whisper at launch'),
+      el('span', 'prefs-hint', 'loads the speech model in the background so the first dictation is instant')
+    )
+    warmupRow.append(warmupText, warmupSw)
+    m.body.appendChild(warmupRow)
+    tome.store.get('voice-warmup').then((v) => {
+      state.warmup = !!v
+      if (state.step === myStep) paintWarmup()
+    })
+    paintWarmup()
     // Navigating away mid-test must not leave the mic indicator on.
     state.cleanup = release
   }

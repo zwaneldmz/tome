@@ -216,6 +216,7 @@ export async function preferencesModal() {
   const m = modalShell('Preferences')
   m.err.remove() // no error line — prefs report via toasts
   m.body.parentElement.classList.add('prefs-box')
+  let voiceWarmup = !!(await tome.store.get('voice-warmup'))
 
   // ---------- appearance ----------
   const appearance = el('section', 'prefs-section')
@@ -416,6 +417,36 @@ export async function preferencesModal() {
   })
   security.appendChild(enroll)
   m.body.appendChild(security)
+
+  // ---------- voice ----------
+  // Whisper availability + the launch warm-up opt-in the onboarding wizard's
+  // Voice step writes — both surfaces use the same store key and the same
+  // stt:status probe, so they can never disagree.
+  const voice = el('section', 'prefs-section')
+  voice.append(el('h4', '', 'Voice'))
+  const sttStatus = el('div', 'prefs-hint', 'Checking local whisper…')
+  voice.appendChild(sttStatus)
+  tome.stt
+    .status()
+    .then((s) => {
+      sttStatus.textContent = s.ready
+        ? 'Local whisper transcription is ready.'
+        : !s.bin
+          ? 'whisper-cli not found — install it (brew install whisper-cpp) and restart.'
+          : 'Speech model missing — the push-to-talk error message carries the one-time download command.'
+    })
+    .catch(() => (sttStatus.textContent = 'Whisper status unavailable.'))
+  toggleRow(
+    voice,
+    'Warm up whisper at launch',
+    'loads the speech model in the background so the first dictation is instant',
+    () => voiceWarmup,
+    (v) => {
+      voiceWarmup = v
+      tome.store.set('voice-warmup', v)
+    }
+  )
+  m.body.appendChild(voice)
 
   // ---------- agents ----------
   m.body.appendChild(await buildAgentsSection())

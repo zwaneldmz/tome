@@ -25,6 +25,12 @@ export function whisperBin(env = process.env) {
 
 export const modelPath = (userData) => join(userData, 'models', MODEL)
 
+// Existence probes for stt:status. A bare binary name (PATH-correct linux
+// dev runs) can't be probed without a PATH walk — count it as present and
+// let a real transcribe map ENOENT to NO_BIN, same as sttUnavailable does.
+export const binExists = (bin) => !!bin && (!bin.includes('/') || existsSync(bin))
+export const modelExists = (model) => existsSync(model)
+
 // A user-facing reason STT can't run yet, or null when it can. The model file
 // is a deliberate one-time manual download (plan §8): no downloader means no
 // new egress path, and once the file exists the whole loop works air-gapped.

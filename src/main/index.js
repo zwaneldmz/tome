@@ -1075,6 +1075,18 @@ app.whenReady().then(async () => {
       return { skipped: true }
     }
   })
+  // Pure availability probe (no spawn, no audio): the onboarding wizard's
+  // Voice step uses it to show whether whisper is ready before the user
+  // presses Test, and which of the two installs (binary, model) is missing.
+  ipcMain.handle('stt:status', async () => {
+    const bin = stt.whisperBin()
+    const model = stt.modelPath(app.getPath('userData'))
+    return {
+      ready: !stt.sttUnavailable(bin, model),
+      bin: !!bin && stt.binExists(bin),
+      model: stt.modelExists(model),
+    }
+  })
   ipcMain.handle('stt:transcribe', async (e, wav) => {
     // ~10 minutes of 16 kHz mono int16; anything bigger is not push-to-talk
     if (typeof wav?.byteLength !== 'number' || !wav.byteLength || wav.byteLength > 20_000_000)
