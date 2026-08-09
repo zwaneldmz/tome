@@ -258,36 +258,48 @@ export function showOnboarding() {
     const myStep = state.step
     const stale = () => state.step !== myStep
     Promise.resolve(providersP)
-      .then(async (providers) => {
-        const saved = await tome.store.get('chat-provider')
+      .then(async (info) => {
+        // chat:providers returns { providers, active } — main's active is the
+        // stored pick validated against the provider table, so it is the
+        // correct initial selection (and what a skipped step keeps).
+        const providers = info?.providers || []
+        if (!providers.length) {
+          if (!stale()) note('No assistant providers configured — the assistant keeps its shell default.')
+          return
+        }
         if (stale()) return
+        note('Pick the model the assistant pane talks to. ● means its API key was found in your login shell.')
         const group = el('div', 'ob-providers')
         group.setAttribute('role', 'radiogroup')
         group.setAttribute('aria-label', 'Assistant provider')
+        const paint = (selectedId) => {
+          for (const s of group.children) {
+            const sel = s.dataset.pid === selectedId
+            s.classList.toggle('on', sel)
+            s.setAttribute('aria-checked', String(sel))
+          }
+        }
         for (const p of providers) {
           const b = el('button', 'ob-provider')
           b.type = 'button'
+          b.dataset.pid = p.id
           b.setAttribute('role', 'radio')
-          const on = (saved ?? state.provider) === p.id
-          b.setAttribute('aria-checked', String(on))
-          b.classList.toggle('on', on)
+          b.title = p.keySet ? `${p.keyEnv} found in your login shell` : `${p.keyEnv} not found — set it and restart Tome`
           b.append(
-            el('span', 'ob-dot-avail ' + (p.hasKey ? 'ok' : 'off'), p.hasKey ? '●' : '○'),
-            el('span', 'ob-agent-name', p.label || p.id)
+            el('span', 'ob-dot-avail ' + (p.keySet ? 'ok' : 'off'), p.keySet ? '●' : '○'),
+            el('span', 'ob-agent-name', p.label || p.id),
+            el('span', 'ob-provider-model', p.model)
           )
           b.addEventListener('click', () => {
             state.provider = p.id
             state.dirty = true
             tome.store.set('chat-provider', p.id)
-            for (const s of group.children) {
-              const sel = s === b
-              s.classList.toggle('on', sel)
-              s.setAttribute('aria-checked', String(sel))
-            }
+            paint(p.id)
           })
           group.appendChild(b)
         }
         m.body.appendChild(group)
+        paint(state.provider || info.active)
       })
       .catch(
         () => !stale() && note('Could not load providers — the assistant keeps its current settings.')

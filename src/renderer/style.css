@@ -2029,7 +2029,10 @@ canvas.brain-graph {
   color: var(--muted);
   font-size: var(--fs-meta);
   line-height: 1.5;
-  word-break: break-all;
+  /* break-all split English words mid-syllable ("transcrip-tion"); normal
+     wrapping with anywhere as the overflow escape hatch reads far better */
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 .ag-secret {
   font-family: var(--mono);
@@ -2257,7 +2260,13 @@ canvas.brain-graph {
 /* modalShell with a wider box, a dot-per-step header row, and a footer that
    owns Back / Next / Skip so the steps themselves never render navigation. */
 .ob-box {
-  width: 440px;
+  width: 480px;
+}
+.ob-box .ag-body {
+  gap: 12px;
+}
+.ob-box h3 {
+  text-wrap: balance;
 }
 /* no global .hidden utility exists — the wizard scopes its own */
 .ob-box .hidden {
@@ -2332,7 +2341,7 @@ canvas.brain-graph {
   color: var(--muted);
   font-family: var(--mono);
   font-size: var(--fs-micro);
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .ob-providers {
   display: flex;
@@ -2367,6 +2376,20 @@ canvas.brain-graph {
 .ob-provider.on .ob-agent-name {
   color: var(--accent);
 }
+.ob-provider .ob-agent-name {
+  flex: 1;
+  min-width: 0;
+}
+/* the provider's default model id, right-aligned and quiet */
+.ob-provider-model {
+  flex: none;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+}
+.ob-provider.on .ob-provider-model {
+  color: var(--accent);
+}
 .ob-link {
   align-self: flex-start;
   padding: 6px 12px;
@@ -2385,6 +2408,13 @@ canvas.brain-graph {
   justify-content: space-between;
   gap: 12px;
   padding: 2px 0;
+}
+.ob-summary-row .prefs-label {
+  min-width: 0;
+}
+.ob-summary-row .prefs-value {
+  flex: none;
+  text-align: right;
 }
 
 /* ================= toasts ================= */
