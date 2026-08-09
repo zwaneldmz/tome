@@ -169,6 +169,12 @@ Run.
 - **Documents** — PDFs open in Chromium's viewer, images inline, `.docx` and
   `.xlsx` are converted and rendered in sandboxed frames; anything else falls
   back to "Open in default app".
+- **Voice chat** — the `🎙` mic button records push-to-talk and
+  transcribes it with a local whisper.cpp sidecar; audio never leaves the
+  machine, and the transcript lands in the composer for you to edit — never
+  auto-sent.
+- **Assistant providers** — Kimi (Moonshot), GLM (Zhipu), or Claude,
+  switchable in Preferences.
 - **Git** — clickable branch chip (switch or create branches, IntelliJ-style)
   with live working-tree counters `+added ~modified −deleted` and `↑↓`
   ahead/behind. The git menu's **History** opens an IntelliJ-style log pane:

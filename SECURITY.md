@@ -76,10 +76,10 @@ Findings from both are tracked in
 
 ## Reporting a vulnerability
 
-- Once the GitHub mirror is public: use **GitHub Security Advisories** on
+- Use **GitHub Security Advisories** on
   [zwaneldmz/tome](https://github.com/zwaneldmz/tome/security/advisories).
-- Until then: open a confidential issue on the canonical
-  [GitLab tracker](https://gitlab.com/ldmz/tome/-/issues).
+- For non-sensitive bugs: the
+  [GitHub issue tracker](https://github.com/zwaneldmz/tome/issues).
 
 **In scope:** sandbox escapes (seatbelt or proxy bypass), lock-gate bypasses
 (IPC reachable pre-auth that shouldn't be), consent bypasses on repo

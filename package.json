@@ -8,10 +8,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://gitlab.com/ldmz/tome.git"
+    "url": "https://github.com/zwaneldmz/tome.git"
   },
-  "homepage": "https://gitlab.com/ldmz/tome",
-  "bugs": "https://gitlab.com/ldmz/tome/-/issues",
+  "homepage": "https://github.com/zwaneldmz/tome",
+  "bugs": "https://github.com/zwaneldmz/tome/issues",
   "keywords": [
     "electron",
     "coding-agents",
