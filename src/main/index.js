@@ -10,8 +10,9 @@ const execFileAsync = promisify(execFile)
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import pty from 'node-pty'
 import Anthropic from '@anthropic-ai/sdk'
-import mammoth from 'mammoth'
-import * as XLSX from 'xlsx'
+// mammoth/xlsx are NOT top-level imports: they are only needed by doc:read,
+// which runs long after boot, and loading them eagerly added their require
+// cost to every cold start. Lazy-cached loaders below.
 import * as airgap from './airgap'
 import * as authlock from './authlock'
 import * as brain from './brain'
@@ -22,6 +23,27 @@ import * as lsp from './lsp'
 import { AGENTS } from '../shared/pane-kinds.js'
 import { buildAgentSpawn } from './lib/agent-spawn.js'
 import * as stt from './lib/stt.js'
+import { encodeWav } from '../shared/wav.js'
+
+// ---- boot profiling (TOME_PROFILE=1) ----
+// Wall-clock deltas from process start, printed to the main-process console.
+// The renderer keeps its own performance.now() marks and prints them when
+// tome.profile is set (preload mirrors this env var) — together the two
+// timelines cover the whole boot without any build-time instrumentation.
+const PROFILE = !!process.env.TOME_PROFILE
+const bootT0 = Date.now()
+const profMark = (label) => {
+  if (PROFILE) console.log(`[profile] ${label}: ${Date.now() - bootT0}ms`)
+}
+profMark('main module evaluated')
+
+// Lazy, promise-cached heavy imports: the first doc:read of each type pays
+// the module load; every later read reuses it. Kept out of the top-level
+// import list so app start never parses them.
+let mammothPromise = null
+const loadMammoth = () => (mammothPromise ??= import('mammoth'))
+let xlsxPromise = null
+const loadXlsx = () => (xlsxPromise ??= import('xlsx'))
 
 const ptys = new Map()
 
@@ -364,12 +386,19 @@ function createWindow() {
     minWidth: 800,
     minHeight: 500,
     titleBarStyle: 'hiddenInset',
+    // Hidden until the renderer has painted once: without this, Chromium
+    // flashes a blank white frame between window creation and first paint.
+    // ready-to-show fires after did-finish-load, so TOME_SHOT's capture
+    // (which waits on did-finish-load) is unaffected.
+    show: false,
     backgroundColor: WINDOW_BG[uiTheme],
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
     },
   })
+  win.once('ready-to-show', () => win.show())
+  profMark('window created')
   // ---- popped-out panes ----
   // dockview tears a pane group off into its own OS window with window.open()
   // on a same-origin popout.html and then moves the live DOM across. Only
@@ -403,6 +432,8 @@ function createWindow() {
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+  profMark('loadFile/loadURL called')
+  win.webContents.once('did-finish-load', () => profMark('did-finish-load'))
   if (!app.isPackaged && process.env.TOME_SHOT) {
     win.webContents.once('did-finish-load', () => {
       setTimeout(async () => {
@@ -415,6 +446,7 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  profMark('app ready')
   // ---- app lock ----
   // Every invoke channel refuses until login succeeds; only the door itself
   // (auth + first-run setup) and the ui-state store stay open. Registered
@@ -477,6 +509,7 @@ app.whenReady().then(async () => {
   events.setEventSink((type, payload) => win?.webContents.send('events:' + type, payload))
   brain.setEventSink((ws, index) => win?.webContents.send('brain:changed', { ws, index }))
 
+  profMark('pre-window init done')
   createWindow()
   buildMenu()
   conductor.init({
@@ -911,10 +944,11 @@ app.whenReady().then(async () => {
     path = real
     const ext = extname(path).toLowerCase()
     if (ext === '.docx') {
-      const { value } = await mammoth.convertToHtml({ path })
+      const { value } = await (await loadMammoth()).convertToHtml({ path })
       return { html: docCss() + value }
     }
     if (ext === '.xlsx' || ext === '.xls') {
+      const XLSX = await loadXlsx()
       const wb = XLSX.readFile(path)
       const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
       const parts = wb.SheetNames.map(
@@ -989,6 +1023,28 @@ app.whenReady().then(async () => {
   // the binary, the model path, and the temp filename itself. Failures come
   // back as { error } values, not throws: "install whisper" is advice for the
   // user, not an exception for the console.
+  // stt:warmup runs whisper-cli once over a generated 0.1 s silent WAV so the
+  // first real dictation skips the model load (WS-C §6). The renderer calls
+  // it after boot; the store key 'voice-warmup' (default off) gates it here in
+  // main so a renderer alone can't make the app spawn whisper on launch. It is
+  // registered after the lock gate like every other channel — a locked app
+  // must not spawn processes. All failures are swallowed: a missing binary or
+  // model just means the first dictation pays the load cost itself.
+  ipcMain.handle('stt:warmup', async () => {
+    try {
+      if (!(await readStore('voice-warmup'))) return { skipped: true }
+      const bin = stt.whisperBin()
+      const model = stt.modelPath(app.getPath('userData'))
+      if (stt.sttUnavailable(bin, model)) return { skipped: true }
+      // 0.1 s of 16 kHz silence: enough for whisper to load the model and
+      // produce nothing, cheap enough to not matter on the boot tail.
+      const wav = encodeWav(new Float32Array(1600))
+      await stt.transcribe({ wav, bin, model, tempDir: app.getPath('temp'), timeoutMs: 30_000 })
+      return { warmed: true }
+    } catch {
+      return { skipped: true }
+    }
+  })
   ipcMain.handle('stt:transcribe', async (e, wav) => {
     // ~10 minutes of 16 kHz mono int16; anything bigger is not push-to-talk
     if (typeof wav?.byteLength !== 'number' || !wav.byteLength || wav.byteLength > 20_000_000)

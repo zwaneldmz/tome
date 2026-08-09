@@ -9,6 +9,7 @@ import { tome, toast } from './util.js'
 import { prefs, wsState, agState, counters } from './state.js'
 import { terms, chats, brains } from './regs.js'
 import { dock, addChat, addBrain, openFile, restoreLayout } from './panes.js'
+import { markdownLangExt } from './cm-lang.js'
 import { renderAll } from './menus.js'
 import { startGitPolling, initGitMenu } from './git.js'
 import { activeWorkspace, syncFolders } from './workspaces.js'
@@ -33,10 +34,21 @@ tome.chat.onTool(({ id, tool, hint }) => chats.get(id)?.toolNote(tool, hint))
 tome.brain.onChanged(({ ws: bws, index }) => brains.get(bws)?.onChanged(index))
 
 // ---------- boot ----------
+// Boot profiling: performance.now() deltas from module evaluation, printed
+// once at boot end when main was launched with TOME_PROFILE=1 (preload
+// mirrors the env var as tome.profile; main prints its own timeline).
+const bootT0 = performance.now()
+const bootMarks = []
+const mark = (label) => bootMarks.push(`${label}: ${(performance.now() - bootT0).toFixed(0)}ms`)
+mark('module evaluation start')
+
 ;(async () => {
   await bootTheme() // before the lock screen paints — store:get is open while locked
+  mark('bootTheme done')
   await bootAuth(tome, toast) // main gates the sensitive IPC until this resolves
+  mark('bootAuth done')
   await bootChrome()
+  mark('bootChrome done')
   const saved = await tome.store.get('workspaces')
   if (saved && Array.isArray(saved.workspaces)) {
     wsState.ws = saved
@@ -53,17 +65,33 @@ tome.brain.onChanged(({ ws: bws, index }) => brains.get(bws)?.onChanged(index))
   tome.airgap.state().then((s) => Object.assign(agState, s))
   syncFolders() // main starts with an empty confinement list
   wsState.activeRoot = activeWorkspace()?.folders[0] || null
-  // After bootAuth, so the lock-gated apply channel is reachable; a repo's
-  // .tome/airgap.json still needs the user's consent before it is honored.
-  checkRepoAirgap()
   renderAll()
-  initGitMenu() // deferred out of git.js's module body — see the note there
-  startGitPolling() // gated on unlock: the IPC gate refuses while locked
   try {
     await restoreLayout()
   } catch (err) {
     console.warn('layout restore failed:', err)
   }
+  mark('restoreLayout done')
+  if (tome.profile) console.log('[profile] renderer boot — ' + bootMarks.join(' | '))
+  // ---- post-paint ----
+  // Everything below is boot-tail work: nothing here is awaited by the paint
+  // path above, so it all runs after the layout is on screen.
+  // After bootAuth, so the lock-gated apply channel is reachable; a repo's
+  // .tome/airgap.json still needs the user's consent before it is honored.
+  checkRepoAirgap()
+  initGitMenu() // deferred out of git.js's module body — see the note there
+  startGitPolling() // gated on unlock: the IPC gate refuses while locked
+  // Idle warm-up of the two lazy loads the user is most likely to hit next:
+  // the brain pane's markdown mode and the editor's language table. Idle
+  // time only — neither may compete with first paint.
+  const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1000))
+  idle(() => {
+    markdownLangExt()
+    import('./panels/editor.js').then((m) => m.warmLanguages?.())
+  })
+  // whisper-cli model warm-up for push-to-talk; main gates it on the
+  // 'voice-warmup' store key (default off) and swallows all failures.
+  tome.stt.warmup().catch(() => {})
   if (tome.shotMode && wsState.activeRoot) {
     // screenshot/demo mode: open a representative set of panes
     const id = `pty-${++counters.seq}`

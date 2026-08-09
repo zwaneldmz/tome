@@ -3,6 +3,9 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 contextBridge.exposeInMainWorld('tome', {
   home: ipcRenderer.sendSync('app:home'),
   shotMode: !!process.env.TOME_SHOT,
+  // Boot profiling gate: the renderer prints its performance.now() marks when
+  // main was launched with TOME_PROFILE=1 (main prints its own timestamps).
+  profile: !!process.env.TOME_PROFILE,
   pty: {
     create: (opts) => ipcRenderer.invoke('pty:create', opts),
     write: (id, data) => ipcRenderer.send('pty:write', { id, data }),
@@ -118,6 +121,9 @@ contextBridge.exposeInMainWorld('tome', {
     // one finished WAV buffer in, { text } or { error } out — main owns the
     // whisper binary, model path, and temp file; errors are advice, not throws
     transcribe: (wav) => ipcRenderer.invoke('stt:transcribe', wav),
+    // one whisper-cli run over generated silence so the first real dictation
+    // skips the model load; main gates it on the 'voice-warmup' store key
+    warmup: () => ipcRenderer.invoke('stt:warmup'),
   },
   chat: {
     send: (id, messages, brainWs) => ipcRenderer.invoke('chat:send', { id, messages, brainWs }),

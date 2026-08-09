@@ -3,22 +3,11 @@
 import { basicSetup } from 'codemirror'
 import { Decoration, EditorView, MatchDecorator, ViewPlugin, keymap } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
-import { LanguageDescription } from '@codemirror/language'
-import { languages } from '@codemirror/language-data'
+import { markdownLangExt } from '../cm-lang.js'
 import { tome, toast } from '../util.js'
 import { cmTheme, onTheme } from '../theme.js'
 import { brains } from '../regs.js'
 import { modalShell } from '../modals.js'
-
-// markdown language mode, loaded once and shared by every BrainPanel editor
-let mdLangExtPromise = null
-function markdownLangExt() {
-  if (!mdLangExtPromise) {
-    const lang = LanguageDescription.matchFilename(languages, 'x.md')
-    mdLangExtPromise = lang ? lang.load() : Promise.resolve([])
-  }
-  return mdLangExtPromise
-}
 
 // [[wikilink]] highlighting — stateless, shared across every BrainPanel editor
 const wikilinkMatcher = new MatchDecorator({
