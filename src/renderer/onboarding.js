@@ -212,7 +212,7 @@ export function showOnboarding() {
     const spinner = el('p', 'ag-note', 'Checking your PATH…')
     spinner.setAttribute('role', 'status')
     list.appendChild(spinner)
-    note('More CLIs can be added later in ⌘, → Agents.')
+    note('More CLIs can be added later in Settings (⌘,) → Agents.')
     const paint = (agents, customs) => {
       spinner.remove()
       for (const a of agents) {
@@ -245,7 +245,7 @@ export function showOnboarding() {
     Promise.all([tome.agents.list(), Promise.resolve(tome.agents.customs?.() ?? null)])
       .then(([agents, customs]) => !stale() && paint(agents, customs))
       .catch(
-        () => !stale() && (spinner.textContent = 'Could not check for agents — find them later in ⌘,.')
+        () => !stale() && (spinner.textContent = 'Could not check for agents — find them later in Settings (⌘,).')
       )
   }
 
@@ -477,7 +477,7 @@ export function showOnboarding() {
     item('Air-gapped agents', prefs.airgapDefault ? 'on' : 'off')
     item('Assistant commands', prefs.conductorRun ? 'on' : 'off')
     m.body.appendChild(summary)
-    note('Change any of this anytime in ⌘,.')
+    note('Change any of this anytime in Settings (⌘,).')
   }
 
   const RENDERERS = [stepWelcome, stepAgents, stepAssistant, stepVoice, stepSecurity, stepDone]

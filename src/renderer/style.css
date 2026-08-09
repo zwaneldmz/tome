@@ -2082,10 +2082,35 @@ canvas.brain-graph {
 
 /* ---- preferences ---- */
 .prefs-box {
-  width: 520px;
+  width: 560px;
+  /* eight sections no longer fit a fixed box: cap at the window and scroll
+     the body, never the whole overlay */
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
 }
 .prefs-box .ag-body {
-  gap: 14px;
+  gap: 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  /* room for the last section's focus ring + the scroll shadow edge */
+  padding: 2px 2px 6px;
+}
+/* cluster heading directly above its rows, sections apart from each other */
+.prefs-box .ag-body .prefs-section + .prefs-section {
+  margin-top: 2px;
+}
+/* small control cluster on the right of a row (value + button) */
+.prefs-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+/* standalone ghost buttons used as row controls shouldn't stretch */
+.prefs-row .ag-btn {
+  padding: 6px 12px;
 }
 .prefs-section {
   display: flex;
@@ -2106,6 +2131,9 @@ canvas.brain-graph {
   justify-content: space-between;
   gap: 12px;
   padding: 6px 0;
+}
+.prefs-row + .prefs-row {
+  border-top: 1px solid var(--line);
 }
 .prefs-text {
   display: flex;

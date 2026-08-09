@@ -213,7 +213,7 @@ function toggleRow(parent, label, hint, get, set) {
 }
 
 export async function preferencesModal() {
-  const m = modalShell('Preferences')
+  const m = modalShell('Settings')
   m.err.remove() // no error line — prefs report via toasts
   m.body.parentElement.classList.add('prefs-box')
   let voiceWarmup = !!(await tome.store.get('voice-warmup'))
@@ -415,7 +415,7 @@ export async function preferencesModal() {
     m.close()
     totpModal()
   })
-  security.appendChild(enroll)
+  row(security, 'Two-factor authentication', enroll, 'required to open an air-gapped pane')
   m.body.appendChild(security)
 
   // ---------- voice ----------
@@ -455,18 +455,25 @@ export async function preferencesModal() {
   const sidebar = el('section', 'prefs-section')
   sidebar.append(el('h4', '', 'Sidebar'))
   const tree = document.getElementById('tree')
-  const current = Math.round(tree.getBoundingClientRect().width) || SIDEBAR_DEFAULT
-  const width = el('span', 'prefs-value', `${current} px`)
-  row(sidebar, 'Current width', width, `default ${SIDEBAR_DEFAULT} px`)
-  const reset = el('button', 'ag-btn ghost', 'Reset sidebar width')
+  const reset = el('button', 'ag-btn ghost', 'Reset width')
   reset.type = 'button'
+  const width = el('span', 'prefs-value')
+  const paintWidth = () => {
+    // Read on demand (click + open), not during render — a layout read in
+    // the build path forces sync reflow of the whole app under the modal.
+    const current = Math.round(tree.getBoundingClientRect().width) || SIDEBAR_DEFAULT
+    width.textContent = `${current} px`
+  }
   reset.addEventListener('click', () => {
     tree.style.width = ''
     tome.store.set('sidebar-width', null) // no store:delete — null reads as unset
-    width.textContent = `${SIDEBAR_DEFAULT} px`
+    paintWidth()
     toast('Sidebar width reset', 'ok')
   })
-  sidebar.appendChild(reset)
+  const widthBox = el('div', 'prefs-inline')
+  widthBox.append(width, reset)
+  row(sidebar, 'Width', widthBox, `drag the divider · default ${SIDEBAR_DEFAULT} px`)
+  paintWidth()
   m.body.appendChild(sidebar)
 
   // ---------- onboarding ----------
@@ -478,6 +485,6 @@ export async function preferencesModal() {
     m.close()
     showOnboarding()
   })
-  onboarding.appendChild(replay)
+  row(onboarding, 'Setup wizard', replay, 'the first-run tour — agents, assistant, voice, security')
   m.body.appendChild(onboarding)
 }

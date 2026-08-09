@@ -1185,19 +1185,24 @@ function buildMenu() {
   const send = (action) => () => win?.webContents.send('menu:action', action)
   const template = [
     {
+      // The application menu: macOS convention puts Settings (⌘,) directly
+      // under About, then app-specific actions, Services, and the hide/quit
+      // block. app.name is 'Tome' (setName ran before this builds).
       label: app.name,
       submenu: [
         { role: 'about' },
         { type: 'separator' },
         {
-          label: 'Preferences…',
+          label: 'Settings…',
           accelerator: 'CmdOrCtrl+,',
           click: send({ id: 'open-preferences' }),
         },
         {
-          label: 'Setup wizard…',
+          label: 'Setup Wizard…',
           click: send({ id: 'open-onboarding' }),
         },
+        { type: 'separator' },
+        { role: 'services' },
         { type: 'separator' },
         { role: 'hide' },
         { role: 'hideOthers' },
