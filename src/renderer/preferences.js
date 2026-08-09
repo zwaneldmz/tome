@@ -23,6 +23,21 @@ function row(parent, label, ctrl, hint) {
   return r
 }
 
+// Single-line text input that persists a store key on change; clearing the
+// field writes null (no store:delete — null reads as unset).
+function textRow(parent, label, hint, key, initial) {
+  const input = el('input', 'prefs-input')
+  input.type = 'text'
+  input.spellcheck = false
+  input.value = initial || ''
+  input.addEventListener('change', () => {
+    const v = input.value.trim()
+    tome.store.set(key, v || null)
+  })
+  row(parent, label, input, hint)
+  return input
+}
+
 // Switch-style toggle: a button with role=switch whose .on state mirrors the
 // menu item's .active state. Reads/writes the exact store keys and prefs
 // mutations from menus.js populateAddMenu.
@@ -157,6 +172,63 @@ export async function preferencesModal() {
     (v) => setEditorPrefs({ autosave: v })
   )
   m.body.appendChild(editor)
+
+  // ---------- assistant ----------
+  // Provider choice + model override for the assistant pane. Keys are NOT
+  // stored: they come from the login shell (main's ensureLoginEnv), so this
+  // section only shows whether each key was found — never the key itself.
+  const assistant = el('section', 'prefs-section')
+  assistant.append(el('h4', '', 'Assistant'))
+  const chatInfo = await tome.chat.providers().catch(() => null)
+  if (chatInfo) {
+    const pseg = el('div', 'prefs-seg')
+    pseg.setAttribute('role', 'radiogroup')
+    pseg.setAttribute('aria-label', 'Assistant provider')
+    const modelRow = { input: null } // filled below; provider switch repopulates it
+    for (const p of chatInfo.providers) {
+      // ● key found in the login shell · ○ missing — set it and restart
+      const b = el('button', '', `${p.keySet ? '●' : '○'} ${p.label}`)
+      b.type = 'button'
+      b.setAttribute('role', 'radio')
+      b.title = p.keySet ? `${p.keyEnv} found in your login shell` : `${p.keyEnv} not found in your login shell`
+      b.setAttribute('aria-checked', String(chatInfo.active === p.id))
+      b.classList.toggle('on', chatInfo.active === p.id)
+      b.addEventListener('click', () => {
+        tome.store.set('chat-provider', p.id)
+        for (const s of pseg.children) {
+          const on = s === b
+          s.classList.toggle('on', on)
+          s.setAttribute('aria-checked', String(on))
+        }
+        // Repopulate the model field with the newly picked provider's
+        // default; the stored override only makes sense per provider.
+        if (modelRow.input) {
+          modelRow.input.value = p.model
+          tome.store.set('chat-model', null)
+        }
+      })
+      pseg.appendChild(b)
+    }
+    row(assistant, 'Provider', pseg, '● key found in your login shell · ○ missing')
+    const activeEntry = chatInfo.providers.find((p) => p.id === chatInfo.active)
+    const storedModel = await tome.store.get('chat-model')
+    modelRow.input = textRow(
+      assistant,
+      'Model',
+      'blank = provider default',
+      'chat-model',
+      typeof storedModel === 'string' && storedModel ? storedModel : activeEntry?.model
+    )
+    const keysHint = el(
+      'div',
+      'prefs-hint',
+      'keys come from your login shell — set MOONSHOT_API_KEY / ZHIPU_API_KEY / ANTHROPIC_API_KEY and restart'
+    )
+    assistant.appendChild(keysHint)
+  } else {
+    assistant.appendChild(el('div', 'prefs-hint', 'Provider list unavailable.'))
+  }
+  m.body.appendChild(assistant)
 
   // ---------- security ----------
   const security = el('section', 'prefs-section')

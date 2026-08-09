@@ -20,7 +20,9 @@ import * as events from './events'
 import * as flowRunner from './flow-runner'
 import * as lsp from './lsp'
 import { AGENTS } from '../shared/pane-kinds.js'
+import { CHAT_PROVIDERS, DEFAULT_CHAT_PROVIDER } from '../shared/chat-providers.js'
 import { buildAgentSpawn } from './lib/agent-spawn.js'
+import { resolveChatProvider } from './lib/chat-client.js'
 import * as stt from './lib/stt.js'
 
 const ptys = new Map()
@@ -106,18 +108,13 @@ async function confinedRealPath(p) {
 }
 
 const SHELL = process.env.SHELL || '/bin/zsh'
-// Assistant provider: the Requesty router by default (REQUESTY_API_KEY, pulled
-// from the login shell like the agent-pane secrets — Finder launches don't see
-// .zshrc). Without a Requesty key, fall back to direct Anthropic.
-// No /v1 suffix: the SDK appends /v1/messages itself, and /v1/v1/messages 404s.
-const REQUESTY_BASE = process.env.TOME_CHAT_BASE_URL || 'https://router.requesty.ai'
-// Requesty routes Claude via vertex/bedrock; bare anthropic/* ids 403 unless the
-// key's Model Library approves them.
-const REQUESTY_MODEL = process.env.TOME_CHAT_MODEL || 'vertex/claude-opus-4-8@eu'
-const ANTHROPIC_MODEL = process.env.TOME_CHAT_MODEL || 'claude-opus-5'
-const CHAT_SYSTEM =
-  'You are the assistant pane inside Tome, a desktop coding harness. ' +
-  'Keep responses focused, brief, and concise. Plain text only — no markdown tables.'
+// Assistant provider: a first-class preference (src/shared/chat-providers.js —
+// Kimi/GLM over their OpenAI-compatible endpoints, Claude via the SDK),
+// resolved per send by lib/chat-client.js:resolveChatProvider. The pre-existing
+// escape hatches keep working and win over the preference: TOME_CHAT_BASE_URL /
+// TOME_CHAT_MODEL (custom endpoint), then REQUESTY_API_KEY (Requesty router).
+// Keys come from the login shell like the agent-pane secrets — Finder launches
+// don't see .zshrc. The system prompt itself lives in conductor.SYSTEM.
 
 app.setName('Tome')
 
@@ -205,6 +202,7 @@ const AGENT_SECRET_KEYS = new Set([
   'OPENROUTER_API_KEY',
   'DEEPSEEK_API_KEY',
   'MOONSHOT_API_KEY',
+  'ZHIPU_API_KEY',
   'GROQ_API_KEY',
   'MISTRAL_API_KEY',
   'XAI_API_KEY',
@@ -1005,33 +1003,35 @@ app.whenReady().then(async () => {
     }
   })
 
-  // ---- chat (Claude API, streamed from main so the key never enters the renderer) ----
-  // Resolved per send so a key added to the shell after boot is picked up on
-  // the next message; the SDK client itself is built once (anthropic ??=).
-  async function chatProvider() {
-    const secrets = await resolveAgentSecrets()
-    const reqKey = process.env.REQUESTY_API_KEY || secrets.REQUESTY_API_KEY
-    if (reqKey)
-      return { opts: { apiKey: reqKey, baseURL: REQUESTY_BASE }, model: REQUESTY_MODEL, beta: false }
-    return { opts: {}, model: ANTHROPIC_MODEL, beta: true }
-  }
-
+  // ---- chat (streamed from main so the key never enters the renderer) ----
+  // Provider resolved per send so a key added to the shell after boot — or a
+  // provider flipped in Preferences — is picked up on the next message; the
+  // SDK client itself is built once (anthropic ??=) and only the anthropic
+  // wire (claude, Requesty, anthropic-typed env override) ever touches it.
   ipcMain.handle('chat:send', async (e, { id, messages, brainWs }) => {
     try {
-      const provider = await chatProvider()
-      anthropic ??= new Anthropic(provider.opts)
+      const provider = await resolveChatProvider({ readStore, secrets: await resolveAgentSecrets() })
+      if (provider.keyMissing) {
+        win?.webContents.send('chat:done', {
+          id,
+          aborted: false,
+          error: `${provider.keyMissing.label} needs ${provider.keyMissing.keyEnv} — export it in your shell and restart, or pick another provider in ⌘, → Assistant.`,
+        })
+        return
+      }
+      if (provider.wire === 'anthropic') {
+        anthropic ??= new Anthropic(provider.opts)
+        provider.anthropic = anthropic
+        // server-side fallback betas are Anthropic-only; routers 400 on them
+        if (provider.beta) {
+          provider.betas = ['server-side-fallback-2026-07-01']
+          provider.fallbacks = 'default'
+        }
+      }
       // conductor system prompt (workspace tools) + the brain vault context
       let system = conductor.SYSTEM
       if (brainWs) system += await brain.contextFor(brainWs, messages[messages.length - 1]?.content || '')
-      await conductor.runChat(anthropic, {
-        id,
-        model: provider.model,
-        system,
-        messages,
-        // server-side fallback betas are Anthropic-only; routers 400 on them
-        betas: provider.beta ? ['server-side-fallback-2026-07-01'] : undefined,
-        fallbacks: provider.beta ? 'default' : undefined,
-      })
+      await conductor.runChat({ id, system, messages, client: provider })
     } catch (err) {
       const msg = err?.message || String(err)
       const authy = err?.status === 401 || /api.key|auth/i.test(msg)
@@ -1039,9 +1039,27 @@ app.whenReady().then(async () => {
         id,
         aborted: false,
         error: authy
-          ? 'No chat credentials found. Set REQUESTY_API_KEY (router) or ANTHROPIC_API_KEY (direct) in your shell and restart Tome.'
+          ? 'Chat credentials rejected. Check the provider key (MOONSHOT_API_KEY / ZHIPU_API_KEY / ANTHROPIC_API_KEY / REQUESTY_API_KEY) in your shell and restart Tome.'
           : msg,
       })
+    }
+  })
+
+  // Provider list for Preferences: names, models, and a key-set boolean
+  // derived from the login-shell secrets — the key ITSELF never crosses IPC.
+  ipcMain.handle('chat:providers', async () => {
+    const secrets = await resolveAgentSecrets()
+    const stored = await readStore('chat-provider')
+    const active = CHAT_PROVIDERS[stored] ? stored : DEFAULT_CHAT_PROVIDER
+    return {
+      providers: Object.entries(CHAT_PROVIDERS).map(([pid, p]) => ({
+        id: pid,
+        label: p.label,
+        model: p.model,
+        keyEnv: p.keyEnv,
+        keySet: !!(secrets[p.keyEnv] || process.env[p.keyEnv]),
+      })),
+      active,
     }
   })
 })

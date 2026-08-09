@@ -2081,6 +2081,21 @@ canvas.brain-graph {
   color: var(--accent);
   background: var(--accent-soft);
 }
+/* single-line text setting (assistant model) */
+.prefs-input {
+  width: 180px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  color: var(--text);
+  background: var(--bg-sunken);
+}
+.prefs-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 /* −/+ stepper */
 .prefs-stepper {
   display: flex;

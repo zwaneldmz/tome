@@ -122,6 +122,8 @@ contextBridge.exposeInMainWorld('tome', {
   chat: {
     send: (id, messages, brainWs) => ipcRenderer.invoke('chat:send', { id, messages, brainWs }),
     abort: (id) => ipcRenderer.send('chat:abort', id),
+    // provider list + key-set booleans for Preferences (never the keys)
+    providers: () => ipcRenderer.invoke('chat:providers'),
     onDelta: (cb) => ipcRenderer.on('chat:delta', (e, m) => cb(m)),
     onDone: (cb) => ipcRenderer.on('chat:done', (e, m) => cb(m)),
     onTool: (cb) => ipcRenderer.on('chat:tool', (e, m) => cb(m)),

@@ -23,6 +23,7 @@ export default [
         AbortController: 'readonly',
         Response: 'readonly',
         fetch: 'readonly',
+        TextDecoder: 'readonly',
       },
     },
     rules: {

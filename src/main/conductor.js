@@ -5,6 +5,7 @@
 import { stripAnsi, stripControlChars } from '../shared/terminal-text.js'
 import { AGENTS, OPENABLE_KINDS_DESCRIPTION } from '../shared/pane-kinds.js'
 import { readFlowTool, draftFlowTool } from './lib/flow-tools.js'
+import { streamChat } from './lib/chat-client.js'
 
 let ptys = null // Map shared with index.js
 let send = () => {} // (channel, payload) -> renderer
@@ -50,7 +51,9 @@ export function setAllowRun(v) {
   allowRun = !!v
 }
 
-const TOOLS = [
+// Canonical tool set — Anthropic-shaped (input_schema), exported for tests.
+// chat-client.js translates to OpenAI function defs at the wire boundary.
+export const TOOLS = [
   {
     name: 'list_panes',
     description:
@@ -234,7 +237,12 @@ export function abortChat(id) {
   inflight.get(id)?.abort()
 }
 
-export async function runChat(anthropic, { id, model, system, messages, betas, fallbacks }) {
+// `client` is the provider resolved by chat-client.resolveChatProvider plus
+// an optional anthropic SDK instance (required only for wire:'anthropic').
+// The loop below speaks the normalized streamChat shape — Anthropic-shaped
+// history and tools in, normalized content blocks back — so the wire
+// dialect (anthropic SDK vs OpenAI-compatible SSE) stays inside chat-client.
+export async function runChat({ id, system, messages, client }) {
   const msgs = [...messages]
   const controller = new AbortController()
   inflight.set(id, controller)
@@ -243,20 +251,17 @@ export async function runChat(anthropic, { id, model, system, messages, betas, f
   try {
     for (let turn = 0; turn < 8; turn++) {
       if (controller.signal.aborted) break
-      const args = {
-        model,
-        max_tokens: 64000,
-        system: system || SYSTEM,
-        messages: msgs,
-        tools: TOOLS,
-      }
-      if (betas) args.betas = betas
-      if (fallbacks) args.fallbacks = fallbacks
-      const stream = anthropic.beta.messages.stream(args, { signal: controller.signal })
-      stream.on('text', (text) => send('chat:delta', { id, text }))
       let final
       try {
-        final = await stream.finalMessage()
+        final = await streamChat({
+          provider: client,
+          anthropic: client.anthropic,
+          system: system || SYSTEM,
+          messages: msgs,
+          tools: TOOLS,
+          signal: controller.signal,
+          onText: (text) => send('chat:delta', { id, text }),
+        })
       } catch (err) {
         if (controller.signal.aborted || err?.name === 'AbortError' || err?.name === 'APIUserAbortError') {
           aborted = true
@@ -264,12 +269,12 @@ export async function runChat(anthropic, { id, model, system, messages, betas, f
         }
         throw err
       }
-      totalTokens += (final.usage?.input_tokens || 0) + (final.usage?.output_tokens || 0)
-      if (final.stop_reason === 'refusal') {
+      totalTokens += (final.usage?.input || 0) + (final.usage?.output || 0)
+      if (final.stopReason === 'refusal') {
         send('chat:done', { id, aborted: false, error: 'Request declined by safety classifiers.' })
         return
       }
-      if (final.stop_reason !== 'tool_use') {
+      if (final.stopReason !== 'tool_use') {
         send('chat:done', { id })
         return
       }
