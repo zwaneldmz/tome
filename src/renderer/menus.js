@@ -417,7 +417,7 @@ export async function populateAddMenu(menu, target) {
     },
   })
   menuRule(menu)
-  menuItem(menu, { label: 'Flow runs', hint: 'pipelines', onClick: () => addRuns(target) })
+  menuItem(menu, { label: 'Flow runs', onClick: () => addRuns(target) })
   menuItem(menu, { label: 'Event log', hint: 'audit', onClick: () => addEvents(target) })
   menuRule(menu)
   menuItem(menu, { label: 'Settings…', hint: '⌘,', onClick: () => preferencesModal() })

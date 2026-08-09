@@ -1,5 +1,1 @@
-blank_issues_enabled: false
-contact_links:
-  - name: GitLab issue tracker (canonical)
-    url: https://gitlab.com/ldmz/tome/-/issues
-    about: The canonical tracker until the GitHub mirror is public.
+blank_issues_enabled: true

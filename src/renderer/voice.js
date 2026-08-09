@@ -110,15 +110,60 @@ function openTranscript() {
 // accumulates and ships as ONE follow-up utterance — at most two speech
 // segments in flight at any time, whatever the token rate.
 let speakBuf = '' // text arrived while an utterance was playing
+let voiceName = null // persisted 'voice-name'; null = system default
+
+// The default voice is whatever the OS hands Chromium first — often a
+// robotic compact voice even on macOS, which reads as "terrible" no matter
+// how smooth the queueing is. Prefer, in order: the user's persisted pick,
+// a premium/natural en voice, any local en voice, the OS default.
+function pickVoice() {
+  const voices = speechSynthesis.getVoices()
+  if (!voices.length) return null
+  if (voiceName) {
+    const chosen = voices.find((v) => v.name === voiceName)
+    if (chosen) return chosen
+  }
+  const en = voices.filter((v) => v.lang?.startsWith('en'))
+  const pool = en.length ? en : voices
+  return (
+    pool.find((v) => /premium|enhanced|natural|neural/i.test(v.name)) ||
+    pool.find((v) => /samantha|ava|zoe|allison|susan/i.test(v.name)) ||
+    pool.find((v) => v.localService) ||
+    pool[0]
+  )
+}
+// getVoices() is empty until the OS list loads; re-resolve when it arrives.
+speechSynthesis.onvoiceschanged = () => pickVoice()
+
+// Spoken text is not rendered text: code fences read as punctuation soup,
+// and markdown markers get spelled out ("asterisk asterisk bold"). Strip
+// down to speakable prose before anything reaches speechSynthesis.
+function speakable(text) {
+  return text
+    .replace(/```[\s\S]*?(```|$)/g, ' code snippet. ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*]*)\*\*/g, '$1')
+    .replace(/\*([^*]*)\*/g, '$1')
+    .replace(/__([^_]*)__/g, '$1')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    .replace(/[ \t]+/g, ' ')
+    .trim()
+}
 
 function speak(text) {
-  if (!text.trim()) return
+  const prose = speakable(text)
+  if (!prose) return
   if (speakingNow) {
-    speakBuf += text
+    speakBuf += ' ' + prose
     return
   }
   speakingNow = true
-  const u = new SpeechSynthesisUtterance(text)
+  const u = new SpeechSynthesisUtterance(prose)
+  const v = pickVoice()
+  if (v) u.voice = v
   u.rate = speakRate // read per utterance, so ⌘ voice-rate applies next chunk
   u.onend = u.onerror = () => {
     speakingNow = false
@@ -415,6 +460,38 @@ function openVoiceMenu() {
       },
     })
     menuRule(menu)
+    // Voice picker: the same en voices pickVoice() ranks, the user's pick
+    // persisted to 'voice-name'. System default = the automatic ranking.
+    const voices = speechSynthesis.getVoices().filter((v) => v.lang?.startsWith('en'))
+    if (voices.length) {
+      menuLabel(menu, 'Voice')
+      menuItem(menu, {
+        label: 'System default',
+        active: !voiceName,
+        onClick: () => {
+          voiceName = null
+          tome.store.set('voice-name', null)
+        },
+      })
+      for (const v of voices.slice(0, 8)) {
+        menuItem(menu, {
+          label: v.name,
+          hint: v.localService ? '' : 'network',
+          active: voiceName === v.name,
+          onClick: () => {
+            voiceName = v.name
+            tome.store.set('voice-name', v.name)
+            if (active && state === 'speaking') return // applies next utterance
+            // idle: audition the pick right away
+            const u = new SpeechSynthesisUtterance(`Hi — this is ${v.name}.`)
+            u.voice = v
+            u.rate = speakRate
+            speechSynthesis.speak(u)
+          },
+        })
+      }
+      menuRule(menu)
+    }
     menuItem(menu, { label: 'Voice settings…', onClick: () => preferencesModal() })
   })
 }
@@ -451,5 +528,6 @@ export async function initVoice() {
   bargeIn = (await tome.store.get('voice-bargein')) !== false // default true
   const rate = await tome.store.get('voice-rate')
   if (typeof rate === 'number' && rate > 0) speakRate = rate
+  voiceName = await tome.store.get('voice-name') // null = automatic ranking
   setState('idle')
 }
