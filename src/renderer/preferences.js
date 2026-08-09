@@ -12,6 +12,159 @@ import { totpModal } from './airgap-ui.js'
 const THEME_LABEL = { system: 'Match system', light: 'Light', dark: 'Dark' }
 const SIDEBAR_DEFAULT = 236
 
+// ---- custom agents ----
+// A renderer-side MIRROR of the vet rules in src/main/lib/custom-agents.js,
+// duplicated here so the form can reject inline instead of round-tripping a
+// bad entry into the store. The mirror is convenience, never authority:
+// main re-vets every entry on every read of 'custom-agents', so a stale or
+// bypassed copy of these regexes degrades to "entry silently missing from
+// the ＋ menu", never to a command line.
+const AGENT_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/
+const AGENT_BIN_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i
+const AGENT_MODELFLAG_RE = /^--[a-z-]{2,20}$/
+const AGENT_ARG_BAD_RE = /[^\x20-\x7e]|[;&|`$<>"'\\\s]/
+const AGENT_RESERVED = new Set([
+  'claude',
+  'opencode',
+  'pi',
+  'terminal',
+  'chat',
+  'brain',
+  'flow',
+  'runs',
+  'doc',
+  'editor',
+  'events',
+])
+
+// Inline vet of one form entry → error string or null. Kept in lockstep
+// with vetCustomAgent's messages so a main-side refusal (visible as a
+// silently dropped row) is debuggable against what the form said.
+function vetAgentDraft({ id, label, bin, args, modelFlag }) {
+  if (!AGENT_ID_RE.test(id)) return 'id: 1–32 chars of [a-z0-9-], starting with a letter or digit'
+  if (AGENT_RESERVED.has(id)) return `id "${id}" is a built-in pane kind`
+  if (!label || label.length > 40 || !/^[\x20-\x7e]+$/.test(label)) return 'label: 1–40 chars of printable ASCII'
+  if (!AGENT_BIN_RE.test(bin)) return 'bin: a bare command name (no path separators)'
+  if (args.length > 8) return 'args: at most 8 tokens'
+  for (const a of args)
+    if (!a || a.length > 64 || AGENT_ARG_BAD_RE.test(a))
+      return 'args: single inert tokens (≤64 chars, no spaces or shell metacharacters)'
+  if (modelFlag && !AGENT_MODELFLAG_RE.test(modelFlag)) return 'model flag: like --model (/--[a-z-]{2,20}/)'
+  return null
+}
+
+// The "Agents" Preferences section: the user's custom CLIs as rows (label,
+// bin, args, availability dot) plus an add-form. Persists through the same
+// 'custom-agents' store key main reads, and nudges main afterwards so the
+// conductor's kind descriptions refresh in-session. Exported because WS-E
+// onboarding mounts the same section on its own surface.
+export async function buildAgentsSection() {
+  const section = el('section', 'prefs-section')
+  section.append(el('h4', '', 'Agents'))
+  // The store is the single writer/reader contract: load once, keep one
+  // list, write it back whole on every mutation. main re-vets on read, so
+  // persisting exactly what the form vetted is belt, not the suspenders.
+  let customs = (await tome.agents.customs()) || []
+  const listed = await tome.agents.list()
+  const available = new Map(listed.filter((a) => a.custom).map((a) => [a.name, a.available]))
+
+  const persist = async () => {
+    await tome.store.set('custom-agents', customs)
+    tome.agents.changed() // conductor + agents:list re-read on next use
+  }
+
+  const list = el('div', 'prefs-agents')
+  const renderRows = () => {
+    list.innerHTML = ''
+    if (!customs.length) {
+      const empty = el('div', 'prefs-hint', 'No custom agents yet — add one below.')
+      empty.style.padding = '4px 0'
+      list.appendChild(empty)
+    }
+    for (const a of customs) {
+      const r = el('div', 'prefs-row')
+      const text = el('div', 'prefs-text')
+      const head = el('span', 'prefs-label')
+      const dot = el('span', 'prefs-agent-dot' + (available.get(a.id) ? ' on' : ''))
+      dot.title = available.get(a.id) ? `${a.bin} found on PATH` : `${a.bin} not found on PATH`
+      head.append(dot, a.label)
+      text.append(head)
+      text.append(
+        el(
+          'span',
+          'prefs-hint',
+          `${a.id} · ${[a.bin, ...(a.args || [])].join(' ')}${a.modelFlag ? ` · ${a.modelFlag}` : ''}`
+        )
+      )
+      const remove = el('button', 'ag-btn ghost', 'Remove')
+      remove.type = 'button'
+      remove.addEventListener('click', async () => {
+        customs = customs.filter((c) => c.id !== a.id)
+        await persist()
+        renderRows()
+        toast(`removed ${a.label}`, 'ok')
+      })
+      r.append(text, remove)
+      list.appendChild(r)
+    }
+  }
+  renderRows()
+  section.appendChild(list)
+
+  // add-form: four small inputs + Add, inline errors under it
+  const form = el('div', 'prefs-agent-form')
+  const mk = (placeholder) => {
+    const i = el('input')
+    i.type = 'text'
+    i.placeholder = placeholder
+    i.setAttribute('aria-label', placeholder)
+    i.spellcheck = false
+    return i
+  }
+  const idIn = mk('id — e.g. aider')
+  const labelIn = mk('label — e.g. Aider')
+  const binIn = mk('bin — e.g. aider')
+  const argsIn = mk('args · model flag')
+  const err = el('div', 'prefs-hint')
+  err.style.color = 'var(--danger, #e5534b)'
+  const add = el('button', 'ag-btn ghost', 'Add')
+  add.type = 'button'
+  add.addEventListener('click', async () => {
+    // The last field carries the two optional values space-separated:
+    // arg tokens first, a trailing --flag as the model flag. Splitting here
+    // is exactly the join the spawn builder performs, so what you type is
+    // what the command line gets.
+    const extras = argsIn.value.trim().split(/\s+/).filter(Boolean)
+    const modelFlag = extras.find((t) => t.startsWith('--')) || ''
+    const draft = {
+      id: idIn.value.trim(),
+      label: labelIn.value.trim(),
+      bin: binIn.value.trim(),
+      args: extras.filter((t) => t !== modelFlag),
+      ...(modelFlag ? { modelFlag } : {}),
+    }
+    err.textContent = ''
+    const bad = vetAgentDraft(draft)
+    if (bad) {
+      err.textContent = bad
+      return
+    }
+    if (customs.some((c) => c.id === draft.id)) {
+      err.textContent = `id "${draft.id}" is already in the list`
+      return
+    }
+    customs = [...customs, draft]
+    await persist()
+    renderRows()
+    idIn.value = labelIn.value = binIn.value = argsIn.value = ''
+    toast(`added ${draft.label} — reopen the ＋ menu to spawn it`, 'ok')
+  })
+  form.append(idIn, labelIn, binIn, argsIn, add)
+  section.appendChild(form)
+  section.appendChild(err)
+  return section
+}
+
 // Label on the left, control on the right.
 function row(parent, label, ctrl, hint) {
   const r = el('div', 'prefs-row')
@@ -262,6 +415,9 @@ export async function preferencesModal() {
   })
   security.appendChild(enroll)
   m.body.appendChild(security)
+
+  // ---------- agents ----------
+  m.body.appendChild(await buildAgentsSection())
 
   // ---------- sidebar ----------
   const sidebar = el('section', 'prefs-section')

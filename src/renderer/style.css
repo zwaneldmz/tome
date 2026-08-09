@@ -2154,6 +2154,35 @@ canvas.brain-graph {
   transform: translateX(16px);
   background: var(--accent);
 }
+/* custom agents: availability dot + the four-input add form */
+.prefs-agents {
+  display: flex;
+  flex-direction: column;
+}
+.prefs-agent-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.prefs-agent-dot.on {
+  background: var(--ok, #57ab5a);
+}
+.prefs-agent-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding-top: 6px;
+}
+.prefs-agent-form input {
+  min-width: 0;
+}
+.prefs-agent-form .ag-btn {
+  grid-column: 2;
+  justify-self: end;
+}
 
 /* ================= toasts ================= */
 #toasts {

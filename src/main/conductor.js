@@ -3,7 +3,7 @@
 // to the Claude chat loop, and never runs a command unless the user flipped
 // the "assistant may run commands" toggle (allowRun) on.
 import { stripAnsi, stripControlChars } from '../shared/terminal-text.js'
-import { AGENTS, OPENABLE_KINDS_DESCRIPTION } from '../shared/pane-kinds.js'
+import { AGENTS } from '../shared/pane-kinds.js'
 import { readFlowTool, draftFlowTool } from './lib/flow-tools.js'
 import { streamChat } from './lib/chat-client.js'
 
@@ -14,6 +14,25 @@ let allowRun = false
 let canOpenFile = () => false // main's workspace confinement check
 let logEvent = () => {} // main's persistent event log (events.js)
 let getRoots = () => [] // open workspace folders, [] until ws:sync lands
+
+// ---- agent kinds in prompts/tool descriptions ----
+// AGENTS is the built-in list; custom CLIs (custom-agents.js) widen it at
+// runtime via setAgents below. The three strings the model ever sees them
+// through — the open_pane tool description, the draft_flow tool
+// description, and the system prompt — are REBUILT on every setAgents call
+// rather than frozen at module load, because a custom agent the user just
+// added must be openable by the assistant in the same session. The strings
+// are rebuilt from scratch off a single list, so no edit path can leave two
+// of them disagreeing.
+let agentIds = [...AGENTS]
+const agentKindsText = () => agentIds.join(', ')
+// The open_pane half of OPENABLE_KINDS_DESCRIPTION, rebuilt off agentIds —
+// pane-kinds.js's export stays the built-in-only statement for consumers
+// that never hear about customs.
+const openableKindsDescription = () =>
+  `kind is one of: ${['terminal', ...agentIds, 'chat', 'brain', 'flow', 'runs']
+    .map((k) => `'${k}'`)
+    .join(', ')}.`
 
 const meta = new Map() // ptyId -> { kind, cwd, airgap, exited }
 const scrolls = new Map() // ptyId -> recent raw output
@@ -53,7 +72,39 @@ export function setAllowRun(v) {
 
 // Canonical tool set — Anthropic-shaped (input_schema), exported for tests.
 // chat-client.js translates to OpenAI function defs at the wire boundary.
-export const TOOLS = [
+//
+// Called from index.js after reading the custom-agents store (and after
+// every change to it). Rebuilds the prompt surfaces above from the merged
+// list; unknown/missing input falls back to the built-ins alone rather than
+// leaving the assistant describing kinds that no longer exist.
+export function setAgents(list) {
+  agentIds = Array.isArray(list) && list.length ? [...list] : [...AGENTS]
+  rebuildPrompts()
+}
+
+// Rebuilds the three strings the model reads agent kinds through — the
+// open_pane and draft_flow tool descriptions and the system prompt — from
+// the current agentIds. Called once at module load (so TOOLS/SYSTEM below
+// start life built by the same code path that refreshes them) and on every
+// setAgents. The kinds sentence of SYSTEM is the ONLY dynamic part; the
+// rest is verbatim what it always was, kept next to the replacement point
+// so a wording edit can't forget the rebuild exists.
+function rebuildPrompts() {
+  for (const t of TOOLS) {
+    if (t.name === 'open_pane')
+      t.description = 'Open a new pane in the grid. ' + openableKindsDescription()
+    if (t.name === 'draft_flow') t.description = draftFlowDescription()
+  }
+  SYSTEM = systemPrompt()
+}
+
+// TOOLS/SYSTEM are `let` rather than `const` because setAgents rebuilds
+// them; runChat reads both fresh per call, so a rebuild mid-session takes
+// effect on the next message. Exported for tests (chat-providers.test.js
+// translates the real array) — the rebinding on setAgents is why the export
+// is `let` too.
+export let TOOLS = [
+
   {
     name: 'list_panes',
     description:
@@ -89,9 +140,12 @@ export const TOOLS = [
   },
   {
     name: 'open_pane',
-    // shared/pane-kinds.js owns the list — main's AGENTS and the renderer's
-    // conductor:open switch read the same module
-    description: 'Open a new pane in the grid. ' + OPENABLE_KINDS_DESCRIPTION,
+    // shared/pane-kinds.js owns the built-in list — main's AGENTS and the
+    // renderer's conductor:open switch read the same module. The
+    // description string itself is rebuilt by rebuildPrompts (called right
+    // after this array literal, and on every setAgents) when custom CLIs
+    // widen it. This initial value is a placeholder for that rebuild.
+    description: '',
     input_schema: {
       type: 'object',
       properties: { kind: { type: 'string' } },
@@ -121,10 +175,9 @@ export const TOOLS = [
   },
   {
     name: 'draft_flow',
-    description:
-      'Create or overwrite a flow at .tome/flows/<name>.flow.json; a flow pane opens and live-updates as you refine it. `flow` is the whole document: {version: 1, name, nodes: [], edges: []}. Node: {id, kind, name, instructions, expects, produces, inputs: [{name}], outputs: [{name}], x, y, model?} — kind is "terminal" or an agent CLI (' +
-      AGENTS.join(', ') +
-      '); give every node a unique short id like "n1"; omit x/y for auto-layout. Edge: {id, from, to, fromOutput, toInput} joining an output port name to an input port name. Structural errors are refused outright; contract warnings come back for you to raise with the user. Only call this after the user agrees to start (or change) a draft.',
+    // Same placeholder-then-rebuild story as open_pane above; the text
+    // itself lives in draftFlowDescription() below.
+    description: draftFlowDescription(),
     input_schema: {
       type: 'object',
       properties: {
@@ -137,9 +190,22 @@ export const TOOLS = [
   },
 ]
 
-export const SYSTEM =
-  'You are the assistant pane inside Tome, a desktop coding harness whose grid holds ' +
-  `terminal panes, agent CLI panes (${AGENTS.join(', ')}), editors, documents, and note vaults. ` +
+// The draft_flow tool description as a function of the current agent list,
+// so rebuildPrompts can re-derive it instead of string-splicing a built one.
+function draftFlowDescription() {
+  return (
+    'Create or overwrite a flow at .tome/flows/<name>.flow.json; a flow pane opens and live-updates as you refine it. `flow` is the whole document: {version: 1, name, nodes: [], edges: []}. Node: {id, kind, name, instructions, expects, produces, inputs: [{name}], outputs: [{name}], x, y, model?} — kind is "terminal" or an agent CLI (' +
+    agentKindsText() +
+    '); give every node a unique short id like "n1"; omit x/y for auto-layout. Edge: {id, from, to, fromOutput, toInput} joining an output port name to an input port name. Structural errors are refused outright; contract warnings come back for you to raise with the user. Only call this after the user agrees to start (or change) a draft.'
+  )
+}
+
+// The system prompt as a function of the current agent list — one sentence
+// (the agent kinds parenthetical) is dynamic, the rest never changes.
+function systemPrompt() {
+  return (
+    'You are the assistant pane inside Tome, a desktop coding harness whose grid holds ' +
+    `terminal panes, agent CLI panes (${agentKindsText()}), editors, documents, and note vaults. ` +
   'You have tools to inspect and drive the workspace: list panes, read a terminal’s recent ' +
   'output, type into a terminal, open new panes or files. Use them whenever the user refers to ' +
   'other panes ("what is claude doing", "run the tests over there", "open a terminal"). ' +
@@ -157,6 +223,11 @@ export const SYSTEM =
   'returns. Never overwrite a flow you did not draft in this conversation without asking. ' +
   'You cannot run flows: when the user approves the final shape, say it is saved and that ' +
   'they press Run on the flow pane.'
+  )
+}
+
+export let SYSTEM = '' // placeholder — built by the rebuildPrompts call below
+rebuildPrompts()
 
 // `chatId` rides along so the renderer can open what the assistant asks for
 // as a tab in the requesting pane's own group instead of resplitting the grid.

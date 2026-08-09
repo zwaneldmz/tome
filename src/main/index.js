@@ -21,9 +21,11 @@ import * as events from './events'
 import * as flowRunner from './flow-runner'
 import * as lsp from './lsp'
 import { AGENTS } from '../shared/pane-kinds.js'
+<<<<<<< HEAD
 import { CHAT_PROVIDERS, DEFAULT_CHAT_PROVIDER } from '../shared/chat-providers.js'
-import { buildAgentSpawn } from './lib/agent-spawn.js'
 import { resolveChatProvider } from './lib/chat-client.js'
+import { buildAgentSpawnFrom } from './lib/agent-spawn.js'
+import { mergeAgents } from './lib/custom-agents.js'
 import * as stt from './lib/stt.js'
 import { encodeWav } from '../shared/wav.js'
 
@@ -596,14 +598,21 @@ app.whenReady().then(async () => {
   }
 
   async function createPty({ id, kind, cwd, gapped, ws, model }) {
-    const isAgent = AGENTS.includes(kind)
+    // Resolve the kind against built-ins PLUS the user's vetted custom CLIs,
+    // with the store re-read per spawn: spawns are rare, and a fresh read is
+    // what makes a Preferences edit take effect on the next pane without any
+    // cache invalidation. mergeAgents re-vets every custom entry on the way
+    // in, so what the renderer (or a hand edit) left in the store can shrink
+    // the list, never sneak a command line past it.
+    const agents = mergeAgents(AGENTS, await readStore('custom-agents'))
+    const isAgent = agents.some((a) => a.id === kind)
     if (!isAgent && kind !== 'terminal') return
     let spawnCmd = SHELL
     // A flow node may pin a model (src/shared/agent-models.js), which is the
     // only renderer-supplied value that has ever influenced this command line
     // — so the assembly lives in one vetted, unit-tested place rather than
     // inline here. It returns null for 'terminal', i.e. a bare login shell.
-    const agentCmd = buildAgentSpawn(kind, { model })
+    const agentCmd = buildAgentSpawnFrom(agents, kind, { model })
     let spawnArgs = agentCmd ? ['-l', '-c', agentCmd] : ['-l']
     const { env, sandbox } = await buildAgentEnv({ paneId: id, agent: isAgent, gapped, ws })
     if (sandbox) {
@@ -982,13 +991,37 @@ app.whenReady().then(async () => {
     // Wait for the login-shell PATH (async, cached) so Finder launches still
     // find agents installed in ~/.local/bin etc.
     await ensureLoginEnv()
-    const check = (name) =>
+    // Built-ins plus the vetted customs, availability-probed identically —
+    // a custom bin resolves through the same login-shell PATH the built-ins
+    // do, which is the whole point of the bare-command-name rule.
+    const agents = mergeAgents(AGENTS, await readStore('custom-agents'))
+    const check = (a) =>
       new Promise((resolve) => {
-        execFile(SHELL, ['-l', '-c', `command -v ${name}`], (err) =>
-          resolve({ name, available: !err })
+        execFile(SHELL, ['-l', '-c', `command -v ${a.bin}`], (err) =>
+          resolve({ name: a.id, available: !err, ...(a.custom ? { label: a.label, custom: true } : {}) })
         )
       })
-    return Promise.all(AGENTS.map(check))
+    return Promise.all(agents.map(check))
+  })
+
+  // The vetted custom list for Preferences — what the store holds, minus
+  // whatever failed re-vetting on the way out. Availability comes from
+  // agents:list; this channel is the shape-of-the-list answer.
+  ipcMain.handle('agents:customs', async () =>
+    mergeAgents(AGENTS, await readStore('custom-agents'))
+      .filter((a) => a.custom)
+      .map(({ id, label, bin, args, modelFlag }) => ({ id, label, bin, args, modelFlag }))
+  )
+
+  // The renderer edited 'custom-agents' (Preferences) — re-read the store
+  // and rebuild the conductor's kind descriptions so the assistant can
+  // open_pane a custom CLI in the same session it was added. Registered
+  // with ipcMain.on like the other conductor setters (panes:sync & co.),
+  // NOT the wrapped handle — the lock gate only covers invoke channels,
+  // and nothing about refreshing a description string is privileged: the
+  // store bytes are re-vetted here, and every spawn path is lock-gated.
+  ipcMain.on('agents:changed', async () => {
+    conductor.setAgents(mergeAgents(AGENTS, await readStore('custom-agents')).map((a) => a.id))
   })
 
   // ---- background flow runs ----

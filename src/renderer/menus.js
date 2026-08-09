@@ -324,13 +324,28 @@ wireMenu('ws-chip', 'ws-menu', (menu) => {
 export async function populateAddMenu(menu, target) {
   menu.innerHTML = ''
   const agents = await tome.agents.list()
-  for (const a of agents) {
+  for (const a of agents.filter((a) => !a.custom)) {
     menuItem(menu, {
       label: (prefs.airgapDefault ? '⛨ ' : '') + a.name,
       hint: a.available ? (target ? 'as a tab' : 'agent') : 'not installed',
       disabled: !a.available,
       onClick: () => addTerminal(a.name, target),
     })
+  }
+  // User-declared CLIs (Preferences → Agents) spawn exactly like built-ins —
+  // same addTerminal path, same greyed-with-a-hint treatment when the bin
+  // isn't on PATH; main re-vets the kind again at pty:create.
+  const customs = agents.filter((a) => a.custom)
+  if (customs.length) {
+    menuLabel(menu, 'Custom agents')
+    for (const a of customs) {
+      menuItem(menu, {
+        label: (prefs.airgapDefault ? '⛨ ' : '') + (a.label || a.name),
+        hint: a.available ? (target ? 'as a tab' : 'agent') : 'not installed',
+        disabled: !a.available,
+        onClick: () => addTerminal(a.name, target),
+      })
+    }
   }
   menuItem(menu, {
     label: 'spawn agents air-gapped',

@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "name": "release-notes",
+  "nodes": [
+    {
+      "kind": "claude",
+      "name": "gather",
+      "instructions": "List the merged PRs since the last tag and write them into a short bullet list.",
+      "expects": "",
+      "produces": "",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "list",
+          "description": ""
+        }
+      ],
+      "x": 126.5,
+      "y": 227.25,
+      "id": "n1",
+      "model": "haiku"
+    },
+    {
+      "kind": "claude",
+      "name": "draft",
+      "instructions": "Turn the bullet list into release notes in the project's voice.",
+      "expects": "",
+      "produces": "",
+      "inputs": [
+        {
+          "name": "list",
+          "description": ""
+        }
+      ],
+      "outputs": [
+        {
+          "name": "notes",
+          "description": ""
+        }
+      ],
+      "x": 466.5,
+      "y": 227.25,
+      "id": "n2"
+    },
+    {
+      "kind": "claude",
+      "name": "review",
+      "instructions": "Tighten the notes; flag anything inaccurate.",
+      "expects": "",
+      "produces": "",
+      "inputs": [
+        {
+          "name": "notes",
+          "description": ""
+        }
+      ],
+      "outputs": [],
+      "x": 806.5,
+      "y": 227.25,
+      "id": "n3"
+    }
+  ],
+  "edges": [
+    {
+      "from": "n1",
+      "fromOutput": "list",
+      "to": "n2",
+      "toInput": "list",
+      "label": "",
+      "id": "e1"
+    },
+    {
+      "from": "n2",
+      "fromOutput": "notes",
+      "to": "n3",
+      "toInput": "notes",
+      "label": "",
+      "id": "e2"
+    }
+  ]
+}

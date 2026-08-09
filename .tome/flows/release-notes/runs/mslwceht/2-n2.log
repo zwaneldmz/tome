@@ -1,0 +1,16 @@
+# draft · claude · 2026-08-09T14:27:38.512Z
+Done. Notes written to `.tome/flows/release-notes/n2-notes.md`.
+
+One problem worth knowing: upstream handoff **never existed**. Gather (haiku node) log say "Wrote 9 PRs since v0.1.0 to n1-list.md" — file nowhere on disk, exit 0 anyway. Hallucinated write. I reconstructed list from `git log v0.1.0..HEAD` — exactly 9 commits, match gather's count, so no content lost.
+
+Notes cover, in README voice:
+
+- **Background flow runs** — headless `claude -p` per node, real layer sequencing, air-gapped, logs + `run.json` per run, process-group cancel
+- **Flow runs pane** — pipeline-style columns, live log tails, split Run button
+- **Per-node model pins** — editor select, card badge, injection-proof spawn line
+- **Fixes** — flow panel edge count / placeholder / port overlap; `brain.js` missing `sep` import
+- **Docs** — rebuilt tour, flows recording
+- Skipped 3 internal feature-plan commits — not user-facing
+
+Suggest for flow owner: runner should verify declared handoff files exist before marking node done — exit 0 + missing artifact currently pass silently.
+# exit 0

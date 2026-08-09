@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "orchestration": {
+      "source": "stablyai/orca",
+      "sourceType": "github",
+      "skillPath": "skills/orchestration/SKILL.md",
+      "computedHash": "b5c364878fb07d21a369f091f2e96b823da94308b15b39636f2585d8b5621b51"
+    }
+  }
+}

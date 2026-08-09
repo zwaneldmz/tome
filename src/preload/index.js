@@ -88,6 +88,12 @@ contextBridge.exposeInMainWorld('tome', {
   },
   agents: {
     list: () => ipcRenderer.invoke('agents:list'),
+    // The vetted custom list for Preferences, and the nudge that tells main
+    // to re-read 'custom-agents' after an edit (conductor prompt rebuild).
+    // The list itself only ever travels through the store — this channel
+    // carries no payload, so there is nothing to vet on it.
+    customs: () => ipcRenderer.invoke('agents:customs'),
+    changed: () => ipcRenderer.send('agents:changed'),
   },
   // Persistent event log (main owns userData/events.jsonl): a read-only tail
   // plus a live push for each new record.
