@@ -10,3 +10,7 @@ tome-council-report.pdf
 reviews/
 docs/*
 !docs/how-tome-works.html
+!docs/icon.png
+!docs/screenshot.png
+!docs/tour-*.png
+!docs/flow-creation.mp4
