@@ -69,6 +69,34 @@ export async function buildAgentsSection() {
   const listed = await tome.agents.list()
   const available = new Map(listed.filter((a) => a.custom).map((a) => [a.name, a.available]))
 
+  // Enabled/disabled picker — the same 'agents-disabled' key the onboarding
+  // wizard's Agents step writes and the ＋ menu reads. Built-ins first, then
+  // customs; an unavailable CLI can be toggled here (it will simply offer
+  // itself greyed-out when it lands back in the menu).
+  const disabled = new Set((await tome.store.get('agents-disabled')) || [])
+  if (listed.length) {
+    for (const a of listed) {
+      const sw = el('button', 'prefs-switch')
+      sw.type = 'button'
+      sw.setAttribute('role', 'switch')
+      sw.append(el('span', 'prefs-knob'))
+      const paint = () => {
+        sw.classList.toggle('on', !disabled.has(a.name))
+        sw.setAttribute('aria-checked', String(!disabled.has(a.name)))
+      }
+      sw.addEventListener('click', () => {
+        disabled.has(a.name) ? disabled.delete(a.name) : disabled.add(a.name)
+        tome.store.set('agents-disabled', [...disabled])
+        paint()
+      })
+      const r = row(section, a.label || a.name, sw, a.custom ? `${a.name} · custom` : a.available ? null : 'not installed')
+      const dot = el('span', 'prefs-agent-dot' + (a.available ? ' on' : ''))
+      dot.title = a.available ? `${a.bin || a.name} found on PATH` : 'not found on PATH'
+      r.querySelector('.prefs-label').prepend(dot)
+      paint()
+    }
+  }
+
   const persist = async () => {
     await tome.store.set('custom-agents', customs)
     tome.agents.changed() // conductor + agents:list re-read on next use

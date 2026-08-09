@@ -44,7 +44,14 @@ function recompile() {
 }
 
 export function setEventSink(fn) {
-  onEvent = fn
+  onEvent = (type, payload) => {
+    // Quit tears the window down while teardown code (closeAll, pty kills)
+    // may still push state — a send into a destroyed webContents throws
+    // "Object has been destroyed" as an uncaught main-process exception.
+    try {
+      fn(type, payload)
+    } catch {}
+  }
 }
 
 // onEvent pushes to the live renderer; logEvent persists to the event log.
@@ -368,14 +375,15 @@ export function closePane(paneId) {
 // this an unclosed proxy (spawn failed after createPaneProxy, onExit never
 // fired) would keep its loopback port bound until the process exits.
 // server.close() only stops accepting — in-flight CONNECT tunnels die with
-// the process itself, which is where this is called from.
+// the process itself, which is where this is called from. No pushState:
+// closeAll runs from will-quit/window-all-closed, where the renderer is
+// already gone — pushing would throw "Object has been destroyed".
 export function closeAll() {
   for (const [id, st] of panes) {
     clearTimeout(st.timer)
     st.server.close()
     panes.delete(id)
   }
-  pushState()
 }
 
 export function getState() {

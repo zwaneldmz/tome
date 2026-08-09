@@ -324,7 +324,11 @@ wireMenu('ws-chip', 'ws-menu', (menu) => {
 export async function populateAddMenu(menu, target) {
   menu.innerHTML = ''
   const agents = await tome.agents.list()
-  for (const a of agents.filter((a) => !a.custom)) {
+  // The wizard's Agents step (and Settings → Agents) can deselect a CLI:
+  // it stays installed, it just leaves this menu. pty:create in main still
+  // accepts the kind — deselection is a UI convenience, not a sandbox rule.
+  const disabled = new Set((await tome.store.get('agents-disabled')) || [])
+  for (const a of agents.filter((a) => !a.custom && !disabled.has(a.name))) {
     menuItem(menu, {
       label: (prefs.airgapDefault ? '⛨ ' : '') + a.name,
       hint: a.available ? (target ? 'as a tab' : 'agent') : 'not installed',
@@ -335,7 +339,7 @@ export async function populateAddMenu(menu, target) {
   // User-declared CLIs (Preferences → Agents) spawn exactly like built-ins —
   // same addTerminal path, same greyed-with-a-hint treatment when the bin
   // isn't on PATH; main re-vets the kind again at pty:create.
-  const customs = agents.filter((a) => a.custom)
+  const customs = agents.filter((a) => a.custom && !disabled.has(a.name))
   if (customs.length) {
     menuLabel(menu, 'Custom agents')
     for (const a of customs) {

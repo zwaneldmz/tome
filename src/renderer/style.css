@@ -3500,3 +3500,18 @@ body.tome-popout .dockview-theme-tome .dv-groupview {
   line-height: 1.5;
   color: var(--bright);
 }
+/* agent picker rows in the wizard Agents step */
+.ob-agent-pick {
+  align-items: center;
+}
+.ob-agent-pick input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.ob-agent-pick input[type="checkbox"]:disabled {
+  cursor: default;
+  opacity: 0.4;
+}

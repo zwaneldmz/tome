@@ -214,43 +214,46 @@ export async function showOnboarding() {
   }
 
   function stepAgents() {
+    note('Pick the agent CLIs Tome may spawn. Unchecked agents stay installed but leave the ＋ menu.')
     const list = el('div', 'ob-agents')
     m.body.appendChild(list)
     const spinner = el('p', 'ag-note', 'Checking your PATH…')
     spinner.setAttribute('role', 'status')
     list.appendChild(spinner)
     note('More CLIs can be added later in Settings (⌘,) → Agents.')
-    const paint = (agents, customs) => {
+    const paint = async (agents) => {
       spinner.remove()
-      for (const a of agents) {
-        const r = el('div', 'ob-agent')
+      const disabled = new Set((await tome.store.get('agents-disabled')) || [])
+      const row = (id, label, available, hintText) => {
+        const r = el('div', 'ob-agent ob-agent-pick')
+        const cb = el('input')
+        cb.type = 'checkbox'
+        cb.checked = !disabled.has(id)
+        cb.disabled = !available // not installed — nothing to offer
+        cb.setAttribute('aria-label', `Enable ${label}`)
+        cb.addEventListener('change', async () => {
+          cb.checked ? disabled.delete(id) : disabled.add(id)
+          state.dirty = true
+          await tome.store.set('agents-disabled', [...disabled])
+        })
+        const name = el('span', 'ob-agent-name', label)
         r.append(
-          el('span', 'ob-dot-avail ' + (a.available ? 'ok' : 'off'), a.available ? '●' : '○'),
-          el('span', 'ob-agent-name', a.name)
+          cb,
+          el('span', 'ob-dot-avail ' + (available ? 'ok' : 'off'), available ? '●' : '○'),
+          name
         )
-        if (!a.available) {
-          const hint = el('span', 'ob-agent-hint', INSTALL_HINT[a.name] || 'not on your PATH')
-          r.appendChild(hint)
-        }
+        if (!available) r.appendChild(el('span', 'ob-agent-hint', hintText || 'not on your PATH'))
         list.appendChild(r)
       }
-      for (const c of customs || []) {
-        const r = el('div', 'ob-agent')
-        r.append(
-          el('span', 'ob-dot-avail ok', '●'),
-          el('span', 'ob-agent-name', c.name || c),
-          el('span', 'prefs-hint', 'custom')
-        )
-        list.appendChild(r)
-      }
+      for (const a of agents) row(a.name, a.label || a.name, a.available, INSTALL_HINT[a.name])
     }
     // Inline spinner, never blocking Next: a slow login shell just leaves the
     // list empty until the probe resolves. If the user has moved on by then,
     // the result is dropped — m.body now belongs to another step.
     const myStep = state.step
     const stale = () => state.step !== myStep
-    Promise.all([tome.agents.list(), Promise.resolve(tome.agents.customs?.() ?? null)])
-      .then(([agents, customs]) => !stale() && paint(agents, customs))
+    Promise.resolve(tome.agents.list())
+      .then((agents) => !stale() && paint(agents))
       .catch(
         () => !stale() && (spinner.textContent = 'Could not check for agents — find them later in Settings (⌘,).')
       )
