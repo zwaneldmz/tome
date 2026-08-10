@@ -33,8 +33,14 @@ export async function resolveChatProvider({ readStore, secrets = {} } = {}) {
   const envBase = process.env.TOME_CHAT_BASE_URL
   const envModel = process.env.TOME_CHAT_MODEL
   if (envBase || envModel) {
+    let envHost = ''
+    try {
+      envHost = new URL(envBase).hostname
+    } catch {
+      /* not a parseable URL — openai wire unless TOME_CHAT_WIRE says otherwise */
+    }
     const anthropicWire =
-      process.env.TOME_CHAT_WIRE === 'anthropic' || (envBase || '').includes('api.anthropic.com')
+      process.env.TOME_CHAT_WIRE === 'anthropic' || envHost === 'api.anthropic.com'
     return {
       id: 'env',
       label: 'Custom endpoint (TOME_CHAT_BASE_URL/TOME_CHAT_MODEL)',
