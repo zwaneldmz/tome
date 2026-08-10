@@ -1,6 +1,8 @@
 // Provider allowlist for the air-gap proxies: hostname patterns where `*`
-// matches exactly one DNS label ([a-z0-9-]+), case-insensitive, fully
-// anchored — so `*.amazonaws.com` can never match `amazonaws.com.evil.com`.
+// matches exactly one DNS label ([a-z0-9-]+), case-insensitive, matched
+// label-by-label with equal label counts — so `*.amazonaws.com` can never
+// match `amazonaws.com.evil.com`. Deliberately not regex-based: label
+// comparison is bypass-proof by construction and static analyzers can see it.
 // Extracted from airgap.js so the compiler is testable without module state.
 
 export const DEFAULT_ALLOW = [
@@ -24,11 +26,16 @@ export const DEFAULT_ALLOW = [
 
 export function compileAllowlist(patterns) {
   return patterns.map((p) => {
-    const re = p
-      .split('*')
-      .map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-      .join('[a-z0-9-]+')
-    return new RegExp(`^${re}$`, 'i')
+    const want = p.toLowerCase().split('.')
+    return {
+      test(host) {
+        const got = String(host).toLowerCase().split('.')
+        if (got.length !== want.length) return false
+        return want.every((label, i) =>
+          label === '*' ? /^[a-z0-9-]+$/.test(got[i]) : got[i] === label,
+        )
+      },
+    }
   })
 }
 
