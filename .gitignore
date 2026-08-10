@@ -5,6 +5,7 @@ build/icon.iconset/
 .DS_Store
 .env
 .claude/
+.worktrees/
 index.js
 tome-council-report.pdf
 reviews/
