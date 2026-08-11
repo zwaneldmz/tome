@@ -1,6 +1,6 @@
-import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, systemPreferences, nativeTheme, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, protocol, net, shell, session, systemPreferences, nativeTheme, Menu } from 'electron'
 import { join, resolve, extname, sep } from 'node:path'
-import { readdir, readFile, writeFile, mkdir, realpath } from 'node:fs/promises'
+import { readdir, readFile, writeFile, mkdir, realpath, chmod } from 'node:fs/promises'
 import { watch as watchFile } from 'node:fs'
 import { homedir } from 'node:os'
 import { execFile } from 'node:child_process'
@@ -24,7 +24,12 @@ import { AGENTS } from '../shared/pane-kinds.js'
 import { CHAT_PROVIDERS, DEFAULT_CHAT_PROVIDER } from '../shared/chat-providers.js'
 import { resolveChatProvider } from './lib/chat-client.js'
 import { buildAgentSpawnFrom } from './lib/agent-spawn.js'
+import { buildAgentBaseEnv } from './lib/agent-env.js'
 import { mergeAgents } from './lib/custom-agents.js'
+import { isValidStoreKey, isStoreKeyAllowed } from './lib/store-keys.js'
+import { resolveGapping, resolveSpawnCwd } from './lib/pty-authority.js'
+import { isAppUrl } from './lib/app-url.js'
+import { isLocked, shouldBlockIpcOn } from './lib/ipc-lock-gate.js'
 import * as stt from './lib/stt.js'
 import { encodeWav } from '../shared/wav.js'
 
@@ -85,14 +90,14 @@ let anthropic = null
 
 // ---- file-open confinement ----
 // Anything that opens or parses a file in main on behalf of the renderer —
-// the conductor's open_file tool (model-driven!) and doc:read's
-// mammoth/SheetJS parsers — stays inside the open workspace folders, or a
-// brain vault. Otherwise a prompt-injected chat reply could make the main
-// process parse ~/.ssh/… with libraries that have CVE histories.
-// (fs:readFile/fs:writeFile/fs:mkdir/fs:createFile/shell:openPath stay
-// unvetted by design: the editor and tree are user-driven; the trust
-// boundary is documented in the review — renderer compromise ≈
-// user-privileged file access.)
+// the conductor's open_file tool (model-driven!), doc:read's mammoth/SheetJS
+// parsers, and shell:openPath's hand-off to the OS — stays inside the open
+// workspace folders, or a brain vault. Otherwise a prompt-injected chat
+// reply could make the main process parse ~/.ssh/… with libraries that have
+// CVE histories, or hand the OS an arbitrary path to open (TOME-001).
+// (fs:readFile/fs:writeFile/fs:mkdir/fs:createFile stay unvetted by design:
+// the editor and tree are user-driven; the trust boundary is documented in
+// the review — renderer compromise ≈ user-privileged file access.)
 let openFolders = [] // absolute paths of open workspace folders
 // "Never told" is not the same answer as "told, and it is empty". Both deny,
 // but only one is a bug — a silent deny during startup looks exactly like a
@@ -394,6 +399,9 @@ function createWindow() {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      webviewTag: false,
     },
   })
   win.once('ready-to-show', () => win.show())
@@ -417,7 +425,13 @@ function createWindow() {
         // leaves the whole tab strip free as a drop target for panes dragged
         // in from another window — a drag region there would swallow them.
         backgroundColor: WINDOW_BG[uiTheme],
-        webPreferences: { preload: join(__dirname, '../preload/index.js'), sandbox: true },
+        webPreferences: {
+          preload: join(__dirname, '../preload/index.js'),
+          sandbox: true,
+          contextIsolation: true,
+          nodeIntegration: false,
+          webviewTag: false,
+        },
       },
     }
   })
@@ -444,19 +458,58 @@ function createWindow() {
   }
 }
 
+// ---- ipc lock gate ----
+// Both wrappers below must install before ANY ipcMain.handle/.on channel
+// registers — including ipcMain.on('app:quit-ready', ...) near the bottom of
+// this file. Unlike everything inside app.whenReady().then() below, that one
+// runs at plain module evaluation (before Electron even signals ready), so a
+// gate installed inside the whenReady callback would never see it wrapped.
+// Defining isLockedNow this early is still safe: it only reads authlock
+// state lazily, the moment a gated channel actually fires, and nothing can
+// invoke an IPC channel before the renderer loads — always well after
+// authlock.initAuth() runs below.
+// TOME_SHOT is a dev/screenshot affordance — an env var that bypasses the
+// lock gate must never ship in packaged builds.
+const shotMode = !!process.env.TOME_SHOT && !app.isPackaged
+const isLockedNow = () =>
+  isLocked({ configured: authlock.authStatus().configured, unlocked: authlock.isUnlocked(), shotMode })
+
+// ipcMain.on channels are fire-and-forget or sendSync, so the ipcMain.handle
+// gate below (installed once whenReady fires) never covered them — ws:sync
+// (resets the fs-confinement roots) and lsp:didOpen (spawns a language
+// server) used to run straight through a locked app. OPEN_ON and the block
+// decision live in ./lib/ipc-lock-gate.js (TOME-003), extracted so a future
+// widen of the allowlist or a regression in the decision itself fails a
+// pinned test instead of shipping silently — this just wires them in.
+const rawOn = ipcMain.on.bind(ipcMain)
+ipcMain.on = (channel, fn) =>
+  rawOn(channel, (e, ...args) => {
+    if (shouldBlockIpcOn(channel, isLockedNow())) {
+      e.returnValue = undefined // no-op for a fire-and-forget send; answers a blocked sendSync
+      return
+    }
+    return fn(e, ...args)
+  })
+
 app.whenReady().then(async () => {
   profMark('app ready')
-  // ---- app lock ----
+  // ---- app lock (invoke channels) ----
   // Every invoke channel refuses until login succeeds; only the door itself
   // (auth + first-run setup) and the ui-state store stay open. Registered
   // handlers below inherit the guard because this wraps ipcMain.handle first.
+  // (isLockedNow/shotMode and the ipcMain.on half of this gate live above,
+  // before whenReady — see the comment there for why.)
   const OPEN_CHANNELS = new Set([
     'auth:status',
     'auth:login',
     'auth:touchid',
     'airgap:setup',
-    'airgap:enrollTotp',
-    'airgap:confirmTotp',
+    // enrollTotp/confirmTotp used to stay open pre-login for first-run setup,
+    // but isLockedNow() is already false during first-run (not yet
+    // configured), so legitimate setup still reaches them unauthenticated —
+    // the only effect of listing them here was leaving them reachable to a
+    // pre-auth attacker once the app WAS configured and locked. Gated now;
+    // enrollTotp() also refuses to clobber an already-active factor (TOME-005).
     'airgap:state',
     'store:get',
     'store:set',
@@ -465,11 +518,6 @@ app.whenReady().then(async () => {
     // so a locked app would leave a popout window that cannot be closed.
     'popout:close',
   ])
-  // TOME_SHOT is a dev/screenshot affordance — an env var that bypasses the
-  // lock gate must never ship in packaged builds.
-  const shotMode = !!process.env.TOME_SHOT && !app.isPackaged
-  const isLockedNow = () =>
-    authlock.authStatus().configured && !authlock.isUnlocked() && !shotMode
   const rawHandle = ipcMain.handle.bind(ipcMain)
   ipcMain.handle = (channel, fn) =>
     rawHandle(channel, (e, ...args) => {
@@ -508,6 +556,42 @@ app.whenReady().then(async () => {
   events.setEventSink((type, payload) => win?.webContents.send('events:' + type, payload))
   brain.setEventSink((ws, index) => win?.webContents.send('brain:changed', { ws, index }))
 
+  // ---- navigation & window hardening (TOME-006) ----
+  // Registered here, before createWindow() runs a few lines down, so it
+  // covers the very first webContents (the main window's) as well as every
+  // popout child created after it. Until now, a renderer-driven top-level
+  // navigation, a server redirect, an extra window, a <webview> attach, or a
+  // permission request all fell back to Electron's defaults — none of it was
+  // an application-owned invariant. isAppUrl (src/main/lib/app-url.js) is
+  // the allow-only-our-own-pages check for both nav events. The window-open
+  // handler set here is a bare "popout or nothing" fallback: createWindow()
+  // (defined above, called below) sets its own setWindowOpenHandler on
+  // win.webContents specifically, which — being set later — wins there,
+  // adding the sizing/webPreferences a real popout needs. This generic one
+  // is what actually governs popout children and anything else, which had
+  // no window-open handler of their own before.
+  app.on('web-contents-created', (event, contents) => {
+    const denyForeignNav = (navEvent, url) => {
+      if (
+        !isAppUrl(url, {
+          devOrigin: process.env.ELECTRON_RENDERER_URL,
+          rendererDir: join(__dirname, '../renderer'),
+        })
+      )
+        navEvent.preventDefault()
+    }
+    contents.on('will-navigate', denyForeignNav)
+    contents.on('will-redirect', denyForeignNav)
+    contents.setWindowOpenHandler(({ url }) => (isPopoutUrl(url) ? { action: 'allow' } : { action: 'deny' }))
+    contents.on('will-attach-webview', (attachEvent) => attachEvent.preventDefault())
+  })
+  // The app opens no camera/mic/clipboard-read/notification/etc UI of its
+  // own — deny every permission check and request outright instead of
+  // leaving Electron's per-permission defaults (some of which prompt, some
+  // of which allow) in force.
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => callback(false))
+  session.defaultSession.setPermissionCheckHandler(() => false)
+
   profMark('pre-window init done')
   createWindow()
   buildMenu()
@@ -537,6 +621,10 @@ app.whenReady().then(async () => {
     airgap.reapplyRepoConsents()
   })
   ipcMain.on('conductor:allowRun', (e, v) => conductor.setAllowRun(v))
+  // Per-pane read consent (TOME-009) — names ONE pane and a boolean; there is
+  // no channel that grants/revokes read access to a pane it didn't name, and
+  // this carries no scrollback content, only the grant itself.
+  ipcMain.on('conductor:allowRead', (e, { paneId, allowed }) => conductor.setReadConsent(paneId, !!allowed))
 
   // ---- pty ----
   // The renderer names a vetted pane kind, and may ask for a model off the
@@ -580,20 +668,36 @@ app.whenReady().then(async () => {
     // Await the login shell before spawning so the agent lands in the user's
     // real PATH (first spawn pays for the shell-out; later spawns get the cache).
     await ensureLoginEnv()
-    const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' }
+    // Allowlisted base, not a full process.env spread (TOME-007) — PATH here
+    // is already the login shell's real PATH (ensureLoginEnv mutates
+    // process.env.PATH above), so the allowlist copy carries it through as-is.
+    const env = buildAgentBaseEnv(process.env)
+    env.TERM = 'xterm-256color'
+    env.COLORTERM = 'truecolor'
     if (agent) Object.assign(env, await resolveAgentSecrets())
     if (ws) {
       env.TOME_BRAIN = await brain.ensureBrain(ws)
       const info = await brain.coreInfo(await readStore('core-vault'))
       if (info.configured) env.TOME_CORE_VAULT = info.root
     }
-    if (!(gapped && process.platform === 'darwin')) return { env, sandbox: null }
+    if (!gapped) return { env, sandbox: null }
+    // The proxy (plain Node http/CONNECT server, airgap.js) is cross-platform
+    // and must come up for a gapped pane on every OS. Only the seatbelt wrap
+    // that makes it the SOLE way out is darwin-only — this used to gate the
+    // proxy itself on the same darwin check, so a gapped pane on Linux/
+    // Windows got neither control at all: fully open egress under an
+    // "air-gapped" label. A gapped pane must never end up with neither
+    // (TOME-001).
     const { port } = await airgap.createPaneProxy(paneId)
     const proxy = `http://127.0.0.1:${port}`
     for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY'])
       env[k] = proxy
     env.NO_PROXY = env.no_proxy = 'localhost,127.0.0.1'
-    return { env, sandbox: { cmd: '/usr/bin/sandbox-exec', args: ['-p', airgap.seatbeltProfile(userData)] } }
+    const sandbox =
+      process.platform === 'darwin'
+        ? { cmd: '/usr/bin/sandbox-exec', args: ['-p', airgap.seatbeltProfile(userData)] }
+        : null
+    return { env, sandbox }
   }
 
   async function createPty({ id, kind, cwd, gapped, ws, model }) {
@@ -606,6 +710,21 @@ app.whenReady().then(async () => {
     const agents = mergeAgents(AGENTS, await readStore('custom-agents'))
     const isAgent = agents.some((a) => a.id === kind)
     if (!isAgent && kind !== 'terminal') return
+    // The renderer may ask for MORE isolation than policy wants (a per-pane
+    // toggle) but can never ask for less: resolveGapping folds in the stored
+    // 'airgap-default' preference (absent means gapped — the same "on unless
+    // explicitly off" reading the renderer's own onboarding/preferences UI
+    // uses for this key) so a renderer requesting gapped:false can't turn off
+    // gapping the policy wants. The resolved value, not the raw renderer one,
+    // is what flows into buildAgentEnv and conductor.register below
+    // (TOME-001).
+    const effectiveGapped = resolveGapping(gapped, (await readStore('airgap-default')) !== false)
+    // cwd is only ever a STARTING directory — a shell can cd anywhere the
+    // moment it's running — but it used to reach pty.spawn straight from the
+    // renderer with no check at all. resolveSpawnCwd bounds it to the open
+    // workspace roots or the user's home subtree, falling back to home for
+    // anything else, same as a missing cwd already did (TOME-001).
+    const spawnCwd = resolveSpawnCwd(cwd, openFolders, homedir())
     let spawnCmd = SHELL
     // A flow node may pin a model (src/shared/agent-models.js), which is the
     // only renderer-supplied value that has ever influenced this command line
@@ -613,7 +732,7 @@ app.whenReady().then(async () => {
     // inline here. It returns null for 'terminal', i.e. a bare login shell.
     const agentCmd = buildAgentSpawnFrom(agents, kind, { model })
     let spawnArgs = agentCmd ? ['-l', '-c', agentCmd] : ['-l']
-    const { env, sandbox } = await buildAgentEnv({ paneId: id, agent: isAgent, gapped, ws })
+    const { env, sandbox } = await buildAgentEnv({ paneId: id, agent: isAgent, gapped: effectiveGapped, ws })
     if (sandbox) {
       spawnArgs = [...sandbox.args, spawnCmd, ...spawnArgs]
       spawnCmd = sandbox.cmd
@@ -624,7 +743,7 @@ app.whenReady().then(async () => {
         name: 'xterm-256color',
         cols: 80,
         rows: 24,
-        cwd: cwd || homedir(),
+        cwd: spawnCwd,
         env,
       })
     } catch (err) {
@@ -634,7 +753,7 @@ app.whenReady().then(async () => {
       throw err
     }
     ptys.set(id, p)
-    conductor.register(id, { kind, cwd: cwd || homedir(), airgap: !!gapped })
+    conductor.register(id, { kind, cwd: spawnCwd, airgap: effectiveGapped })
     p.onData((data) => {
       conductor.record(id, data)
       queuePtyData(id, data)
@@ -840,19 +959,21 @@ app.whenReady().then(async () => {
   })
 
   // ---- json store (workspaces, ui state) ----
-  // store:get/set stay open pre-login for the lock screen, so keys are strictly
-  // vetted: plain slugs only (no traversal) and never the files that hold
-  // credentials (airgap-auth) or the egress allowlist (airgap).
+  // store:get/set stay open pre-login for the lock screen (see OPEN_CHANNELS
+  // above), so every key runs through store-keys.js: plain slugs only (no
+  // traversal), never one of the files main itself owns (credentials, the
+  // egress allowlist, repo consents, the event log — see RESERVED_KEYS
+  // there), and — while locked — nothing outside LOCKSCREEN_STORE_KEYS
+  // (chat transcripts and policy toggles included) is readable or writable.
   const storeDir = app.getPath('userData')
-  const RESERVED_KEYS = new Set(['airgap', 'airgap-auth'])
   function vetKey(key) {
-    if (typeof key !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(key) || RESERVED_KEYS.has(key))
-      throw new Error('Bad store key.')
+    if (!isValidStoreKey(key)) throw new Error('Bad store key.')
     return key
   }
   async function readStore(key) {
+    if (!isStoreKeyAllowed(key, { locked: isLockedNow() })) return null
     try {
-      return JSON.parse(await readFile(join(storeDir, vetKey(key) + '.json'), 'utf8'))
+      return JSON.parse(await readFile(join(storeDir, key + '.json'), 'utf8'))
     } catch {
       return null
     }
@@ -860,8 +981,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('store:get', (e, key) => readStore(key))
   ipcMain.handle('store:set', async (e, { key, value }) => {
     vetKey(key)
+    if (!isStoreKeyAllowed(key, { locked: isLockedNow() })) throw new Error('Locked.')
     await mkdir(storeDir, { recursive: true })
-    await writeFile(join(storeDir, key + '.json'), JSON.stringify(value, null, 2))
+    const file = join(storeDir, key + '.json')
+    await writeFile(file, JSON.stringify(value, null, 2))
+    await chmod(file, 0o600)
   })
 
   // ---- git ----
@@ -972,7 +1096,16 @@ app.whenReady().then(async () => {
     }
     throw new Error('No viewer for ' + ext)
   })
-  ipcMain.handle('shell:openPath', (e, p) => shell.openPath(p))
+  // Same confinement as doc:read — shell.openPath hands the path straight to
+  // the OS's own file-type handler, so an unconfined call is an arbitrary
+  // "open this" on the renderer's behalf. shell.openPath itself never
+  // throws (it resolves to '' on success, an error string on failure); a
+  // refusal here returns a string for the same reason, not an Error
+  // (TOME-001).
+  ipcMain.handle('shell:openPath', async (e, p) => {
+    const real = await confinedRealPath(p)
+    return real ? shell.openPath(real) : confinementError('shell:openPath')
+  })
 
   // The renderer answered a popout close prompt: let that window go. Not
   // calling this is how "cancel" works — the window simply stays open.

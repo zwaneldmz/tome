@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened Runtime entitlements for Developer ID (non-App-Store) distribution.
+  This is not App Sandbox — Tome ships outside the Mac App Store, so sandbox
+  entitlements (network.*, files.*, device.*) do not apply and are omitted.
+  Only what Electron's own executable and Tome's native modules need under
+  Hardened Runtime is granted:
+    - allow-jit / allow-unsigned-executable-memory / allow-dyld-environment-variables
+      are Electron/V8's documented minimum Hardened Runtime baseline (Chromium's
+      JIT and Electron's helper-process launching need them).
+    - disable-library-validation lets node-pty's prebuilt native addon (not
+      signed with this app's Team ID) load under Hardened Runtime.
+  See reviews/validation/TOME-010-acceptance.md for what still gates real use.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>

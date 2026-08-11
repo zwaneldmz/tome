@@ -343,6 +343,64 @@ describe('validateFlow', () => {
   it('does not error on an ordinary flow name', () => {
     expect(validateFlow(baseFlow()).errors).toEqual([])
   })
+
+  // TOME-008: node.id and every port name become half of handoffPath's
+  // literal `${id}-${name}.md` (composeBootstrapPrompt) — a traversal-shaped
+  // one used to reach that interpolation with no check at all, neutralized
+  // only downstream by flow-runner's own logName filename-sanitizing. These
+  // pin the load-time refusal that now stands in front of it, the same hard
+  // line the flow-name check above already draws.
+  it('errors on a node id shaped like a traversal', () => {
+    const flow = baseFlow()
+    flow.nodes[0].id = '../../../escaped'
+    const result = validateFlow(flow)
+    expect(result.errors).toContain(
+      'node id "../../../escaped" can\'t be used in a handoff path (no "/", "\\", ":", control characters, or a leading "-")'
+    )
+  })
+
+  it('errors on an output name shaped like a traversal', () => {
+    const flow = baseFlow()
+    flow.nodes[0].outputs[0].name = '../escape'
+    const result = validateFlow(flow)
+    expect(result.errors).toContain(
+      'node "n1" output name "../escape" can\'t be used in a handoff path (no "/", "\\", ":", control characters, or a leading "-")'
+    )
+  })
+
+  it('errors on an input name shaped like a traversal', () => {
+    const flow = baseFlow()
+    flow.nodes[1].inputs[0].name = '..\\escape'
+    const result = validateFlow(flow)
+    expect(result.errors).toContain(
+      'node "n2" input name "..\\escape" can\'t be used in a handoff path (no "/", "\\", ":", control characters, or a leading "-")'
+    )
+  })
+
+  it('errors on unsafe edge.from / edge.to / edge.fromOutput / edge.toInput independently of dangling-reference errors', () => {
+    const flow = baseFlow()
+    flow.edges[0].fromOutput = 'a/b'
+    flow.edges[0].toInput = '-flag'
+    const result = validateFlow(flow)
+    expect(result.errors).toContain(
+      'edge "e1" fromOutput "a/b" can\'t be used in a handoff path (no "/", "\\", ":", control characters, or a leading "-")'
+    )
+    expect(result.errors).toContain(
+      'edge "e1" toInput "-flag" can\'t be used in a handoff path (no "/", "\\", ":", control characters, or a leading "-")'
+    )
+  })
+
+  it('rejects a node id that is merely non-string, not just one shaped like a traversal', () => {
+    const flow = baseFlow()
+    flow.nodes[0].id = 42
+    expect(validateFlow(flow).errors).toContain(
+      'node id "42" can\'t be used in a handoff path (no "/", "\\", ":", control characters, or a leading "-")'
+    )
+  })
+
+  it('does not error on ordinary node ids and port names (no false positives from the new check)', () => {
+    expect(validateFlow(baseFlow())).toEqual({ errors: [], warnings: [] })
+  })
 })
 
 describe('topoSort', () => {

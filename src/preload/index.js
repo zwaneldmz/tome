@@ -59,6 +59,10 @@ contextBridge.exposeInMainWorld('tome', {
   },
   conductor: {
     allowRun: (v) => ipcRenderer.send('conductor:allowRun', v),
+    // Per-pane scrollback-read consent (TOME-009) — paneId names the pane,
+    // allowed is a plain boolean grant/revoke.
+    allowRead: (paneId, allowed) => ipcRenderer.send('conductor:allowRead', { paneId, allowed }),
+    onReadRequest: (cb) => ipcRenderer.on('conductor:readRequest', (e, m) => cb(m)),
     onOpen: (cb) => ipcRenderer.on('conductor:open', (e, m) => cb(m)),
     onActed: (cb) => ipcRenderer.on('conductor:acted', (e, m) => cb(m)),
   },

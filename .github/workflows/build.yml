@@ -20,6 +20,14 @@ jobs:
       - run: npm ci
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      # npm audit's own exit code has no concept of a reviewed exception, so
+      # scripts/audit-gate.mjs (not npm audit) is the pass/fail authority for
+      # both steps below — see reviews/validation/audit-exceptions.json and
+      # reviews/validation/TOME-017-acceptance.md.
+      - name: Dependency audit gate — production (high+)
+        run: npm audit --omit=dev --audit-level=high --json | node scripts/audit-gate.mjs high
+      - name: Dependency audit gate — all dependencies (critical)
+        run: npm audit --audit-level=critical --json | node scripts/audit-gate.mjs critical
       - name: Lint (hygiene gate)
         run: npm run lint
       - name: Tests (vitest floor — crypto, guards, confinement)

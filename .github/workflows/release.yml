@@ -1,0 +1,134 @@
+name: release
+
+# Tag-triggered release build. Produces macOS DMG+ZIP artifacts, a SHA256SUMS
+# manifest, a CycloneDX SBOM, and a GitHub build-provenance attestation for
+# every tagged release. Signing and notarization are gated behind the
+# presence of Apple credentials (repo secrets) and no-op without them, so
+# this workflow is safe to run before those credentials exist — it just
+# produces unsigned artifacts. See reviews/validation/TOME-010-acceptance.md
+# for what the scaffold provides and the credential ceremony still required
+# before a build here is actually trustworthy.
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      # npm ci above skips Electron's own postinstall download (same guard
+      # build.yml works around); electron-builder packages the real binary,
+      # not the stub, so restore it the same way local dev does.
+      - name: Restore Electron binary
+        run: npm run fix:electron
+      - run: npm run build
+
+      # --- Signing (no-ops without secrets.CSC_LINK) --------------------------
+      - name: Import Developer ID certificate
+        id: import_cert
+        if: ${{ secrets.CSC_LINK != '' }}
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/release-signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 900 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          CERT_PATH="$RUNNER_TEMP/dev-id.p12"
+          printf '%s' "$CSC_LINK" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN" -P "$CSC_KEY_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          security default-keychain -s "$KEYCHAIN"
+          rm -f "$CERT_PATH"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::no Developer ID Application identity found in the imported certificate"
+            exit 1
+          fi
+          echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
+          echo "keychain=$KEYCHAIN" >> "$GITHUB_OUTPUT"
+
+      # --- Notarization credentials (no-ops without secrets.APPLE_API_KEY) ----
+      - name: Prepare App Store Connect API key
+        if: ${{ secrets.APPLE_API_KEY != '' }}
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          KEY_PATH="$RUNNER_TEMP/apple-api-key.p8"
+          umask 077
+          printf '%s' "$APPLE_API_KEY_CONTENT" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          echo "APPLE_API_KEY=$KEY_PATH" >> "$GITHUB_ENV"
+          echo "APPLE_API_KEY_ID=$APPLE_API_KEY_ID" >> "$GITHUB_ENV"
+          echo "APPLE_API_ISSUER=$APPLE_API_ISSUER" >> "$GITHUB_ENV"
+
+      # mac.identity stays null in package.json's checked-in default (local
+      # `npm run package` must keep working unsigned); this is the one place
+      # that overrides it, and only when a certificate actually imported.
+      - name: Package macOS artifacts (dmg, zip)
+        env:
+          BUILD_IDENTITY: ${{ steps.import_cert.outputs.identity }}
+          HAS_APPLE_KEY: ${{ secrets.APPLE_API_KEY != '' }}
+        run: |
+          ARGS=(--mac dmg zip --publish never)
+          if [ -n "$BUILD_IDENTITY" ]; then
+            ARGS+=(-c.mac.identity="$BUILD_IDENTITY")
+            [ "$HAS_APPLE_KEY" = "true" ] && ARGS+=(-c.mac.notarize=true)
+          fi
+          npx electron-builder "${ARGS[@]}"
+
+      - name: Remove temporary signing keychain
+        if: ${{ always() && steps.import_cert.outputs.keychain != '' }}
+        env:
+          SIGNING_KEYCHAIN: ${{ steps.import_cert.outputs.keychain }}
+        run: security delete-keychain "$SIGNING_KEYCHAIN" || true
+
+      - name: Generate SHA256SUMS
+        run: |
+          cd dist
+          shasum -a 256 *.dmg *.zip > SHA256SUMS
+          mv SHA256SUMS ..
+
+      - name: Generate CycloneDX SBOM
+        run: npm sbom --sbom-format cyclonedx > sbom.cdx.json
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: 'dist/*.dmg,dist/*.zip,sbom.cdx.json'
+
+      # Only publish on an actual tag ref — workflow_dispatch from a branch
+      # exercises the rest of the pipeline as a dry run without creating a
+      # release out of it.
+      - name: Publish release assets
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.dmg dist/*.zip SHA256SUMS sbom.cdx.json --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" dist/*.dmg dist/*.zip SHA256SUMS sbom.cdx.json --repo "$GITHUB_REPOSITORY" --title "Tome $TAG" --generate-notes
+          fi

@@ -12,7 +12,7 @@
 // and nobody else — tells the truth at the end.
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest'
 import { spawn as realSpawn } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as runner from '../src/main/flow-runner.js'
@@ -201,6 +201,47 @@ describe('startRun — refusals happen before anything is spawned or written', (
     // Nothing was created for a refused run.
     expect(runner.snapshotAll().some((r) => r.flow === 'mixed')).toBe(false)
     await expect(readFile(join(root, '.tome', 'flows', 'mixed', 'runs'), 'utf8')).rejects.toThrow()
+  })
+})
+
+// TOME-008: canOpenFile and flowRoot are both LEXICAL — neither resolves a
+// symlink. The repo's first test to create a real one and confirm
+// confinement survives it (mirrors src/main/lib/flow-confine.js's own unit
+// tests in test/flow-confine.test.js, but end to end through startRun).
+describe('startRun — symlinked paths are confined by real location, not just lexical spelling', () => {
+  it('refuses a flow.json reached through a symlinked .tome/flows directory', async () => {
+    const root = await workspace()
+    const outsideRoot = await mkdtemp(join(tmpdir(), 'tome-runs-outside-'))
+    tmpRoots.push(outsideRoot)
+    // Replace .tome/flows itself with a symlink pointing OUTSIDE root: the
+    // lexical path root/.tome/flows/escape.flow.json still reads as "inside
+    // the workspace" to canOpenFile's own lexical check, but its REAL
+    // location is not — and readFile follows it regardless.
+    await rm(join(root, '.tome', 'flows'), { recursive: true, force: true })
+    await symlink(outsideRoot, join(root, '.tome', 'flows'))
+    const path = await writeFlow(root, flowDoc('escape', ['n1']))
+    install()
+    expect((await runner.startRun(path)).error).toBe('flow is outside the open workspace folders')
+    expect(runner.snapshotAll().some((r) => r.flow === 'escape')).toBe(false)
+  })
+
+  it('refuses to create a run directory through a pre-existing symlinked ancestor', async () => {
+    const root = await workspace()
+    const outsideRoot = await mkdtemp(join(tmpdir(), 'tome-runs-outside-'))
+    tmpRoots.push(outsideRoot)
+    const path = await writeFlow(root, flowDoc('planted', ['n1']))
+    // .tome/flows/<name> — the folder Run's mkdir(recursive) would normally
+    // create fresh for this flow's first-ever run — already exists, but as a
+    // symlink out of the workspace, exactly as an earlier compromised run
+    // (or a hand-edited workspace) could leave one. flowPath itself is a
+    // real file inside the real workspace and reads clean.
+    await symlink(outsideRoot, join(root, '.tome', 'flows', 'planted'))
+    install({ scripts: { n1: 'exit 0' } })
+    const res = await runner.startRun(path)
+    expect(res.error).toMatch(/could not create the run folder/)
+    expect(runner.snapshotAll().some((r) => r.flow === 'planted')).toBe(false)
+    // Nothing was ever written into the symlink target.
+    expect(await readdir(outsideRoot)).toEqual([])
   })
 })
 
@@ -643,14 +684,28 @@ describe('run.json and the logs', () => {
     expect(run.nodes[0].log).toBe(join(run.dir, '1-n1.log'))
   })
 
-  it('never lets a hand-edited node id aim a log write out of the run folder', async () => {
+  // TOME-008: a traversal-shaped node id used to reach startRun and get
+  // neutralized only at the log-naming layer (logName's character filter,
+  // still below, still exercised by the next test). validateFlow now
+  // refuses the whole flow before a run is ever created — the stronger of
+  // the two guards, so this replaces the older "reaches the run and gets
+  // sanitized" pin rather than sitting alongside it.
+  it('refuses a hand-edited node id shaped like a traversal, before any run is created', async () => {
     const root = await workspace()
     install()
     const doc = flowDoc('traversal', ['../../../escaped', 'n2'])
-    const { id } = await runner.startRun(await writeFlow(root, doc))
+    const res = await runner.startRun(await writeFlow(root, doc))
+    expect(res.error).toMatch(/can't be used in a handoff path/)
+    expect(runner.snapshotAll().some((r) => r.flow === 'traversal')).toBe(false)
+  })
+
+  it('still sanitizes a safeSegment-legal id for the log filename — defense in depth, not the primary guard', async () => {
+    const root = await workspace()
+    install({ scripts: { 'weird id!': 'exit 0' } })
+    const { id } = await runner.startRun(await writeFlow(root, flowDoc('sanitized', ['weird id!'])))
     const run = await settled(id)
-    for (const node of run.nodes) expect(node.log.startsWith(run.dir + '/')).toBe(true)
-    expect(run.nodes[0].log).toBe(join(run.dir, '1-.._.._.._escaped.log'))
+    expect(run.nodes[0].log.startsWith(run.dir + '/')).toBe(true)
+    expect(run.nodes[0].log).toBe(join(run.dir, '1-weird_id_.log'))
   })
 })
 

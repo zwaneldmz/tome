@@ -70,11 +70,31 @@ npm run package    # → dist/mac-arm64/Tome.app
 ditto dist/mac-arm64/Tome.app /Applications/Tome.app
 ```
 
-Builds are currently **unsigned** — signed/notarized releases are on the
-roadmap. Until then, after copying to `/Applications`:
+Tagged releases (`vX.Y.Z`) build in `.github/workflows/release.yml`, which
+publishes to the [Releases page](https://github.com/zwaneldmz/tome/releases)
+with a `SHA256SUMS` manifest, a CycloneDX SBOM, and a GitHub build-provenance
+attestation alongside the `.dmg`/`.zip`. **Signing and notarization credentials
+are not yet configured for that workflow, so released artifacts are currently
+unsigned too** — see `reviews/validation/TOME-010-acceptance.md` for the exact
+Developer ID / App Store Connect / repo-secret ceremony that still has to run
+before a release here carries a verifiable publisher identity. Once it has,
+verify a downloaded release before opening it:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Tome.app
+shasum -c SHA256SUMS --ignore-missing        # the binary matches the manifest
+codesign --verify --deep --strict Tome.app   # the signature itself is intact
+spctl -a -vv Tome.app                        # Gatekeeper accepts the signature
+xcrun stapler validate Tome.app              # a notarization ticket is stapled
+```
+
+**Local dev builds (`npm run package`) are unsigned by design** — `identity`
+is `null` in `package.json`'s `build.mac` so contributors without a Developer
+ID cert can still package the app; the four checks above will fail against
+that build, which is expected. For local development only, after copying to
+`/Applications`:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Tome.app   # dev-only, unsigned build
 ```
 
 (or right-click → Open once).

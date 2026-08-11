@@ -6,6 +6,8 @@ import { chats } from '../regs.js'
 import { activeWorkspace } from '../workspaces.js'
 import { encodeWav } from '../../shared/wav.js'
 import { loadHistory, persistHistory, flushHistory } from '../chat-history.js'
+import { shouldAbortOnDispose } from '../chat-lifecycle.js'
+import { voiceActive } from '../voice.js'
 
 export class ChatPanel {
   constructor() {
@@ -309,6 +311,11 @@ export class ChatPanel {
     this.current = null
   }
   dispose() {
+    // A pane closed mid-reply used to leave its provider/tool loop running
+    // headless in main with nowhere to deliver chat:delta/chat:tool/chat:done
+    // — abort it here, same as the stop button, unless voice.js owns this
+    // turn (TOME-015).
+    if (shouldAbortOnDispose(this.busy, this.chatId, voiceActive())) tome.chat.abort(this.chatId)
     this.stopRec(true)
     this.stopWait()
     if (this.deltaRaf) {

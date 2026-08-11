@@ -37,6 +37,15 @@ const openableKindsDescription = () =>
 const meta = new Map() // ptyId -> { kind, cwd, airgap, exited }
 const scrolls = new Map() // ptyId -> recent raw output
 const SCROLL_CAP = 200_000
+// Per-pane scrollback-read consent (TOME-009): default-deny — read_terminal
+// refuses any pane that isn't in here, on top of (never instead of) the
+// unconditional air-gap refusal below. Separate from allowRun, which gates
+// writes/execution, not reads.
+const readConsent = new Set() // ptyId -> granted
+// Panes we've already asked the user about, so a model that keeps calling
+// read_terminal on a denied pane triggers exactly one consent prompt, not a
+// storm of them. Cleared on forget(id) so a reopened pane can re-ask.
+const readRequested = new Set() // ptyId -> prompt already surfaced
 
 export function init(opts) {
   ptys = opts.ptys
@@ -62,12 +71,21 @@ export function markExited(id) {
 export function forget(id) {
   meta.delete(id)
   scrolls.delete(id)
+  readConsent.delete(id)
+  readRequested.delete(id)
 }
 export function setPanes(list) {
   panes = Array.isArray(list) ? list : []
 }
 export function setAllowRun(v) {
   allowRun = !!v
+}
+// Grants or revokes read_terminal's per-pane consent (TOME-009). Driven only
+// by the renderer's own gated conductor:allowRead channel — the conductor
+// never grants itself read access.
+export function setReadConsent(paneId, allowed) {
+  if (allowed) readConsent.add(paneId)
+  else readConsent.delete(paneId)
 }
 
 // Canonical tool set — Anthropic-shaped (input_schema), exported for tests.
@@ -231,7 +249,8 @@ rebuildPrompts()
 
 // `chatId` rides along so the renderer can open what the assistant asks for
 // as a tab in the requesting pane's own group instead of resplitting the grid.
-function runTool(name, input, chatId) {
+// Exported for tests, same rationale as TOOLS/SYSTEM above.
+export function runTool(name, input, chatId) {
   switch (name) {
     case 'list_panes': {
       const rows = panes.map((p) => {
@@ -245,8 +264,25 @@ function runTool(name, input, chatId) {
     case 'read_terminal': {
       const buf = scrolls.get(input.pane_id)
       if (buf == null) return 'No such terminal pane. Use list_panes.'
+      // Scrollback can hold anything the pane ever printed — default-deny,
+      // and an air-gapped pane is refused outright, consent or not (TOME-009).
+      if (meta.get(input.pane_id)?.airgap) return 'Refused: air-gapped pane output cannot be disclosed.'
+      if (!readConsent.has(input.pane_id)) {
+        // Surface a one-time per-pane consent prompt to the user; the renderer
+        // answers on the gated conductor:allowRead channel. Fail closed until
+        // then — the model just gets the refusal and can retry after approval.
+        if (!readRequested.has(input.pane_id)) {
+          readRequested.add(input.pane_id)
+          send('conductor:readRequest', { paneId: input.pane_id })
+        }
+        return 'Refused: user has not authorized reading this terminal.'
+      }
       const lines = stripAnsi(buf).split('\n')
-      return lines.slice(-Math.min(Math.max(input.lines || 60, 1), 400)).join('\n') || '(no output yet)'
+      const tail = lines.slice(-Math.min(Math.max(input.lines || 60, 1), 400))
+      // Audit the read like conductor:tool audits a tool call: pane + line
+      // count only — never the scrollback content itself.
+      logEvent('conductor:read', { paneId: input.pane_id, lines: tail.length })
+      return tail.join('\n') || '(no output yet)'
     }
     case 'type_in_terminal': {
       const p = ptys.get(input.pane_id)
@@ -352,6 +388,11 @@ export async function runChat({ id, system, messages, client }) {
       msgs.push({ role: 'assistant', content: final.content })
       const results = []
       for (const block of final.content.filter((b) => b.type === 'tool_use')) {
+        // A stop mid-turn must not let the rest of THIS batch of tool calls
+        // run headless after the renderer stopped listening — bail before
+        // the next runTool (TOME-015). The try/catch around streamChat above
+        // already covers an abort that lands before/during the stream itself.
+        if (controller.signal.aborted) break
         const hint = block.input?.pane_id || block.input?.kind || block.input?.path || block.input?.name || ''
         send('chat:tool', { id, tool: block.name, hint })
         let out

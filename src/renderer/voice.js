@@ -22,10 +22,14 @@ import { micIcon } from './icons.js'
 import { loadHistory, persistHistory, flushHistory } from './chat-history.js'
 import { encodeWav } from '../shared/wav.js'
 import { makeVad } from '../shared/vad.js'
+import { VOICE_CHAT_ID } from './chat-lifecycle.js'
 
 // Canonical id, per the WS-A contract: the voice session and a chat pane
 // opened with this id share history via the store key 'chat-log-chat-voice'.
-export const VOICE_CHAT_ID = 'chat-voice'
+// Defined in chat-lifecycle.js (a DOM-free module) so ChatPanel.dispose's
+// abort predicate can read the same constant without importing this file's
+// speechSynthesis/getUserMedia side effects.
+export { VOICE_CHAT_ID }
 
 let btn = null
 let active = false

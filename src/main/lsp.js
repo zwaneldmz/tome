@@ -12,7 +12,8 @@
 // optional tool must not nag on every keystroke.
 import { spawn } from 'node:child_process'
 import { pathToFileURL, fileURLToPath } from 'node:url'
-import { dirname, join, resolve, sep } from 'node:path'
+import { sep } from 'node:path'
+import { confineToRoot, resolveServerEnv } from './lib/lsp-policy.js'
 
 // stdio commands that are the conventional way to run each server
 const SERVERS = [
@@ -85,13 +86,14 @@ class Server {
   start() {
     if (this.ready) return this.ready
     this.ready = (async () => {
-      // A project-local server wins over a global one: language servers are
-      // usually a dev dependency, and the project's pinned version is the one
-      // that matches its config.
-      const binDir = join(this.root, 'node_modules', '.bin')
       this.proc = spawn(this.spec.cmd, this.spec.args, {
         cwd: this.root,
-        env: { ...process.env, PATH: `${binDir}:${process.env.PATH || ''}` },
+        // System PATH only — see resolveServerEnv (lib/lsp-policy.js) for why
+        // this never prepends this.root's own node_modules/.bin: this.root
+        // can be a renderer-chosen workspace folder, and a prefix drawn from
+        // it would let a compromised renderer's own binary stand in for the
+        // real language server.
+        env: resolveServerEnv(this.root),
         stdio: ['pipe', 'pipe', 'pipe'],
       })
       // A missing binary raises 'error' and may never raise 'exit', so both
@@ -249,22 +251,16 @@ export function init({ onDiagnostics, onMissing }) {
   notifyMissing = onMissing || (() => {})
 }
 
-// The workspace folder the file sits in — the server's root. Falls back to the
-// file's own directory so a file opened outside any workspace still gets one.
-function rootFor(path, folders) {
-  const abs = resolve(path)
-  const hit = (folders || [])
-    .filter((f) => abs === f || abs.startsWith(f + sep))
-    .sort((a, b) => b.length - a.length)[0]
-  return hit || dirname(abs)
-}
-
 async function serverOf(path, folders) {
   const langId = languageIdFor(path)
   if (!langId) return null
   const spec = serverFor(langId)
   if (!spec) return null
-  const root = rootFor(path, folders)
+  // The workspace folder the file sits in — the server's root and cwd. A
+  // path outside every open folder is refused rather than rooted at the
+  // file's own directory; see confineToRoot (lib/lsp-policy.js).
+  const root = confineToRoot(path, folders)
+  if (!root) return null
   if (missing.has(`${root} ${spec.cmd}`)) return null
   const key = `${root} ${spec.id}`
   let server = servers.get(key)

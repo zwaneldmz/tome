@@ -405,6 +405,18 @@ tome.conductor.onOpen(async ({ kind, file, source }) => {
 tome.conductor.onActed(({ pane, ran }) =>
   toast(`assistant ${ran ? 'ran a command in' : 'typed into'} ${pane}`, 'ok')
 )
+// Per-pane scrollback-read consent (TOME-009): the assistant tried to read a
+// terminal it has no grant for. Ask once; the answer rides the gated
+// conductor:allowRead channel. A dismissed prompt leaves the pane denied.
+tome.conductor.onReadRequest(async ({ paneId }) => {
+  const title = dock.getPanel(paneId)?.title?.replace(/^● /, '') || 'a terminal'
+  const ok = await confirmModal(
+    'Let the assistant read this terminal?',
+    `The assistant asked to read scrollback from “${title}”. Approving sends that pane’s output to the chat provider.`,
+    'Allow reading'
+  )
+  tome.conductor.allowRead(paneId, !!ok)
+})
 
 // ---------- layout persistence ----------
 // The dockview grid is serialized with toJSON() and stored per workspace,

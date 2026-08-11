@@ -5,7 +5,16 @@
 // path guard IS the feature, so it should meet real resolve()/writeFileSync
 // behaviour, not a stub's idea of it.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs'
+import {
+  mkdtempSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  mkdirSync,
+  writeFileSync,
+  symlinkSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFlowTool, draftFlowTool } from '../src/main/lib/flow-tools.js'
@@ -152,5 +161,40 @@ describe('readFlowTool', () => {
     draftFlowTool([root], { name: 'alpha', flow: validFlow() })
     expect(readFlowTool([root], {})).toBe('alpha')
     expect(readdirSync(flowsDir()).sort()).toEqual(['alpha.flow.json', 'notes.txt'])
+  })
+})
+
+// TOME-008: flowPath()'s own resolve()+startsWith check (above) is lexical
+// and cannot see a symlink. These are the repo's first tests to replace
+// .tome/flows itself with a real symlink and confirm the realpath
+// confinement in flow-confine.js catches what the lexical check alone
+// would miss (mirrors test/flow-confine.test.js's unit tests, end to end
+// through the tool functions the conductor actually calls).
+describe('symlink confinement', () => {
+  let outside
+  afterEach(() => {
+    if (outside) rmSync(outside, { recursive: true, force: true })
+    outside = undefined
+  })
+
+  it('refuses to write a flow reached through a symlinked .tome/flows directory', () => {
+    outside = mkdtempSync(join(tmpdir(), 'tome-flow-tools-outside-'))
+    mkdirSync(join(root, '.tome'), { recursive: true })
+    symlinkSync(outside, flowsDir())
+    const { text, openPath } = draftFlowTool([root], { name: 'escape', flow: validFlow() })
+    expect(text).toMatch(/escapes the workspace/)
+    expect(openPath).toBeUndefined()
+    // Nothing was ever written into the symlink target.
+    expect(readdirSync(outside)).toEqual([])
+  })
+
+  it('refuses to read a flow reached through a symlinked .tome/flows directory', () => {
+    outside = mkdtempSync(join(tmpdir(), 'tome-flow-tools-outside-'))
+    writeFileSync(join(outside, 'planted.flow.json'), JSON.stringify(validFlow()))
+    mkdirSync(join(root, '.tome'), { recursive: true })
+    symlinkSync(outside, flowsDir())
+    // Reads as a miss, not as a distinct "escaped" error — same UX as a name
+    // nothing was ever written under, which from the caller's side this is.
+    expect(readFlowTool([root], { name: 'planted' })).toMatch(/No flow named "planted"/)
   })
 })

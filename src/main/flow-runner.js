@@ -35,6 +35,7 @@ import { join } from 'node:path'
 import { composeBootstrapPrompt, flowRoot, topoSort, validateFlow } from '../shared/flow-model.js'
 import { nextActions, runPaneId, runPlan, runStatus } from '../shared/flow-run-plan.js'
 import { buildHeadlessSpawn } from './lib/agent-spawn.js'
+import { confineRealAbs } from './lib/flow-confine.js'
 
 // SIGTERM is a request an agent CLI mid-tool-call is free to ignore. After
 // this long the process is taken out of the user's machine's hands rather
@@ -122,9 +123,37 @@ export async function startRun(flowPath, win) {
   // which belongs outside the open workspace folders.
   if (!canOpenFile(flowPath)) return { error: 'flow is outside the open workspace folders' }
 
+  // canOpenFile (isConfinedPath, main's index.js) is a LEXICAL check — it
+  // never resolves a symlink. flowRoot is pure string-slicing on flowPath
+  // itself, so deriving it here, before the file is even read, costs nothing
+  // and gives confineRealAbs below a root to hold flowPath to. Every path
+  // this run creates (dir, logs, run.json) is anchored to this SAME root —
+  // established once, here — which is also what lets it stand in for
+  // canOpenFile's workspace-folder check at every later sink without this
+  // module ever seeing the open-folders list itself.
+  const root = flowRoot(flowPath)
+
+  let raw
+  try {
+    raw = await readFile(flowPath, 'utf8')
+  } catch (err) {
+    return { error: `could not read flow: ${err.message}` }
+  }
+  // Confined AFTER the read succeeds, not before: a flowPath that simply
+  // does not exist must still fail as "could not read flow" below, not as an
+  // escape refusal that would be true of literally any missing file.
+  // Confirms the file readFile actually followed is still really inside
+  // root — a symlinked flow.json, or a symlinked ancestor directory (an
+  // earlier run's leftover, a hand-edited workspace), would otherwise let
+  // content from outside the workspace read as though it were opened from
+  // inside it.
+  if (!(await confineRealAbs(root, flowPath))) {
+    return { error: 'flow is outside the open workspace folders' }
+  }
+
   let flow
   try {
-    flow = JSON.parse(await readFile(flowPath, 'utf8'))
+    flow = JSON.parse(raw)
   } catch (err) {
     return { error: `could not read flow: ${err.message}` }
   }
@@ -175,11 +204,22 @@ export async function startRun(flowPath, win) {
 
   // composeBootstrapPrompt's handoff paths are relative to the folder holding
   // this flow's own .tome, not to the flow.json's folder two levels deeper —
-  // flowRoot derives it, and it becomes both the run folder's home and every
-  // node's cwd, so what a brief tells an agent to read resolves.
-  const root = flowRoot(flowPath)
+  // flowRoot derives it (computed above, before flowPath was even read), and
+  // it becomes both the run folder's home and every node's cwd, so what a
+  // brief tells an agent to read resolves.
   const id = newRunId()
   const dir = join(root, '.tome', 'flows', flow.name, 'runs', id)
+  // dir is safe LEXICALLY — flow.name already cleared validateFlow's
+  // unsafeFolderName gate and id is our own timestamp — but .tome/flows/
+  // <name> or its runs/ folder may already exist as a symlink (an earlier
+  // run, a hand-edited workspace) and mkdir's recursive option walks through
+  // one exactly like any other directory. Confine the nearest existing
+  // ancestor before creating anything; dir itself is stored and used
+  // UNCHANGED below either way (confineRealAbs returns the lexical value on
+  // success), so a symlinked tmp dir in a test never rewrites it.
+  if (!(await confineRealAbs(root, dir, { mustExist: false }))) {
+    return { error: 'could not create the run folder: run folder escapes the workspace' }
+  }
   try {
     // recursive also creates .tome/flows/<name>/ — the handoff folder every
     // brief tells its node to write into, which must exist before the first
@@ -363,7 +403,15 @@ async function launch(run, nodeId) {
   try {
     ;({ env, sandbox } = await buildAgentEnv({ paneId, agent: true, gapped: run.gapped, ws: undefined }))
   } catch (err) {
-    await appendFile(node.log, `# could not prepare the agent environment: ${err.message}\n`).catch(() => {})
+    // node.log was confined once at run creation (dir, which it lives
+    // under) — re-check here rather than trust that: this node's own cwd IS
+    // run.root, so by the time ANY of its code has run, the run folder is no
+    // longer only something this process controls. Best-effort either way,
+    // same as the append itself: a log this run cannot safely write to must
+    // still fail the node, never the whole run.
+    if (await confineRealAbs(run.root, node.log, { mustExist: false })) {
+      await appendFile(node.log, `# could not prepare the agent environment: ${err.message}\n`).catch(() => {})
+    }
     setStatus(run, nodeId, 'failed')
     return
   }
@@ -386,6 +434,14 @@ async function launch(run, nodeId) {
     cmd = sandbox.cmd
   }
 
+  // Re-confined for the same reason as the appendFile above — this is the
+  // node's own about-to-be-live cwd, not a static vault, so "confined when
+  // dir was created" is a fact about the past, not the present.
+  if (!(await confineRealAbs(run.root, node.log, { mustExist: false }))) {
+    closeAgentEnv(paneId)
+    setStatus(run, nodeId, 'failed')
+    return
+  }
   const log = createWriteStream(node.log)
   log.on('error', () => {}) // a log we cannot write must never take the run down
   log.write(`# ${node.name} · ${node.kind}${node.model ? ' · ' + node.model : ''} · ${node.started}\n`)
@@ -497,7 +553,19 @@ function settleIfDone(run) {
 // log's fire-and-forget append).
 function persist(run) {
   const text = JSON.stringify(snapshot(run), null, 2) + '\n'
-  run.writes = run.writes.then(() => writeFile(join(run.dir, 'run.json'), text)).catch(() => {})
+  const file = join(run.dir, 'run.json')
+  // Re-confined on every write, not just once at dir's creation — persist()
+  // fires for the life of the run, and each node's cwd is run.root, so the
+  // folder run.json lives in is not something only this process can change
+  // between one transition and the next. A confinement failure joins every
+  // other failure here: swallowed, because a run must not die over its own
+  // bookkeeping file.
+  run.writes = run.writes
+    .then(async () => {
+      if (!(await confineRealAbs(run.root, file, { mustExist: false }))) return
+      await writeFile(file, text)
+    })
+    .catch(() => {})
 }
 
 // Every transition, not just the interesting ones: the runs pane and the

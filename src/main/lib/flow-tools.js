@@ -9,6 +9,7 @@
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { validateFlow, unsafeFolderName } from '../../shared/flow-model.js'
+import { confineRealAbsSync } from './flow-confine.js'
 
 const SUFFIX = '.flow.json'
 
@@ -99,7 +100,12 @@ export function readFlowTool(roots, input = {}) {
   if (bad) return bad
   for (const root of input.root ? [picked.root] : roots) {
     const abs = flowPath(root, input.name)
-    if (abs && existsSync(abs)) return readFileSync(abs, 'utf8')
+    // flowPath's own resolve+startsWith check is lexical — it cannot see
+    // that .tome/flows itself (or a hand-placed name inside it) is a
+    // symlink. confineRealAbsSync re-checks against the REAL root before a
+    // byte is read, so content living outside `root` can never be returned
+    // as though it were opened from inside it.
+    if (abs && existsSync(abs) && confineRealAbsSync(root, abs)) return readFileSync(abs, 'utf8')
   }
   return `No flow named "${input.name}". Call read_flow without a name to list them.`
 }
@@ -137,6 +143,16 @@ export function draftFlowTool(roots, input = {}) {
 
   const abs = flowPath(picked.root, input.name)
   if (!abs) return { text: `Flow name "${input.name}" does not resolve inside .tome/flows.` }
+  // Lexically abs resolves inside picked.root (flowPath's own check above) —
+  // but .tome, .tome/flows, or this very name may already exist as a
+  // symlink (an earlier write, a hand-edited workspace), and mkdirSync's
+  // recursive option walks through one exactly like any other directory.
+  // mustExist:false walks up to the nearest existing ancestor of `abs`,
+  // which covers flowsDir too (abs's own parent), so one call confines both
+  // the mkdirSync below and the writeFileSync that follows it.
+  if (!confineRealAbsSync(picked.root, abs, { mustExist: false })) {
+    return { text: `Flow name "${input.name}" escapes the workspace folder.` }
+  }
   const created = !existsSync(abs)
   mkdirSync(flowsDir(picked.root), { recursive: true })
   // Same serialization as FlowPanel.save() — the pane's onDiskChanged

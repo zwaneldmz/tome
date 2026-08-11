@@ -103,6 +103,29 @@ export function unsafeFolderName(name) {
   return typeof name === 'string' && (name === '..' || /[\\/]/.test(name))
 }
 
+// Every node id and port name below becomes half of handoffPath's literal
+// `${id}-${name}.md` (composeBootstrapPrompt) — hyphenated together with no
+// separator of its own to reject, unlike flow.name, which becomes a WHOLE
+// path component and only has to clear unsafeFolderName above. Stricter for
+// that reason: a leading "-" would read as a flag to something downstream
+// one day, a bare "." or ".." would collide with the filesystem's own
+// entries, and ":" is a drive prefix on one platform and inert everywhere
+// else, which is exactly the kind of thing worth refusing rather than
+// discovering later. Exported so a future caller (or a test) can ask the
+// same question validateFlow asks below, on one value at a time.
+export function safeSegment(s) {
+  if (typeof s !== 'string' || !s) return false
+  if (s === '.' || s === '..') return false
+  if (/[\\/:\x00-\x1f\x7f]/.test(s)) return false
+  if (s.startsWith('-')) return false
+  return true
+}
+
+// Same error text at every safeSegment call site below — one place to get
+// the parenthetical right instead of five chances to let it drift.
+const unsafeSegmentError = (what, value) =>
+  `${what} "${value}" can't be used in a handoff path (no "/", "\\", ":", control characters, or a leading "-")`
+
 // Errors vs. warnings is a hard line, not a style choice: errors mean the
 // *graph* is broken (topoSort/rendering can't trust node/edge references),
 // so Run must refuse them. Warnings mean only the declared *contract* is
@@ -134,6 +157,22 @@ export function validateFlow(flow) {
     seenNodeIds.add(node.id)
     nodeById.set(node.id, node)
 
+    // Hard error, same reasoning as the flow-name check above: a
+    // traversal-shaped node id or port name isn't a wrong *declared
+    // contract* like an unknown kind — handoffPath (below) and Run's
+    // mkdir/writeFile (flow-runner.js) trust this string as-is, so letting a
+    // structurally "valid" flow through would leave nothing standing between
+    // "open a file" and a write outside the run folder except logName's own
+    // filename-sanitizing, which is a second lock, not a reason to skip this
+    // one.
+    if (!safeSegment(node.id)) errors.push(unsafeSegmentError('node id', node.id))
+    for (const input of node.inputs || []) {
+      if (!safeSegment(input?.name)) errors.push(unsafeSegmentError(`node "${node.id}" input name`, input?.name))
+    }
+    for (const output of node.outputs || []) {
+      if (!safeSegment(output?.name)) errors.push(unsafeSegmentError(`node "${node.id}" output name`, output?.name))
+    }
+
     if (node.kind !== 'terminal' && !AGENTS.includes(node.kind)) {
       warnings.push(`node "${node.id}" has unknown kind "${node.kind}"`)
     }
@@ -164,6 +203,21 @@ export function validateFlow(flow) {
     const toNode = nodeById.get(edge.to)
     if (!fromNode) errors.push(`edge "${edge.id}" references a missing node "${edge.from}"`)
     if (!toNode) errors.push(`edge "${edge.id}" references a missing node "${edge.to}"`)
+
+    // Same handoff-path reasoning as the node loop: edge.from/edge.to select
+    // WHICH node's id handoffPath uses and fromOutput/toInput are a port
+    // name read the same way composeBootstrapPrompt reads a node's own
+    // outputs[].name — refused here too, independent of the dangling-node
+    // checks just above (a value can be safe-shaped and still dangling, or
+    // unsafe-shaped and still resolve to a real node).
+    for (const [field, value] of [
+      ['from', edge.from],
+      ['to', edge.to],
+      ['fromOutput', edge.fromOutput],
+      ['toInput', edge.toInput],
+    ]) {
+      if (!safeSegment(value)) errors.push(unsafeSegmentError(`edge "${edge.id}" ${field}`, value))
+    }
 
     if (fromNode && !(fromNode.outputs || []).some((o) => o.name === edge.fromOutput)) {
       warnings.push(`edge "${edge.id}": "${edge.fromOutput}" is not an output of node "${edge.from}"`)

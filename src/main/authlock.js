@@ -56,6 +56,12 @@ export function verifyPassphrase(pass) {
 // ---- TOTP (RFC 6238) — crypto lives in ./lib/totp.js (pinned by tests) ----
 
 export async function enrollTotp() {
+  // Never silently replace a live second factor: enrollTotp+confirmTotp sat
+  // on OPEN_CHANNELS (reachable pre-auth), so an unauthenticated caller could
+  // roll a secret only they know over the owner's active one and confirm it
+  // out from under them. First-time enrollment (no active factor yet) is
+  // unaffected.
+  if (auth?.totp?.active) throw new Error('Active second factor present.')
   const secret = b32encode(randomBytes(20))
   auth = { ...(auth || {}), totp: { secret: protectSecret(secret), active: false } }
   await save()

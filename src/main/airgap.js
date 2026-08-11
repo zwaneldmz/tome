@@ -14,6 +14,13 @@ import {
 } from './lib/allowlist.js'
 
 const DEFAULT_UNLOCK_MINUTES = 15
+// Main-owned allowlist for unlockPane's `minutes` argument, which arrives
+// verbatim from the renderer over airgap:unlock. Without this, 0/negative/
+// NaN/Infinity/huge values all pass the old `minutes * 60_000` arithmetic
+// through unchecked and flip a pane to mode 'open' with a bogus or
+// immediate expiry — the UI only ever offers these three values, so
+// anything else is a forged IPC call, not a real user choice.
+export const ALLOWED_UNLOCK_MINUTES = [15, 30, 60]
 
 // The effective matcher list is the union of three sources, recompiled
 // whenever one changes: the shipped provider defaults, the user's own
@@ -34,7 +41,7 @@ let confinedRealPath = async () => null
 let allowMatchers = compileAllowlist(DEFAULT_ALLOW)
 let onEvent = () => {}
 let logEvent = () => {} // main's persistent event log (events.js)
-const panes = new Map() // paneId -> { mode, expiresAt, timer, server }
+const panes = new Map() // paneId -> { mode, expiresAt, timer, server, tunnels }
 
 function recompile() {
   allowMatchers = compileAllowlist([
@@ -320,10 +327,34 @@ export function createPaneProxy(paneId) {
       return
     }
     const up = connect(port, host, () => {
+      // Re-check at connect-COMPLETION time, not just at request time: host
+      // is attacker-controlled and can stall the TCP handshake as long as it
+      // likes, so the pane can relock — or close entirely — while this was
+      // still in flight. Without this, a tunnel that was only ever allowed
+      // because mode was 'open' can finish handshaking AFTER relockPane/
+      // closePane/closeAll already swept st.tunnels, register itself
+      // afterward, and pipe forever with no host ever having been re-checked
+      // — the TOCTOU this closes (TOME-002).
+      const st = panes.get(paneId)
+      if (!st || !hostAllowed(paneId, host)) {
+        socket.destroy()
+        up.destroy()
+        return
+      }
       socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
       if (head?.length) up.write(head)
       up.pipe(socket)
       socket.pipe(up)
+      // Track the established tunnel so relockPane/closePane can find and
+      // kill it later — piped bytes keep flowing on their own even after
+      // the pane's mode/lifetime says they shouldn't (TOME-002).
+      const tunnel = { client: socket, up, host }
+      st.tunnels.add(tunnel)
+      const untrack = () => st.tunnels.delete(tunnel)
+      socket.on('close', untrack)
+      socket.on('error', untrack)
+      up.on('close', untrack)
+      up.on('error', untrack)
     })
     up.on('error', () => socket.destroy())
     socket.on('error', () => up.destroy())
@@ -332,7 +363,7 @@ export function createPaneProxy(paneId) {
   return new Promise((resolve, reject) => {
     server.on('error', reject)
     server.listen(0, '127.0.0.1', () => {
-      panes.set(paneId, { mode: 'providers', expiresAt: null, timer: null, server })
+      panes.set(paneId, { mode: 'providers', expiresAt: null, timer: null, server, tunnels: new Set() })
       pushState()
       resolve({ port: server.address().port })
     })
@@ -340,6 +371,7 @@ export function createPaneProxy(paneId) {
 }
 
 export function unlockPane(paneId, minutes = DEFAULT_UNLOCK_MINUTES) {
+  if (!Number.isInteger(minutes) || !ALLOWED_UNLOCK_MINUTES.includes(minutes)) return false
   const st = panes.get(paneId)
   if (!st) return false
   clearTimeout(st.timer)
@@ -358,6 +390,17 @@ export function relockPane(paneId) {
   st.mode = 'providers'
   st.expiresAt = null
   st.timer = null
+  // Narrowing the mode doesn't stop bytes already piping through an
+  // established CONNECT tunnel — only tunnels that were EVER allowed on
+  // their own merits (provider allowlist / consented repo hosts) survive;
+  // anything that only got through because mode was 'open' is killed now.
+  for (const tunnel of st.tunnels) {
+    if (!hostAllowed(paneId, tunnel.host)) {
+      tunnel.client.destroy()
+      tunnel.up.destroy()
+      st.tunnels.delete(tunnel)
+    }
+  }
   pushState()
   logEvent('airgap:relock', { paneId })
 }
@@ -367,6 +410,11 @@ export function closePane(paneId) {
   if (!st) return
   clearTimeout(st.timer)
   st.server.close()
+  for (const tunnel of st.tunnels) {
+    tunnel.client.destroy()
+    tunnel.up.destroy()
+  }
+  st.tunnels.clear()
   panes.delete(paneId)
   pushState()
 }
@@ -374,14 +422,20 @@ export function closePane(paneId) {
 // Quit-time teardown: pane proxies are children of no window, so without
 // this an unclosed proxy (spawn failed after createPaneProxy, onExit never
 // fired) would keep its loopback port bound until the process exits.
-// server.close() only stops accepting — in-flight CONNECT tunnels die with
-// the process itself, which is where this is called from. No pushState:
-// closeAll runs from will-quit/window-all-closed, where the renderer is
-// already gone — pushing would throw "Object has been destroyed".
+// server.close() only stops accepting new connections — established CONNECT
+// tunnels keep piping bytes on their own, so every live tunnel is destroyed
+// explicitly below too (TOME-002). No pushState: closeAll runs from
+// will-quit/window-all-closed, where the renderer is already gone — pushing
+// would throw "Object has been destroyed".
 export function closeAll() {
   for (const [id, st] of panes) {
     clearTimeout(st.timer)
     st.server.close()
+    for (const tunnel of st.tunnels) {
+      tunnel.client.destroy()
+      tunnel.up.destroy()
+    }
+    st.tunnels.clear()
     panes.delete(id)
   }
 }
