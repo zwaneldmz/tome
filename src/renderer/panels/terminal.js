@@ -5,7 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import { tome } from '../util.js'
 import { terms, strips } from '../regs.js'
 import { onTheme, xtermTheme } from '../theme.js'
-import { stripRender, airgapModal } from '../airgap-ui.js'
+import { stripRender, airgapModal, reauthPrompt } from '../airgap-ui.js'
 import { terminalIcon } from '../icons.js'
 
 // Terminal font size is user-adjustable (⌘=/⌘-/⌘0, handled in keys.js) and
@@ -77,22 +77,40 @@ export class TerminalPanel {
     term.open(termHost)
     terms.set(this.ptyId, term)
     // main already re-signals failures as red text over pty:data; this catch
-    // keeps a spawn error from surfacing as an unhandled rejection too
-    tome.pty
-      .create({
-        id: this.ptyId,
-        kind: params.kind,
-        cwd: params.cwd,
-        airgap: params.airgap,
-        ws: params.ws,
-        // Undefined for every pane but a flow node that pinned one; main
-        // treats absent as "the agent CLI's own default".
-        model: params.model,
-      })
-      .catch((err) => {
+    // keeps a spawn error from surfacing as an unhandled rejection too.
+    // An ungapped pane also comes back with { reauth: true } instead of
+    // spawning (TOME-001): prompt for the second factor and retry with it,
+    // looping while main keeps refusing (wrong code / throttled) until it
+    // spawns or the user cancels.
+    const spawn = async (auth) => {
+      let r
+      try {
+        r = await tome.pty.create({
+          id: this.ptyId,
+          kind: params.kind,
+          cwd: params.cwd,
+          airgap: params.airgap,
+          ws: params.ws,
+          // Undefined for every pane but a flow node that pinned one; main
+          // treats absent as "the agent CLI's own default".
+          model: params.model,
+          auth,
+        })
+      } catch (err) {
         console.error('pty:create failed:', err)
         term.write(`\r\n\x1b[31mpane failed to start: ${err?.message || err}\x1b[0m\r\n`)
-      })
+        return
+      }
+      if (r?.reauth) {
+        const creds = await reauthPrompt(r.error)
+        if (!creds) {
+          term.write(`\r\n\x1b[33mcancelled — unsandboxed pane not started\x1b[0m\r\n`)
+          return
+        }
+        return spawn(creds)
+      }
+    }
+    spawn()
     term.onData((d) => tome.pty.write(this.ptyId, d))
     term.onResize(({ cols, rows }) => tome.pty.resize(this.ptyId, cols, rows))
     const refit = () => {

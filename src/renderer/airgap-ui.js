@@ -136,6 +136,43 @@ export async function airgapModal(paneId) {
   setTimeout(() => field.focus(), 0)
 }
 
+// Second-factor re-auth before main will spawn an UNSANDBOXED (ungapped) pane
+// (TOME-001). Main answers pty:create with { reauth: true } and spawns nothing
+// until it gets back a verified passphrase/TOTP. Resolves to the credentials to
+// retry with, or null if the user dismisses (Escape/scrim/Cancel) — in which
+// case the pane is simply not started. errMsg carries main's last refusal
+// (wrong code, throttled) so a retry shows why the previous attempt failed.
+export async function reauthPrompt(errMsg) {
+  const state = await tome.airgap.state()
+  return new Promise((resolve) => {
+    let settled = false
+    const done = (v) => {
+      if (settled) return
+      settled = true
+      resolve(v)
+    }
+    // onClose fires on Escape/scrim/Cancel — treat every dismissal as "no".
+    const m = modalShell('⛨ unlock to launch an unsandboxed shell', () => done(null))
+    m.note(
+      'This pane runs with your full privileges and open network access. Re-enter your credentials to allow it — every unsandboxed pane asks again.'
+    )
+    if (errMsg) m.err.textContent = errMsg
+    let pass = null
+    let code = null
+    if (state.auth.totp) code = m.input('2FA code (6 digits)', 'text')
+    else pass = m.input('passphrase')
+    const go = () => {
+      done(state.auth.totp ? { code: code.value } : { passphrase: pass.value })
+      m.close()
+    }
+    m.button('Unlock', go)
+    m.button('Cancel', () => m.close(), 'ghost')
+    const field = code || pass
+    field.addEventListener('keydown', (e) => e.key === 'Enter' && go())
+    setTimeout(() => field.focus(), 0)
+  })
+}
+
 function setupModal(paneId) {
   const m = modalShell('⛨ set up air-gap unlock')
   m.note('Choose the passphrase that allows internet on air-gapped panes. Stored as a salted hash.')

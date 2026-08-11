@@ -27,7 +27,7 @@ import { buildAgentSpawnFrom } from './lib/agent-spawn.js'
 import { buildAgentBaseEnv } from './lib/agent-env.js'
 import { mergeAgents } from './lib/custom-agents.js'
 import { isValidStoreKey, isStoreKeyAllowed } from './lib/store-keys.js'
-import { resolveGapping, resolveSpawnCwd } from './lib/pty-authority.js'
+import { resolveGapping, resolveSpawnCwd, unrestrictedSpawnNeedsReauth } from './lib/pty-authority.js'
 import { isAppUrl } from './lib/app-url.js'
 import { isLocked, shouldBlockIpcOn } from './lib/ipc-lock-gate.js'
 import * as stt from './lib/stt.js'
@@ -630,9 +630,9 @@ app.whenReady().then(async () => {
   // The renderer names a vetted pane kind, and may ask for a model off the
   // shared allowlist; the command line is built HERE so a compromised renderer
   // can't request arbitrary binaries or arguments.
-  ipcMain.handle('pty:create', async (e, { id, kind, cwd, airgap: gapped, ws, model }) => {
+  ipcMain.handle('pty:create', async (e, { id, kind, cwd, airgap: gapped, ws, model, auth }) => {
     try {
-      return await createPty({ id, kind, cwd, gapped, ws, model })
+      return await createPty({ id, kind, cwd, gapped, ws, model, auth })
     } catch (err) {
       // The renderer fires this without awaiting, so a throw here used to
       // surface as nothing but a blank pane. Say what broke.
@@ -700,7 +700,7 @@ app.whenReady().then(async () => {
     return { env, sandbox }
   }
 
-  async function createPty({ id, kind, cwd, gapped, ws, model }) {
+  async function createPty({ id, kind, cwd, gapped, ws, model, auth }) {
     // Resolve the kind against built-ins PLUS the user's vetted custom CLIs,
     // with the store re-read per spawn: spawns are rare, and a fresh read is
     // what makes a Preferences edit take effect on the next pane without any
@@ -719,6 +719,25 @@ app.whenReady().then(async () => {
     // is what flows into buildAgentEnv and conductor.register below
     // (TOME-001).
     const effectiveGapped = resolveGapping(gapped, (await readStore('airgap-default')) !== false)
+    // An ungapped pane is an unsandboxed shell with open egress and the user's
+    // full privileges — the very authority TOME-001 says a compromised renderer
+    // must not be able to seize on its own. So main runs a fresh second-factor
+    // ceremony before spawning one, every time: the renderer's first attempt
+    // arrives without `auth`, main answers { reauth: true } and spawns nothing,
+    // the renderer collects the passphrase/TOTP and retries with `auth`, and
+    // only a verified factor lets the spawn proceed. Throttled like the airgap
+    // unlock so it can't be brute-forced. Gapped panes (the default) never hit
+    // this; an app with no factor configured has nothing to prove against.
+    if (unrestrictedSpawnNeedsReauth(effectiveGapped, authlock.authStatus().configured)) {
+      const waitMs = authlock.throttleRetryIn('pty:unrestricted')
+      if (waitMs) return { reauth: true, error: `Too many attempts. Wait ${Math.ceil(waitMs / 1000)}s.` }
+      const ok = auth && (authlock.totpActive() ? authlock.verifyTotp(auth.code) : authlock.verifyPassphrase(auth.passphrase))
+      if (!ok) {
+        if (auth) authlock.recordFailure('pty:unrestricted')
+        return { reauth: true, error: auth ? 'Incorrect passphrase or code.' : null }
+      }
+      authlock.recordSuccess('pty:unrestricted')
+    }
     // cwd is only ever a STARTING directory — a shell can cd anywhere the
     // moment it's running — but it used to reach pty.spawn straight from the
     // renderer with no check at all. resolveSpawnCwd bounds it to the open

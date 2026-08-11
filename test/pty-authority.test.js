@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { resolveGapping, resolveSpawnCwd } from '../src/main/lib/pty-authority.js'
+import { resolveGapping, resolveSpawnCwd, unrestrictedSpawnNeedsReauth } from '../src/main/lib/pty-authority.js'
 
 describe('resolveGapping()', () => {
   it('renderer requests no gap, but policy defaults to gapped -> gapped wins', () => {
@@ -122,5 +122,18 @@ describe('resolveSpawnCwd()', () => {
     mkdirSync(dir)
     expect(resolveSpawnCwd(dir, [root, other], home)).toBe(dir)
     rmSync(other, { recursive: true, force: true })
+  })
+})
+
+describe('unrestrictedSpawnNeedsReauth()', () => {
+  it('ungapped pane with a configured factor -> ceremony required', () => {
+    expect(unrestrictedSpawnNeedsReauth(false, true)).toBe(true)
+  })
+  it('gapped (sandboxed) pane -> never asks, regardless of config', () => {
+    expect(unrestrictedSpawnNeedsReauth(true, true)).toBe(false)
+    expect(unrestrictedSpawnNeedsReauth(true, false)).toBe(false)
+  })
+  it('ungapped but no factor configured -> nothing to prove, no ceremony', () => {
+    expect(unrestrictedSpawnNeedsReauth(false, false)).toBe(false)
   })
 })

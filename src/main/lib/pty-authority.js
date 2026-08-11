@@ -48,3 +48,16 @@ export function resolveSpawnCwd(cwd, roots, home) {
     return home // doesn't exist, or unreadable — never hand pty.spawn a dead cwd
   }
 }
+
+// ---- unrestricted-spawn ceremony (TOME-001) ----
+// An ungapped pane is an unsandboxed shell/agent with your full privileges and
+// open egress — the exact authority the review flagged a compromised renderer
+// could seize on its own. So main requires a fresh second-factor re-auth
+// before it spawns one, EVERY time (the product decision was "re-auth per
+// action", not a time-boxed grant). This returns whether that ceremony applies
+// to a given spawn: only when the resolved pane is ungapped AND the app has an
+// auth factor configured to re-prove — an app with no passphrase set has no
+// factor to check, and gapped panes are already contained by the sandbox.
+export function unrestrictedSpawnNeedsReauth(effectiveGapped, authConfigured) {
+  return !effectiveGapped && !!authConfigured
+}
