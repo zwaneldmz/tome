@@ -15,3 +15,5 @@ docs/*
 !docs/screenshot.png
 !docs/tour-*.png
 !docs/flow-creation.mp4
+.agents/
+.superpowers/
