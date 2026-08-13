@@ -37,6 +37,10 @@ notify = "8"
 # itself requires notify ^8.2.0 for (matches the `notify = "8"` pin above),
 # so 0.7 is what "latest compatible" resolves to here.
 notify-debouncer-mini = "0.7"
+# PTY spawning for pty.rs (Phase 2 slice P1) — wezterm's cross-platform pty
+# crate; see pty.rs's module doc comment for why portable-pty rather than
+# node-pty's semantics (explicit kill/reap, no auto-SIGHUP-on-drop).
+portable-pty = "0.9"
 
 [dev-dependencies]
 tempfile = "3"

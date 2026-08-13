@@ -41,6 +41,12 @@ pub struct AppState {
     /// body; kept here now only so that slice never needs to touch this
     /// struct.
     pub watchers: Mutex<HashMap<String, ()>>,
+    /// Live PTY panes, keyed by pane id — backs the `pty_write`/
+    /// `pty_resize`/`pty_kill` commands (`pty_create` itself is a later
+    /// slice's work; see `pty.rs`'s module doc comment for the exact
+    /// phase-2 split). Real from Phase 2 slice P1 on, unlike `watchers`
+    /// above.
+    pub pty: crate::pty::Registry,
 }
 
 impl AppState {
@@ -52,6 +58,7 @@ impl AppState {
             theme: RwLock::new(serde_json::Value::Null),
             quit_ready: Notify::new(),
             watchers: Mutex::new(HashMap::new()),
+            pty: crate::pty::Registry::new(),
         }
     }
 }

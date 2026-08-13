@@ -9,12 +9,14 @@ use crate::{lock_gate, state::AppState};
 
 stub_command!(agents_changed, "agents:changed");
 
-/// Mirrors `src/shared/pane-kinds.js`'s `AGENTS` constant. Duplicated here
-/// rather than shared with the JS — `src/shared/**` stays JS-only per the
-/// plan (still vitest-tested, imported by the unchanged renderer), so there
-/// is no Rust module it could be read from. This is the one Rust-side copy,
-/// consumed by both commands below and by `menu.rs`'s "New Pane" submenu.
-pub const AGENTS: &[&str] = &["claude", "opencode", "pi"];
+/// Mirrors `src/shared/pane-kinds.js`'s `AGENTS` constant. Re-exported
+/// from `agent_spawn.rs` (the Phase 2 spawn-policy slice's canonical copy
+/// — see that module's doc comment for why `src/shared/**` itself can't
+/// be the source) rather than duplicated here a second time, so this
+/// stays the one Rust-side copy of the list, consumed by both commands
+/// below and — via this exact re-exported path — by `menu.rs`'s "New
+/// Pane" submenu (`use crate::ipc::agents::AGENTS`, unchanged).
+pub use crate::agent_spawn::AGENTS;
 
 /// Mirrors `agents:list`'s built-in half of `mergeAgents(AGENTS, await
 /// readStore('custom-agents'))` (`src/main/lib/custom-agents.js`) — each

@@ -1,11 +1,17 @@
+mod agent_env;
+mod agent_spawn;
 mod confine;
+mod custom_agents;
 mod events;
 mod eventlog;
 mod fs;
 mod git;
 mod ipc;
 mod lock_gate;
+mod login_env;
 mod menu;
+mod pty;
+mod pty_authority;
 mod state;
 mod store;
 mod store_keys;
