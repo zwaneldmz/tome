@@ -1,0 +1,42 @@
+[package]
+name = "tome"
+version = "0.1.0"
+description = "A coding harness: agents, terminals, editors, and chat in one bound workspace."
+authors = ["Lwando Zwane"]
+edition = "2021"
+
+# See https://v2.tauri.app/start/create-project/#manual-setup
+[lib]
+name = "tome_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "tome"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Core Tauri runtime + the plugins every Phase 1-4 slice needs. Every dep any
+# phase-1 slice will need is pre-added here so no later slice has to touch
+# this file (see lock_gate::CHANNEL_OF_COMMAND for the full command surface
+# these deps eventually back: pty via tokio, fs watching via notify, JSON
+# store/events via serde_json, etc).
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+notify = "8"
+# 0.6 was the version named in the original slice brief; 0.7.0 is latest on
+# crates.io as of this writing and is the version notify-debouncer-mini
+# itself requires notify ^8.2.0 for (matches the `notify = "8"` pin above),
+# so 0.7 is what "latest compatible" resolves to here.
+notify-debouncer-mini = "0.7"
+
+[dev-dependencies]
+tempfile = "3"

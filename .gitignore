@@ -17,3 +17,6 @@ docs/*
 !docs/flow-creation.mp4
 .agents/
 .superpowers/
+src-tauri/target/
+dist-web/
+src-tauri/gen/
