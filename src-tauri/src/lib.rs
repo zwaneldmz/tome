@@ -33,6 +33,7 @@ mod lock_gate;
 mod login_env;
 mod lsp;
 mod menu;
+mod protocol;
 mod pty;
 mod pty_authority;
 mod state;
@@ -168,6 +169,22 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::new())
+        // tome:// custom protocol — serves confined, extension-allowlisted
+        // file bytes to the sandboxed doc-viewer iframe
+        // (`src/renderer/panels/doc.js`). Ports index.js's privileged
+        // `tome` scheme registration (~line 258) and its
+        // `protocol.handle('tome', ...)` handler (~line 528); registered
+        // globally here exactly like the Electron original, so it needs no
+        // separate wiring for the (currently flagged-off) popout webview
+        // once that lands. See `protocol.rs`'s module doc comment for the
+        // full port notes, including why `tauri.conf.json` needed no new
+        // scheme declaration. Closure-wrapped (rather than passing
+        // `protocol::handle` directly) so the compiler resolves this
+        // builder's runtime type `R` before monomorphizing the generic
+        // handler, avoiding an inference dead end at this call site.
+        .register_asynchronous_uri_scheme_protocol("tome", |ctx, request, responder| {
+            protocol::handle(ctx, request, responder)
+        })
         .setup(|app| {
             menu::setup(app)?;
             boot_auth_and_airgap(app.handle());

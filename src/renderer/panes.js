@@ -175,6 +175,77 @@ window.addEventListener('drop', (e) => {
   }
 })
 
+// ---- OS-level drag-drop under Tauri (plan §8) ----
+// Kept alongside, not merged into, the DOM listeners above: dragDropEnabled
+// routes a native OS drag through tome-ipc.js's `dragDrop` bridge instead of
+// the DOM 'Files' drag those listeners gate on.
+//
+// This does more than decide which of the two listener sets above sees a
+// *file* drop, and the risk is bigger than "platform-dependent, unconfirmed"
+// makes it sound. Verified against the pinned crates (Cargo.lock: wry
+// 0.55.1, tauri-runtime-wry 2.11.4): enabling dragDropEnabled makes wry
+// install a drag_drop_handler that unconditionally returns `true` for every
+// DragDropEvent — Enter/Over/Drop/Leave alike — landing on this webview
+// (tauri-runtime-wry's with_drag_drop_handler closure, src/lib.rs, ends
+// every branch with a bare `true`). On macOS, that `true` is what makes
+// WryWebView's NSDraggingDestination override
+// (wry-0.55.1/src/wkwebview/drag_drop.rs: dragging_updated /
+// perform_drag_operation) short-circuit to NSDragOperation::Copy / Bool::YES
+// WITHOUT ever calling `super(this)` — and that super call, not anything
+// this app can hook independently, is what runs WKWebView's own internal
+// DragController and is what actually dispatches dragover/drop into the
+// DOM. That gate is keyed on "is dragDropEnabled on", not on "does this
+// drag carry files", so it applies to ANY drag session landing on the
+// webview, including one that starts and ends inside it — e.g.
+// dockview-core's own tab-header drag (`draggable = true` unless
+// `disableDnd` is set, which this app never does — `grep -rn disableDnd
+// src/renderer/` is empty; see
+// dockview-core.esm.js:4861/5106/5155/5263/5288) and this file's own
+// tear-off detection below (`dragend` + `e.dataTransfer.dropEffect`). So
+// this is a real, source-verified candidate for silently breaking tab
+// reordering and tear-off on macOS — not merely a question of whether the
+// DOM 'Files' listeners above also happen to fire for the same drag (that
+// narrower question is the one still actually open, and only for
+// WebKitGTK/Linux — no Linux runtime available to check against).
+//
+// DECISION (Phase 6): tauri.conf.json now sets dragDropEnabled: FALSE, so
+// wry never installs that NSDraggingDestination override — WKWebView's own
+// DragController runs and dispatches dragover/drop/dragend into the DOM
+// normally, which is what dockview tab-reorder and the tear-off detection
+// below actually need. For a tiling pane-grid harness, pane drag/reorder/
+// tear-off is core; OS-file-drop-to-open is a convenience with working
+// substitutes (click a file in the tree, or File > Open). We keep the core
+// interaction and defer file-drop-to-open. (Because the flag defaulted true
+// since Phase 1, this also un-breaks tab-drag that boot smokes never
+// exercised.) Flagged to the product owner for ratification.
+//
+// Consequence: `tome.dragDrop` below is now DORMANT — with the native
+// handler off, no tauri://drag-drop events fire, so onEnter/onLeave/onDrop
+// never run. The bridge is left in place (harmless, and it lights back up if
+// the flag is ever re-enabled) rather than deleted, so the file-drop-to-open
+// path can be revived without re-deriving all of the above.
+//
+// This block does not touch `dropDepth` — a shared counter across two
+// independently-firing sources risks desync (a leave from one side
+// clearing a count the other still holds open); classList add/remove is
+// idempotent, so the two can't fight into a highlight stuck on even if a
+// platform fires both.
+// `tome.dragDrop` is undefined under Electron's real preload (no such
+// bridge there — the DOM path above already covers Electron), hence the
+// optional chains.
+tome.dragDrop?.onEnter?.(() => dockEl.classList.add('drop-target'))
+tome.dragDrop?.onLeave?.(() => dockEl.classList.remove('drop-target'))
+tome.dragDrop?.onDrop?.(({ paths } = {}) => {
+  dockEl.classList.remove('drop-target')
+  // Same per-path open-or-toast the DOM handler above uses, and — like that
+  // handler — fired without awaiting each openFile() so multiple dropped
+  // files place the same way a multi-file DOM drop already does.
+  for (const path of paths || []) {
+    if (typeof path === 'string' && path) openFile(path)
+    else toast(`cannot open dropped item: ${path}`)
+  }
+})
+
 // Awaitable so callers closing several panes can do it one at a time — the
 // discard prompt is a modal, and only one modal exists at a time.
 export async function closePanel(panel, doc) {

@@ -164,7 +164,16 @@ fn is_brain_path(p: &Path) -> bool {
 /// following) inside an open workspace folder (the root itself included:
 /// unlike `confine()` above, an exact match *is* confined) or inside a
 /// brain vault.
-fn is_confined(open_folders: &[PathBuf], folders_synced: bool, p: &Path) -> bool {
+///
+/// `pub(crate)` (not private) as of `protocol.rs` (Phase 6): that module's
+/// own tests call this directly to exercise a real `../`-escape denial
+/// against the exact lexical decision `confined_real_path` below is built
+/// on, rather than reimplementing a parallel copy just to unit-test it —
+/// `tauri::State` cannot be constructed outside a running app (see
+/// `confined_real_path`'s doc comment), so the private, no-`State`-needed
+/// core is the only piece of this confinement path a non-running-app test
+/// can reach at all. No behavior changed by this widen, only visibility.
+pub(crate) fn is_confined(open_folders: &[PathBuf], folders_synced: bool, p: &Path) -> bool {
     if !folders_synced {
         return false;
     }

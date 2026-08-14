@@ -198,6 +198,54 @@
       },
     },
 
+    // OS file drag-drop (phase 6, plan §8). tauri.conf.json's
+    // app.windows[].dragDropEnabled makes Tauri intercept the native OS drag
+    // before it ever reaches the DOM as a 'Files' drag — so File.path and
+    // webUtils.pathForFile above never see a real drop under Tauri — and
+    // deliver already-resolved, absolute OS paths straight from the
+    // window/webview layer via tauri://drag-drop (paths + position) and its
+    // …-enter/…-leave siblings (panes.js's hover highlight). No per-item
+    // resolution step the way Electron's File + webUtils.getPathForFile
+    // two-step needed.
+    //
+    // dragDropEnabled's interception is not scoped to file drags — it
+    // gates every native drag session the webview sees, including
+    // dockview's own in-page tab-header dragging. See panes.js's own
+    // `tome.dragDrop` block (~line 178) for the source-verified mechanism
+    // and why this is left on rather than switched off to work around it.
+    //
+    // Plain event.listen (this file's `on` helper — same as every other
+    // subscription here) rather than the dedicated
+    // webview.getCurrentWebview().onDragDropEvent() convenience wrapper some
+    // Tauri examples use: verified directly against the pinned tauri crate
+    // source (Cargo.lock pins tauri 2.11.5) that these events emit
+    // window/webview-SCOPED (`emit_to_window`/`emit_to_webview`, not a
+    // plain broadcast `emit`), but a listener registered with no explicit
+    // target defaults to `EventTarget::Any`, and
+    // `event/listener.rs::match_any_or_filter` special-cases `Any` to match
+    // regardless of the emit-side scope filter — so the plain, untargeted
+    // `listen()` this file already uses everywhere else does receive them.
+    // One calling convention, and this app has exactly one window this
+    // phase (popout v2 is out of scope — plan §8), so there's no
+    // multi-webview ambiguity yet; a future popout window emitting its own
+    // drag-drop would also reach this same listener and should be re-scoped
+    // (via `{ target: { kind: 'Webview', label } }`) when that lands.
+    //
+    // Paths are handed to panes.js's drop handler exactly as received, with
+    // NO extra confinement check added here: a physical OS drag from the
+    // user's own file manager is the same "user-driven, not model-driven"
+    // trust bucket src-tauri/src/confine.rs's module doc comment already
+    // carves out for fs:readFile (unvetted by design — renderer compromise
+    // already equals user-privileged file access for tree/editor opens);
+    // panes.js feeds these into the exact same openFile() the DOM File-drag
+    // path already used unconfined, so this is a behavior match, not a new
+    // hole.
+    dragDrop: {
+      onEnter: (cb) => on('tauri://drag-enter', cb),
+      onLeave: (cb) => on('tauri://drag-leave', cb),
+      onDrop: (cb) => on('tauri://drag-drop', cb),
+    },
+
     git: {
       info: (dir) => call('git_info', { dir }),
       branches: (dir) => call('git_branches', { dir }),
