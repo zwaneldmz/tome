@@ -215,17 +215,21 @@ pub struct GappedSpawnSpec {
 /// is ever shell-quoted or needs to be: a path containing a space is just
 /// one `Vec` element, not a token boundary.
 ///
-/// Flag order matches THE DESIGN's own invocation left to right:
-/// `--unshare-user --unshare-net --die-with-parent [--new-session]
-/// --cap-add cap_net_admin --dev-bind / / --bind <host> <container>
-/// --tmpfs <config-dir> -- <shim> --port <P> --sock <container> --
-/// <inner...>`. The relative order of `--unshare-user`/`--unshare-net`/
-/// `--die-with-parent`/`--cap-add`/(`--new-session`) does not matter to
-/// bwrap itself (none of them are filesystem operations, which ARE
-/// order-sensitive — `--dev-bind / /` must precede the narrower `--bind`/
-/// `--tmpfs` so those two apply ON TOP of the whole-root bind, not the
-/// other way around); a fixed order is still pinned by this module's own
-/// tests below purely so a future edit that reorders them is a visible,
+/// Flag order matches THE DESIGN's own invocation left to right, plus
+/// this module's one deviation (`--tmpfs /run`, see its call-site comment
+/// below): `--unshare-user --unshare-net --die-with-parent
+/// [--new-session] --cap-add cap_net_admin --dev-bind / / --tmpfs /run
+/// --bind <host> <container> --tmpfs <config-dir> -- <shim> --port <P>
+/// --sock <container> -- <inner...>`. The relative order of
+/// `--unshare-user`/`--unshare-net`/`--die-with-parent`/`--cap-add`/
+/// (`--new-session`) does not matter to bwrap itself (none of them are
+/// filesystem operations, which ARE order-sensitive — `--dev-bind / /`
+/// must precede the narrower `--tmpfs`/`--bind` ops so those apply ON
+/// TOP of the whole-root bind, not the other way around, and `--tmpfs
+/// /run` must precede the `/run/tome/proxy.sock` bind so the socket's
+/// destination parent exists — and is mkdir-able — when the bind is
+/// set up); a fixed order is still pinned by this module's own tests
+/// below purely so a future edit that reorders them is a visible,
 /// deliberate diff rather than a silent one.
 ///
 /// ### `--new-session` and `headless`
@@ -259,6 +263,28 @@ pub fn build_bwrap_argv(spec: &GappedSpawnSpec) -> Vec<String> {
     argv.push("--dev-bind".to_string());
     argv.push("/".to_string());
     argv.push("/".to_string());
+    // A fresh, world-writable tmpfs over /run, BEFORE the proxy-socket
+    // bind below. Not in THE DESIGN's literal bwrap line — flagged as a
+    // deviation, and load-bearing: this process is UNPRIVILEGED, so the
+    // uid_map bwrap writes maps the caller's real uid (not root), and the
+    // sandboxed setup phase runs without CAP_DAC_OVERRIDE (bwrap clears
+    // the whole bounding set except --cap-add'd caps; cap_net_admin is
+    // for the shim's loopback ioctl, not filesystem access). The bind's
+    // destination parent /run/tome must then be CREATED inside the
+    // namespace — but the --dev-bind'd host /run is root-owned 0755, so
+    // mkdir fails EACCES ("bwrap: Can't mkdir parents for
+    // /run/tome/proxy.sock: Permission denied") — reproduced and
+    // strace-verified against bwrap 0.9.0 as an unprivileged user, and
+    // the exact failure the linux-sandbox CI job's first real run hit.
+    // Root callers never saw it (root maps to root; CAP_DAC_OVERRIDE).
+    // A tmpfs /run is created fresh (and owned by the mapped uid) on
+    // every invocation, so /run/tome under it is mkdir-able. It also
+    // hides whatever else lived in the host's /run from the sandboxed
+    // process — a small confinement bonus, not a regression: nothing a
+    // gapped pane legitimately needs lives in /run (its proxy socket is
+    // the one thing, and the very next op binds it back in).
+    argv.push("--tmpfs".to_string());
+    argv.push("/run".to_string());
     argv.push("--bind".to_string());
     argv.push(spec.host_socket_path.display().to_string());
     argv.push(CONTAINER_PROXY_SOCK_PATH.to_string());
@@ -660,6 +686,8 @@ mod tests {
                 "--dev-bind",
                 "/",
                 "/",
+                "--tmpfs",
+                "/run",
                 "--bind",
                 "/run/user/1000/tome/pane-pty-42.sock",
                 "/run/tome/proxy.sock",
@@ -699,6 +727,8 @@ mod tests {
                 "--dev-bind",
                 "/",
                 "/",
+                "--tmpfs",
+                "/run",
                 "--bind",
                 "/run/user/1000/tome/pane-pty-42.sock",
                 "/run/tome/proxy.sock",
