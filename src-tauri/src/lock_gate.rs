@@ -12,15 +12,18 @@ use crate::state::AppState;
 /// unpackaged (see the JS doc comment this ports — a regression that reads
 /// the env var in here would risk it leaking into a packaged build).
 ///
-/// Nothing calls this yet: `AppState` has only a plain `locked: bool` flag
-/// today (see `guard` below), not separate `configured`/`unlocked`/
-/// `shotMode` concepts — those need the Phase 3 airgap+auth slice's real
-/// port of `authlock.js`'s `initAuth`/`authStatus`/`isUnlocked`. Ported now,
-/// with its exact JS test fixtures, so that slice only has to wire three
-/// booleans through to an already-correct, already-tested predicate rather
-/// than design one.
-#[allow(dead_code)] // spec-ported for Phase 3; see doc comment above
-fn is_locked(configured: bool, unlocked: bool, shot_mode: bool) -> bool {
+/// Called from `lib.rs::run()`'s `boot_auth_and_airgap` (Task A4's
+/// integration) once, at boot, after `authlock::AuthLock::load` resolves
+/// `configured` — see that function's doc comment for why a one-time
+/// computation there is equivalent to this predicate being re-derived
+/// fresh on every gated call the way the JS original's `isLockedNow()`
+/// does (the three inputs can only ever move the result in one direction
+/// after boot: `unlocked` is one-way false->true and forces the result to
+/// `false` outright the moment it flips, so nothing downstream of boot
+/// ever needs to call this a second time — `ipc::auth`/`ipc::airgap`'s own
+/// login-success paths just write `AppState.locked = false` directly
+/// instead).
+pub(crate) fn is_locked(configured: bool, unlocked: bool, shot_mode: bool) -> bool {
     configured && !unlocked && !shot_mode
 }
 

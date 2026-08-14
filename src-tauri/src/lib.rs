@@ -1,5 +1,7 @@
 mod agent_env;
 mod agent_spawn;
+mod airgap;
+mod authlock;
 mod confine;
 mod custom_agents;
 mod events;
@@ -15,6 +17,7 @@ mod pty_authority;
 mod state;
 mod store;
 mod store_keys;
+mod totp;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -22,6 +25,16 @@ use std::time::Duration;
 use tauri::{Emitter, Manager, WindowEvent};
 
 use state::AppState;
+
+/// `!!process.env.<name>` in JS: true only for a SET and NON-EMPTY value
+/// (JS treats `""` as falsy) — matched exactly here rather than with
+/// `.is_ok()`, which would also fire on `TOME_SHOT=`. Shared by
+/// [`boot_plugin`] (`shotMode`/`profile` boot flags) and [`run`]'s own
+/// `shot_mode` computation for the initial lock-gate state (`index.js`'s
+/// `const shotMode = !!process.env.TOME_SHOT && !app.isPackaged`).
+fn truthy_env(name: &str) -> bool {
+    std::env::var(name).map(|v| !v.is_empty()).unwrap_or(false)
+}
 
 /// Builds the plugin that injects `window.__TOME_BOOT__` before any page
 /// script runs, on every window (including the config-declared main
@@ -35,10 +48,6 @@ fn boot_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let home = std::env::home_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
-    // `!!process.env.TOME_SHOT` in JS is true only for a SET and NON-EMPTY
-    // value (JS treats "" as falsy) — matched exactly here rather than with
-    // `.is_ok()`, which would also fire on `TOME_SHOT=`.
-    let truthy_env = |name: &str| std::env::var(name).map(|v| !v.is_empty()).unwrap_or(false);
     let boot = serde_json::json!({
         "home": home,
         "shotMode": truthy_env("TOME_SHOT"),
@@ -47,6 +56,71 @@ fn boot_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::new("tome-boot")
         .js_init_script(format!("window.__TOME_BOOT__ = {boot};"))
         .build()
+}
+
+/// Boot-time load: `authlock::AuthLock::load` (the passphrase/TOTP store)
+/// and `airgap::AirgapState::load_repo_consents` (persisted repo-allowlist
+/// consents), both off `app_data_dir` — Tauri's per-OS analogue of
+/// Electron's `app.getPath('userData')`, which is what both
+/// `authlock.initAuth(userData)` and `airgap.loadRepoConsents(userData)`
+/// receive at their one real call site in `index.js` (~548-552). Also
+/// computes this process's initial lock-gate state (`index.js`'s
+/// `isLockedNow()`) once — see `lock_gate::is_locked`'s doc comment for why
+/// a one-time boot computation is equivalent to the JS original's
+/// recompute-on-every-call version, given how `AppState.locked` is
+/// maintained afterward.
+///
+/// Not itself fallible in any way that should abort `.setup()`:
+/// `AuthLock::load`/`load_repo_consents` both already collapse every
+/// failure mode (missing file, corrupt JSON) to "start fresh/empty" — see
+/// their own doc comments — matching `initAuth`'s `catch { auth = null }` /
+/// `loadRepoConsents`'s `catch {}`. `app_data_dir` itself failing to
+/// resolve is the one real failure this function can hit; the same
+/// fallback every other command's own `app.path().app_data_dir()` call
+/// already has to tolerate (see `ipc::pty::pty_create`/`ipc::store::get`'s
+/// call sites) — boot must not panic `.setup()` over it, so this simply
+/// leaves `AppState.auth` at its starting `None` and the app boots
+/// unlocked (`AppState.locked` stays `false`, its `AppState::new()`
+/// default) rather than crashing.
+fn boot_auth_and_airgap<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Ok(dir) = app.path().app_data_dir() else {
+        return;
+    };
+    // Tauri, unlike Electron's `userData` (which Electron itself creates
+    // before `whenReady` fires), does not guarantee `app_data_dir` exists —
+    // same discipline `store::set`/`events::append` already apply to their
+    // own writes under this directory.
+    let _ = std::fs::create_dir_all(&dir);
+
+    let auth = authlock::AuthLock::load(&dir);
+    let shot_mode = truthy_env("TOME_SHOT") && tauri::is_dev();
+    let locked = lock_gate::is_locked(auth.status().configured, false, shot_mode);
+
+    let state = app.state::<AppState>();
+    *state.locked.write().expect("AppState.locked lock poisoned") = locked;
+    *state.auth.lock().expect("AppState.auth lock poisoned") = Some(auth);
+    state.airgap.load_repo_consents(&dir.join("airgap-repo-consents.json"));
+}
+
+/// Shuts down every live pane proxy (loopback listener + any established
+/// tunnels) and cancels every pending auto-relock timer — the quit-time
+/// half of `closeAll()` (`airgap.js`'s own doc comment: "proxies are
+/// children of no window", so nothing else tears them down when the app
+/// exits). Idempotent, like the JS original (`will-quit` and
+/// `window-all-closed` both call `closeAll()` there; this crate's own quit
+/// path only calls this once, from the `CloseRequested` handler below, but
+/// it would be harmless to call twice — draining a map a second time finds
+/// nothing left). No `airgap:state` push here, matching `closeAll`'s own
+/// comment: the window is on its way down, and a locked/closing app has
+/// nowhere left to deliver the event.
+fn shutdown_all_proxies(state: &AppState) {
+    for (_, (_, timer)) in state.relock_timers.lock().expect("AppState.relock_timers lock poisoned").drain() {
+        timer.abort();
+    }
+    for (_, proxy) in state.proxies.lock().expect("AppState.proxies lock poisoned").drain() {
+        proxy.shutdown();
+    }
+    state.airgap.close_all();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -74,6 +148,7 @@ pub fn run() {
         .manage(AppState::new())
         .setup(|app| {
             menu::setup(app)?;
+            boot_auth_and_airgap(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -217,6 +292,13 @@ pub fn run() {
                 // its persistence beat first.
                 let _ = tokio::time::timeout(Duration::from_millis(1500), state.quit_ready.notified())
                     .await;
+                // Extend index.js's exit cleanup: pane proxies are children
+                // of no window (see `shutdown_all_proxies`'s doc comment) —
+                // without this, a proxy from a spawn that never got a
+                // matching `pty:kill` (or one still `Open` mid-unlock-window)
+                // would keep its loopback port bound, and any of its live
+                // tunnels would keep piping bytes, past process exit.
+                shutdown_all_proxies(&state);
                 app_handle.exit(0);
             });
         })

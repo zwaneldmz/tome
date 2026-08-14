@@ -156,13 +156,13 @@ pub fn read_tail(dir: &Path) -> Vec<serde_json::Value> {
 }
 
 /// Full `logEvent(kind, fields)` equivalent — the entry point other modules
-/// should call once ported (Phase 3's `airgap.rs` for
-/// `logEvent('airgap:blocked', ...)` / `'airgap:unlock'` / `'airgap:relock'`,
-/// the conductor port for `'conductor:tool'` / `'conductor:read'`, the flow
-/// runner port for `'flow-run'`). Builds the record via
+/// should call once ported. `ipc::airgap`'s `AirgapEnv for AppHandle` impl
+/// is the first real caller (`'airgap:blocked'`/`'airgap:unlock'`/
+/// `'airgap:relock'`); the conductor port (`'conductor:tool'`/
+/// `'conductor:read'`) and the flow runner port (`'flow-run'`) are expected
+/// to call this too once they land. Builds the record via
 /// `eventlog::make_event` (defaulting `ts` to now) and hands it to
 /// [`append`].
-#[allow(dead_code)] // no caller within this slice yet — see the module doc comment
 pub fn log_event<K: Into<String>>(
     app: &AppHandle,
     kind: &str,
