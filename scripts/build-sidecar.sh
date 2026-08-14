@@ -12,12 +12,15 @@
 # output has no such suffix, so this script's only real job is: build, then
 # copy-with-a-triple-suffixed-name.
 #
-# NATIVE HOST TARGET ONLY — no cross-compilation. Every real caller today
-# (a CI runner building natively for its own OS/arch, or a developer
-# running `tauri build`/`tauri dev` locally) IS the target the sidecar
-# needs to run on; staging a sidecar for a DIFFERENT target than the one
-# this script runs on is Phase 7 (packaging/release matrix) scope, not
-# this one — see the rewrite plan's phase list.
+# Which triples to stage: `TAURI_ENV_TARGET_TRIPLE` when the caller set it
+# (tauri-action does, and for `--target universal-apple-darwin` it carries
+# BOTH real triples comma-separated — tauri-build's externalBin check runs
+# per-arch, so a universal macOS build needs the sidecar staged for both
+# aarch64-apple-darwin AND x86_64-apple-darwin), otherwise the host triple
+# (native dev builds, the linux-sandbox CI job). Non-host triples are
+# cross-built with `cargo build --target` — the same toolchain component
+# the main build itself needs, so no extra setup is required beyond what a
+# universal build already installs.
 #
 # Safe to run on every OS `cargo build -p tome-shim` compiles for,
 # including macOS, where tome-shim is a real (tiny, `main()`-only) binary
@@ -30,30 +33,42 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-TARGET_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
-if [ -z "$TARGET_TRIPLE" ]; then
+HOST_TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+if [ -z "$HOST_TRIPLE" ]; then
   echo "build-sidecar: could not determine the host target triple from 'rustc -vV'" >&2
   exit 1
 fi
 
-EXT=""
-case "$TARGET_TRIPLE" in
-  *windows*) EXT=".exe" ;;
-esac
-
-echo "build-sidecar: cargo build -p tome-shim --release (host target: $TARGET_TRIPLE)"
-(cd src-tauri && cargo build -p tome-shim --release)
-
-SRC="src-tauri/target/release/tome-shim${EXT}"
+TRIPLES="${TAURI_ENV_TARGET_TRIPLE:-$HOST_TRIPLE}"
 OUT_DIR="src-tauri/binaries"
-DEST="${OUT_DIR}/tome-shim-${TARGET_TRIPLE}${EXT}"
-
-if [ ! -f "$SRC" ]; then
-  echo "build-sidecar: expected build output missing at $SRC" >&2
-  exit 1
-fi
-
 mkdir -p "$OUT_DIR"
-cp "$SRC" "$DEST"
-chmod +x "$DEST"
-echo "build-sidecar: staged $DEST"
+
+# Comma-separated: tauri-action passes 'aarch64-apple-darwin,x86_64-apple-darwin'
+# for a universal build.
+IFS=',' read -ra WANTED <<< "$TRIPLES"
+for TARGET_TRIPLE in "${WANTED[@]}"; do
+  EXT=""
+  case "$TARGET_TRIPLE" in
+    *windows*) EXT=".exe" ;;
+  esac
+
+  if [ "$TARGET_TRIPLE" = "$HOST_TRIPLE" ]; then
+    echo "build-sidecar: cargo build -p tome-shim --release (host target: $TARGET_TRIPLE)"
+    (cd src-tauri && cargo build -p tome-shim --release)
+    SRC="src-tauri/target/release/tome-shim${EXT}"
+  else
+    echo "build-sidecar: cargo build -p tome-shim --release --target $TARGET_TRIPLE (cross)"
+    (cd src-tauri && cargo build -p tome-shim --release --target "$TARGET_TRIPLE")
+    SRC="src-tauri/target/${TARGET_TRIPLE}/release/tome-shim${EXT}"
+  fi
+
+  DEST="${OUT_DIR}/tome-shim-${TARGET_TRIPLE}${EXT}"
+  if [ ! -f "$SRC" ]; then
+    echo "build-sidecar: expected build output missing at $SRC" >&2
+    exit 1
+  fi
+
+  cp "$SRC" "$DEST"
+  chmod +x "$DEST"
+  echo "build-sidecar: staged $DEST"
+done
