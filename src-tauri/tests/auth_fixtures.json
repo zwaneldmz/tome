@@ -1,0 +1,100 @@
+{
+  "scrypt": [
+    {
+      "pass": "hunter2",
+      "salt": "0011223344556677889aabbccddeeff0",
+      "hash": "61ae9b793949c256d6c51ce683260a8d0941ebf6680927d52cc9acefe22f9ec2",
+      "N": 16384,
+      "r": 8,
+      "p": 1,
+      "dklen": 32
+    },
+    {
+      "pass": "",
+      "salt": "abcdef0123456789abcdef0123456789",
+      "hash": "dd023092021d635b52dbdcecf5a27542bee029065dadc0d96e0aefa31abebbd6",
+      "N": 16384,
+      "r": 8,
+      "p": 1,
+      "dklen": 32
+    },
+    {
+      "pass": "p@ss wörd🔐",
+      "salt": "00000000000000000000000000000000",
+      "hash": "62763d42074b62a9ea63bea89f3b38b16faab82149303ff69af373a5c92421da",
+      "N": 16384,
+      "r": 8,
+      "p": 1,
+      "dklen": 32
+    }
+  ],
+  "totp": [
+    {
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "at_ms": 0,
+      "code": "755224"
+    },
+    {
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "at_ms": 59000,
+      "code": "287082"
+    },
+    {
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "at_ms": 1111111109000,
+      "code": "081804"
+    },
+    {
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "at_ms": 1234567890000,
+      "code": "005924"
+    },
+    {
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "at_ms": 2000000000000,
+      "code": "279037"
+    },
+    {
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "at_ms": 0,
+      "code": "755224"
+    },
+    {
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "at_ms": 59000,
+      "code": "287082"
+    },
+    {
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "at_ms": 1111111109000,
+      "code": "081804"
+    },
+    {
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "at_ms": 1234567890000,
+      "code": "005924"
+    },
+    {
+      "secret": "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+      "at_ms": 2000000000000,
+      "code": "279037"
+    }
+  ],
+  "b32": [
+    {
+      "hex": "00",
+      "b32": "AA",
+      "decoded_hex": "00"
+    },
+    {
+      "hex": "48656c6c6f",
+      "b32": "JBSWY3DP",
+      "decoded_hex": "48656c6c6f"
+    },
+    {
+      "hex": "0011223344556677889aabbccddeeff0",
+      "b32": "AAISEM2EKVTHPCE2VO6M3XXP6A",
+      "decoded_hex": "0011223344556677889aabbccddeeff0"
+    }
+  ]
+}

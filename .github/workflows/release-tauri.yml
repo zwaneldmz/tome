@@ -1,0 +1,166 @@
+name: release-tauri
+
+# Tag-triggered Tauri release build — the successor to release.yml's
+# Electron pipeline for the Rust+Tauri rewrite. Produces per-OS bundles
+# (macOS .dmg/.app, Linux .deb/.AppImage/.rpm), a SHA256SUMS manifest,
+# and a GitHub build-provenance attestation for every tagged release.
+#
+# Credential gating mirrors release.yml's own pattern: macOS signing and
+# notarization no-op without the Apple secrets, so this workflow is safe
+# to run before those exist — it just produces unsigned artifacts. The
+# Linux jobs need no credentials at all.
+#
+# Matrix note: macOS builds universal (arm64+x64 in one run, via
+# `--target universal-apple-darwin`); Linux builds x86_64. Linux aarch64
+# is a follow-up (needs either an arm64 runner or a cross toolchain).
+#
+# Secrets this workflow reads (all optional):
+#   TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD —
+#     updater artifact signing (only relevant once the updater plugin
+#     lands; harmless absence today).
+#   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD — Developer ID .p12,
+#     base64 (same content release.yml's CSC_LINK carries).
+#   APPLE_SIGNING_IDENTITY — e.g. "Developer ID Application: Name (TEAMID)".
+#   APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER — App Store
+#     Connect API key for notarization (same as release.yml's).
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            targets: universal-apple-darwin
+          - os: ubuntu-22.04
+            targets: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bubblewrap \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            build-essential \
+            curl \
+            wget \
+            file
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # The renderer bundle only — tauri-apps/tauri-action runs
+      # beforeBuildCommand itself, which is `npm run build:renderer &&
+      # bash scripts/build-sidecar.sh`; installing deps is all this step
+      # needs to guarantee.
+      - name: Install renderer dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Import Developer ID certificate (macOS, no-op without secrets)
+        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE_PRESENT == 'true'
+        env:
+          APPLE_CERTIFICATE_PRESENT: ${{ secrets.APPLE_CERTIFICATE != '' }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/release-signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 900 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          CERT_PATH="$RUNNER_TEMP/dev-id.p12"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          security default-keychain -s "$KEYCHAIN"
+          rm -f "$CERT_PATH"
+
+      - name: Build Tauri bundles
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Tome ${{ github.ref_name }}'
+          releaseBody: 'See the assets below. Unsigned builds are expected until Apple credentials are configured.'
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.targets }}
+
+      # tauri-action uploads the bundles it knows about to the draft
+      # release directly. The checksum manifest below is generated from
+      # the local bundle output and uploaded alongside, mirroring
+      # release.yml's SHA256SUMS.
+      - name: Generate SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUNDLE_DIR="src-tauri/target/${{ matrix.targets }}/release/bundle"
+          if [ ! -d "$BUNDLE_DIR" ]; then
+            BUNDLE_DIR="src-tauri/target/release/bundle"
+          fi
+          cd "$BUNDLE_DIR"
+          find . -type f \( -name '*.dmg' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.app.tar.gz' \) -print0 |
+            sort -z |
+            xargs -0 shasum -a 256 > "$GITHUB_WORKSPACE/SHA256SUMS-${{ matrix.os }}"
+          cat "$GITHUB_WORKSPACE/SHA256SUMS-${{ matrix.os }}"
+
+      - name: Upload SHA256SUMS
+        uses: actions/upload-artifact@v4
+        with:
+          name: sha256sums-${{ matrix.os }}
+          path: SHA256SUMS-${{ matrix.os }}
+          if-no-files-found: ignore
+
+  attest:
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    steps:
+      - name: Download checksum manifests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sha256sums-*
+          merge-multiple: true
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: 'SHA256SUMS-*'
