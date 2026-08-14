@@ -175,6 +175,90 @@ window.addEventListener('drop', (e) => {
   }
 })
 
+// ---- OS-level drag-drop under Tauri (revived; plan §8) ----
+// tauri.conf.json's dragDropEnabled is TRUE again, so wry installs its
+// native drag-drop handler and OS file drops arrive as tauri://drag-drop
+// events (already-resolved absolute paths — no File/webUtils two-step)
+// through the tome.dragDrop bridge below.
+//
+// Why that is safe now, when Phase 6 switched the flag OFF over it: the
+// verified hazard (see git history for the full source trace) is that
+// wry's handler claims EVERY native drag session landing on the webview —
+// Enter/Over/Drop/Leave all return true — which on macOS keeps WKWebView's
+// own DragController from ever dispatching dragover/drop/dragend into the
+// DOM. That kills dockview's in-page tab/group drags (they are plain
+// HTML5 drags) and this file's tear-off detection (dragend +
+// dropEffect). The key property that makes the flag affordable now:
+// dockview's disableDnd option is hot-swappable at runtime
+// (dockviewComponent.updateOptions → updateDragAndDropState re-sets every
+// tab's `draggable` and its drag handler), and wry's handler only sees a
+// drag session when some element inside the webview is actually
+// `draggable`. So: whenever a dockview drag starts, we disable DnD — no
+// draggable element remains, the OS drag ends with it, wry's handler
+// never sees a native session to claim, and WKWebView's DragController
+// dispatches the full HTML5 sequence into the DOM exactly as with the
+// flag off. When the drag ends we re-enable, so OS file drops from
+// outside the window work the rest of the time. An OS file drag entering
+// from OUTSIDE can't collide with this: it isn't a dockview drag, so
+// onWillDrag* never fires for it.
+//
+// The DOM 'Files' listeners above stay as the Electron path (Electron
+// never fires tauri://drag-drop, and tome.dragDrop is undefined there —
+// the optional chains below no-op). Under Tauri they stay dormant: wry's
+// handler claims the drop before the DOM sees it.
+//
+// This block does not touch `dropDepth` — a shared counter across two
+// independently-firing sources risks desync (a leave from one side
+// clearing a count the other still holds open); classList add/remove is
+// idempotent, so the two can't fight into a highlight stuck on even if a
+// platform fires both.
+let dndDisabledForDrag = false
+const setDockDnd = (on) => {
+  if (dndDisabledForDrag === !on) return
+  dndDisabledForDrag = !on
+  try {
+    dock.updateOptions({ disableDnd: !on })
+  } catch {
+    // pre-init or mid-teardown — DnD state settles on the next drag
+  }
+}
+// One pair of listeners per document a pane drag can live in — the main
+// document here, and each popout window's document as it opens (a drag
+// that starts in a popout fires dragstart THERE, not here). watchDragDnd
+// is idempotent per document via a marker property.
+export function watchDragDnd(doc) {
+  if (doc.__tomeDndWatched) return
+  doc.__tomeDndWatched = true
+  doc.addEventListener(
+    'dragstart',
+    () => {
+      // Any HTML5 drag starting in a tome document while the bridge
+      // exists is a dockview pane/tab drag (nothing else here sets
+      // draggable) — disarm the native-claim hazard for its duration.
+      if (tome.dragDrop) setDockDnd(false)
+    },
+    true
+  )
+  doc.addEventListener('dragend', () => setDockDnd(true), true)
+  // A drop inside the window also ends the drag without a reliable
+  // dragend on this document when the drag crossed windows.
+  doc.addEventListener('drop', () => setDockDnd(true), true)
+}
+watchDragDnd(document)
+
+tome.dragDrop?.onEnter?.(() => dockEl.classList.add('drop-target'))
+tome.dragDrop?.onLeave?.(() => dockEl.classList.remove('drop-target'))
+tome.dragDrop?.onDrop?.(({ paths } = {}) => {
+  dockEl.classList.remove('drop-target')
+  // Same per-path open-or-toast the DOM handler above uses, and — like that
+  // handler — fired without awaiting each openFile() so multiple dropped
+  // files place the same way a multi-file DOM drop already does.
+  for (const path of paths || []) {
+    if (typeof path === 'string' && path) openFile(path)
+    else toast(`cannot open dropped item: ${path}`)
+  }
+})
+
 // Awaitable so callers closing several panes can do it one at a time — the
 // discard prompt is a modal, and only one modal exists at a time.
 export async function closePanel(panel, doc) {
@@ -253,6 +337,9 @@ function popout(item, at) {
         w.document.body.classList.add('tome-popout')
         // a drag released in this window ends here, not in the main document
         watchDragCleanup(w.document)
+        // and a drag STARTING in this window needs the same native-drag
+        // disarm the main document gets (see watchDragDnd above)
+        watchDragDnd(w.document)
         const untrack = trackThemedDocument(w.document)
         w.addEventListener('pagehide', untrack, { once: true })
       },
