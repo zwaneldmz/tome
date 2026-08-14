@@ -40,10 +40,15 @@ jobs:
       - run: npm run build
 
       # --- Signing (no-ops without secrets.CSC_LINK) --------------------------
+      # `secrets` is not a valid context in a step-level `if:` — GitHub
+      # fails the whole workflow at parse time ("Unrecognized named-value:
+      # 'secrets'") before any job starts, which is exactly how this file
+      # ran on every push for months. Gate on an env copy instead.
       - name: Import Developer ID certificate
         id: import_cert
-        if: ${{ secrets.CSC_LINK != '' }}
+        if: ${{ env.HAS_CSC_LINK == 'true' }}
         env:
+          HAS_CSC_LINK: ${{ secrets.CSC_LINK != '' }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: |
@@ -69,8 +74,9 @@ jobs:
 
       # --- Notarization credentials (no-ops without secrets.APPLE_API_KEY) ----
       - name: Prepare App Store Connect API key
-        if: ${{ secrets.APPLE_API_KEY != '' }}
+        if: ${{ env.HAS_APPLE_API_KEY == 'true' }}
         env:
+          HAS_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY != '' }}
           APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
