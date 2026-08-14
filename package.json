@@ -55,7 +55,10 @@
     "postinstall": "electron-rebuild -f -w node-pty",
     "fix:electron": "sh scripts/fix-electron.sh",
     "icon": "node scripts/gen-icon.mjs",
-    "package": "electron-vite build && electron-builder --mac --dir"
+    "package": "electron-vite build && electron-builder --mac --dir",
+    "dev:renderer": "vite",
+    "build:renderer": "vite build",
+    "tauri": "tauri"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
@@ -77,6 +80,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
+    "@tauri-apps/cli": "^2",
     "electron": "^43.3.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^3.0.0",

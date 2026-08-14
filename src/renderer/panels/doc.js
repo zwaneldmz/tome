@@ -1,6 +1,8 @@
-// Document pane: pdf (Chromium's viewer), images, docx/xlsx (converted in
-// main), binary fallback.
+// Document pane: pdf (Chromium's viewer), images, docx/xlsx (converted
+// renderer-side — see doc-convert.js), binary fallback.
 import { tome } from '../util.js'
+import { convertToHtml, base64ToBytes } from '../doc-convert.js'
+import { isDark } from '../theme.js'
 
 export class DocPanel {
   constructor() {
@@ -24,7 +26,15 @@ export class DocPanel {
       this.element.appendChild(wrap)
     } else if (mode === 'doc') {
       try {
-        const { html } = await tome.doc.read(path)
+        // Same extraction panes.js's openFile used to pick `mode: 'doc'` in
+        // the first place (CONV_EXT — docx/xlsx/xls only), so this is safe
+        // by construction; doc_read_bytes enforces its own extension
+        // allowlist too, so a routing bug here still can't pull bytes for
+        // anything else.
+        const name = path.split('/').pop()
+        const ext = (name.includes('.') ? name.split('.').pop() : '').toLowerCase()
+        const { base64 } = await tome.doc.readBytes(path)
+        const html = await convertToHtml(ext, base64ToBytes(base64), isDark())
         const f = document.createElement('iframe')
         f.className = 'doc-frame'
         f.sandbox = '' // converted content: no scripts, no navigation

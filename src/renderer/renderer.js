@@ -5,6 +5,9 @@
 //   menus.js  topbar menus (workspace, ＋)   tree.js  file tree sidebar
 //   git.js    branch widget + polling        airgap-ui.js  strips + modals
 //   modals.js modal shell   util.js  el()/toast/tome   state.js, regs.js
+// Tauri IPC shim — must evaluate before anything else reads window.tome
+// (util.js does so at module-eval time on the very next line).
+import './tome-ipc.js'
 import { tome, toast } from './util.js'
 import { prefs, wsState, agState, counters } from './state.js'
 import { terms, chats, brains } from './regs.js'
