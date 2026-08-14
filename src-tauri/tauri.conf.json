@@ -25,6 +25,16 @@
     ]
   },
   "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm", "appimage", "dmg"],
+    "publisher": "Lwando Zwane",
+    "copyright": "Copyright © 2026 Lwando Zwane",
+    "homepage": "https://github.com/zwaneldmz/tome",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "category": "DeveloperTool",
+    "shortDescription": "A coding harness: agents, terminals, editors, and chat in one bound workspace.",
+    "longDescription": "Tome runs AI coding agents in sandboxed terminal panes behind a network air gap, so only an allowlisted loopback proxy can reach the network, alongside a full editor, chat conductor, and flow automation DAG in one workspace. Linux enforcement uses bubblewrap network namespaces; macOS uses sandbox-exec (Seatbelt).",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -32,6 +42,19 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/tome-shim"]
+    "externalBin": ["binaries/tome-shim"],
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      },
+      "rpm": {
+        "depends": ["webkit2gtk4.1", "gtk3"]
+      }
+    },
+    "macOS": {
+      "signingIdentity": null,
+      "hardenedRuntime": true,
+      "entitlements": "../build/entitlements.mac.plist"
+    }
   }
 }

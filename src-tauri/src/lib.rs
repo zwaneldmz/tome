@@ -33,6 +33,7 @@ mod lock_gate;
 mod login_env;
 mod lsp;
 mod menu;
+mod migrate;
 mod protocol;
 mod pty;
 mod pty_authority;
@@ -187,6 +188,14 @@ pub fn run() {
         })
         .setup(|app| {
             menu::setup(app)?;
+            // Best-effort first-boot copy of a legacy Electron userData
+            // profile into this build's own app_data_dir. MUST run before
+            // boot_auth_and_airgap below, so a freshly-migrated
+            // airgap-auth.json/airgap-repo-consents.json (if any) is what
+            // that call's own AuthLock::load/load_repo_consents sees on
+            // this same boot rather than the next one. See migrate.rs's
+            // module doc comment.
+            migrate::run(app.handle());
             boot_auth_and_airgap(app.handle());
             Ok(())
         })
