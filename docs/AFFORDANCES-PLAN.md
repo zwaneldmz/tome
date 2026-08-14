@@ -141,23 +141,35 @@ lands, the security UI should *say so*: detect the active rung at spawn
 time and show "network-contained only" vs "fully contained" per pane.
 Honest degradation beats silent weakness.
 
-## 6. Release readiness (GitHub)
+## 6. Release readiness (GitHub) — **DONE 2026-08-14**
 
-6.1 Merge `rewrite/tauri` → `main` once linux-sandbox is green; open the
-PR with the verification evidence (this session's CI runs, the STT test
-output, the SDK-type verification of `fallbacks`).
+6.1 ✅ Merged `rewrite/tauri` → `main` (PR #1, plus the smoke-test
+follow-up PR #2 with the verification evidence in the body — CI runs,
+STT output, SDK-type verification of `fallbacks`).
 
-6.2 Electron removal replay — the revert-for-coexistence branch is green
-and replayable; do it immediately after the merge so `release.yml`
-(Electron) stops governing tags and `release-tauri.yml` takes over.
+6.2 ✅ Electron removal replayed (PR #3): `release.yml` deleted,
+`src/main` + `src/preload` + their 20 vitest suites removed, Electron
+deps dropped, `release-tauri.yml` is the sole tag pipeline. Required two
+fixes found by CI: build.yml's smoke check pointed at electron-vite's
+`out/renderer` (now `dist-web`, minification-safe marker) and a
+fire-and-forget log-write race in the flow runner (flush + poll).
 
-6.3 Tag `v0.1.0` from main → release-tauri.yml builds macOS universal +
-Linux x86_64 bundles, SHA256SUMS, attestation. Unsigned until Apple
-secrets exist — document the verification steps in the release notes.
+6.3 ✅ Tagged `v0.2.0` (v0.1.0 was taken by the Electron-era release).
+release-tauri.yml builds macOS universal + Linux x86_64 bundles,
+SHA256SUMS, attestation. Four real failures found and fixed en route:
+rustup can't install the `universal-apple-darwin` pseudo-target (PR #5),
+the tome-shim sidecar needed staging per-arch (PR #6), tauri-action
+passes the pseudo-target verbatim (PR #7) and the bundler wants a
+lipo'd `tome-shim-universal-apple-darwin` (PR #8), and an unset
+`APPLE_SIGNING_IDENTITY` must fall back to ad-hoc `-` (PR #9). Release
+published unsigned with verification steps in the notes (checksums +
+the Rekor transparency-log entry — `gh attestation verify` does not
+surface this repo's attestations, so the notes walk the Rekor lookup).
 
-6.4 Housekeeping: push `main` to GitLab mirror, close the stale
-`release.yml` phantom-failure noise (fixed this session — secrets-in-if
-parse error), refresh README screenshots (they show the Electron build).
+6.4 ✅ `main` force-synced to the GitLab mirror (via merge PR #4 —
+GitLab rejects force-push on protected main); the `release.yml`
+phantom-failure noise is gone with the file; README screenshot refreshed
+from the released v0.2.0 dmg (PR #10).
 
 ---
 
