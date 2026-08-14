@@ -40,6 +40,13 @@ if [ -z "$HOST_TRIPLE" ]; then
 fi
 
 TRIPLES="${TAURI_ENV_TARGET_TRIPLE:-$HOST_TRIPLE}"
+# tauri-action passes the BUNDLER target through, and for a universal macOS
+# build that is the pseudo-target 'universal-apple-darwin' — not a real
+# rustup triple, and not the comma-separated pair. Expand it to the two
+# real triples tauri-build's per-arch externalBin check will look for.
+if [ "$TRIPLES" = "universal-apple-darwin" ]; then
+  TRIPLES="aarch64-apple-darwin,x86_64-apple-darwin"
+fi
 OUT_DIR="src-tauri/binaries"
 mkdir -p "$OUT_DIR"
 
