@@ -1,6 +1,6 @@
 mod agent_env;
 mod agent_spawn;
-mod airgap;
+pub mod airgap;
 mod authlock;
 mod brain;
 mod chat;
