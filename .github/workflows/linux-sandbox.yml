@@ -57,6 +57,27 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
+      - name: Allow unprivileged user namespaces on this runner
+        # Ubuntu 24.04 (ubuntu-latest) ships AppArmor's userns restriction
+        # (kernel.apparmor_restrict_unprivileged_userns=1) by default: an
+        # unconfined process may not create a user namespace, which bwrap
+        # --unshare-user needs. That makes the stock runner the WRONG
+        # environment for this proof as-is — not because bwrap is broken
+        # there, but because the restriction is exactly what a hardened
+        # production desktop could also have on, and this job exists to
+        # prove the sandbox works for the common case. The common case is
+        # still "userns allowed" (Ubuntu 22.04/23.x, Debian, Fedora,
+        # Arch, and any 24.04 machine that installed a bwrap AppArmor
+        # profile or relaxed the knob), so the job relaxes the knob for
+        # its own run and says so loudly — the alternative (shipping a
+        # setuid bwrap or an AppArmor profile) is a packaging decision
+        # this repo has not made yet. Self-unshare rung-2 (tome-shim
+        # --self-unshare) needs the same userns, so this one sysctl
+        # covers both rungs.
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sysctl kernel.apparmor_restrict_unprivileged_userns
+
       - name: Confirm bubblewrap actually works on this runner
         # THE DESIGN's own risk callout: bwrap needs either a setuid-root
         # helper or working unprivileged user namespaces, and some
