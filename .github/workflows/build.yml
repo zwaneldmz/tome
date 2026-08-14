@@ -18,8 +18,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       # npm audit's own exit code has no concept of a reviewed exception, so
       # scripts/audit-gate.mjs (not npm audit) is the pass/fail authority for
       # both steps below — see reviews/validation/audit-exceptions.json and
@@ -36,11 +34,15 @@ jobs:
         run: npm run build
       # Renderer smoke check: the bundle built and every module import
       # resolved into it — a broken import fails at build, not at runtime.
+      # Vite emits to dist-web/ (tauri.conf.json's frontendDist), not the
+      # old electron-vite out/renderer tree.
       - name: Renderer smoke check
         run: |
-          test -f out/renderer/index.html
-          for f in out/renderer/assets/*.js; do
+          test -f dist-web/index.html
+          for f in dist-web/assets/*.js; do
             node --check "$f" || { echo "renderer bundle failed parse: $f"; exit 1; }
           done
-          grep -q 'ChatPanel' out/renderer/assets/*.js \
+          # 'chat-mic' is a stable string from the chat panel's template —
+          # class names like ChatPanel don't survive minification.
+          grep -q 'chat-mic' dist-web/assets/*.js \
             && echo "renderer smoke check OK"

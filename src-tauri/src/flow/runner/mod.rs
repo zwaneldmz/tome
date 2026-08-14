@@ -700,6 +700,12 @@ async fn write_to_log(log: &Arc<tokio::sync::Mutex<Option<tokio::fs::File>>>, by
     let mut guard = log.lock().await;
     if let Some(f) = guard.as_mut() {
         let _ = f.write_all(bytes).await;
+        // Flush so a reader that opens the log the moment the run settles
+        // (the runner's own tests do exactly this) sees the failure line —
+        // without it the write can still be in tokio's buffer when the
+        // status flip wakes the reader, which is a lost race on a loaded
+        // CI runner.
+        let _ = f.flush().await;
     }
 }
 
