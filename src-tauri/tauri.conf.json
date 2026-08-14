@@ -6,7 +6,7 @@
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist-web",
     "beforeDevCommand": "npm run dev:renderer",
-    "beforeBuildCommand": "npm run build:renderer"
+    "beforeBuildCommand": "npm run build:renderer && bash scripts/build-sidecar.sh"
   },
   "app": {
     "withGlobalTauri": true,
@@ -30,6 +30,7 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "externalBin": ["binaries/tome-shim"]
   }
 }

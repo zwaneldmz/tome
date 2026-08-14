@@ -28,6 +28,15 @@
 //! gapped pane's egress is no longer merely logged-and-ignored — it is
 //! enforced.
 //!
+//! **Phase 4, slice L3 addendum**: the paragraph above described Phase 3's
+//! landing, when a gapped pane on any OS other than macOS was still
+//! refused outright (real Linux enforcement didn't exist yet). This slice
+//! REPLACES that fail-closed stub with the real thing: `airgap::linux`'s
+//! fallback ladder (bwrap, then `tome-shim` self-unsharing, then an
+//! actionable refusal — never a silent unenforced spawn) now backs the
+//! Linux branch the exact same way `sandbox-exec` backs macOS's. See "Fail-
+//! closed rules this file enforces" below and [`resolve_gapped_spawn`].
+//!
 //! ## The unified spawn path, and why it now covers agents too
 //!
 //! A single code path spawns EVERY pane — agent or plain terminal, gapped
@@ -49,14 +58,20 @@
 //!   "an unsandboxed shell with the user's full privileges and open
 //!   network access" (`src/renderer/lock.js`'s own re-auth-prompt copy)
 //!   regardless of what's running inside it. See [`evaluate_reauth`].
-//! - **A gapped pane on any OS other than macOS is refused outright, not
-//!   silently spawned unenforced.** Real Linux sandbox enforcement
-//!   (bubblewrap + `tome-shim`) is Phase 4 — see [`resolve_gapped_spawn`].
-//!   This is the exact TOME-001 hole (`sandbox = null` off-darwin, proxy
-//!   env vars set but nothing enforcing them) this whole rewrite exists to
-//!   close; refusing is strictly safer than the Electron original's
-//!   silent full-open egress. Terminal panes still work fine ungapped, or
-//!   gapped on macOS — only the gapped+non-macOS combination refuses.
+//! - **A gapped pane is only ever spawned behind a REAL enforcement
+//!   mechanism — never silently unenforced.** macOS gets `sandbox-exec` +
+//!   the seatbelt profile (Phase 3). Linux gets `airgap::linux`'s fallback
+//!   ladder (Phase 4, this slice): bubblewrap when it's on `$PATH`,
+//!   otherwise `tome-shim` self-unsharing a fresh user+network namespace,
+//!   otherwise an actionable refusal — never a silent degrade to open
+//!   egress. Any OTHER OS (a build target this app doesn't actually ship
+//!   for — the rewrite plan's locked decisions name exactly macOS + Linux)
+//!   also refuses outright. See [`resolve_gapped_spawn`] and
+//!   [`build_linux_wrap_argv`]. This whole three-way rule is the exact
+//!   TOME-001 hole (`sandbox = null` off-darwin in the Electron original,
+//!   proxy env vars set but nothing enforcing them) this rewrite exists to
+//!   close — Linux enforcement landing here is what finally makes the air
+//!   gap real on both shipping targets, not just macOS.
 //! - **A pane's proxy is created BEFORE the process spawns, and torn down
 //!   if the spawn then fails** — mirrors `createPty`'s own
 //!   `catch (err) { airgap.closePane(id); throw err }": a proxy that
@@ -64,7 +79,7 @@
 //!   listener.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use portable_pty::{CommandBuilder, PtySize};
 use serde::Deserialize;
@@ -104,13 +119,46 @@ pub struct PtyCreateOpts {
     pub auth: Option<Value>,
 }
 
-/// The macOS `sandbox-exec` wrap around a gapped pane's command line —
-/// `spawnArgs = [...sandbox.args, spawnCmd, ...spawnArgs]; spawnCmd =
-/// sandbox.cmd` in the JS original. Built by [`resolve_gapped_spawn`],
+/// How a gapped pane's command line gets wrapped, once its `PaneProxy` is
+/// already up — the two shapes [`build_pty_command`] knows how to splice
+/// in. Built by [`resolve_gapped_spawn`]'s two enforced branches
+/// ([`GappedSpawnDecision::Sandbox`]/[`GappedSpawnDecision::Linux`]),
 /// consumed by [`build_pty_command`].
-struct SandboxWrap {
-    cmd: String,
-    args: Vec<String>,
+enum SandboxWrap {
+    /// macOS: `sandbox-exec -p <profile> <cmd> <args...>` — a simple
+    /// PREFIX. `spawnArgs = [...sandbox.args, spawnCmd, ...spawnArgs];
+    /// spawnCmd = sandbox.cmd` in the JS original: the plain login-shell
+    /// invocation (`build_pty_command`'s own [`login_shell_argv`]) is
+    /// appended after `args`, and `cmd` becomes the new spawn target.
+    Prefix { cmd: String, args: Vec<String> },
+    /// Linux: the ENTIRE argv, already fully assembled by
+    /// `airgap::linux::build_bwrap_argv`/`build_self_unshare_argv` (argv[0]
+    /// is `bwrap` or the resolved `tome-shim` path; the trailing element is
+    /// this same pane's [`login_shell_argv`], threaded in as
+    /// `GappedSpawnSpec::inner_argv` — see [`build_linux_wrap_argv`]).
+    /// Unlike `Prefix`, there is nothing left to append: bwrap's/
+    /// `tome-shim`'s own calling convention already embeds the inner
+    /// command at the end, so `build_pty_command` just splits this
+    /// straight into `argv[0]`/`argv[1..]` and uses it verbatim.
+    Full { argv: Vec<String> },
+}
+
+/// Which real OS `pty_create` is actually running on — a plain enum rather
+/// than a loose `bool`/`bool` pair specifically so [`resolve_gapped_spawn`]
+/// cannot be called with the nonsensical "both true" state two independent
+/// booleans would allow. The one real call site builds this from
+/// `cfg!(target_os = ...)`; `#[cfg(test)]` builds it directly to exercise
+/// every branch on whichever host this crate's own tests happen to run on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HostOs {
+    MacOs,
+    Linux,
+    /// A build target this app doesn't actually ship for (the rewrite
+    /// plan's locked decisions name exactly macOS + Linux) — kept as a
+    /// real, reachable variant rather than a `panic!`/`unreachable!` so
+    /// [`resolve_gapped_spawn`] stays a total function no possible host
+    /// triple can crash.
+    Other,
 }
 
 /// What `pty_create` does for a gapped pane, once its `PaneProxy` is
@@ -125,26 +173,205 @@ enum GappedSpawnDecision {
     /// any host; the literal and the const are byte-identical on the one
     /// OS where either is ever actually used).
     Sandbox { cmd: &'static str, args: Vec<String> },
-    /// Any OS other than macOS: bubblewrap/`tome-shim` enforcement is
-    /// Phase 4 — refuse rather than spawn a gapped pane with nothing
-    /// actually enforcing its proxy env vars (the exact TOME-001 hole this
-    /// rewrite exists to close).
+    /// Linux: `airgap::linux`'s fallback-ladder verdict for THIS host —
+    /// `Bwrap`/`SelfUnshare` (real enforcement, argv still to be built —
+    /// see [`build_linux_wrap_argv`]) or `Refuse { reason }` (bwrap absent
+    /// AND no usable userns fallback; an actionable message, never a
+    /// silent unenforced spawn).
+    Linux(airgap::linux::SandboxStrategy),
+    /// Any OS other than macOS or Linux — refuse rather than spawn a
+    /// gapped pane with nothing actually enforcing its proxy env vars (the
+    /// exact TOME-001 hole this rewrite exists to close). Distinct from
+    /// `Linux`'s own `Refuse` variant only in WHICH refusal message an
+    /// integrator shows; both are fail-closed by construction.
     RefuseUnsupportedOs,
 }
 
 /// Pure decision core behind the gapped-pane fail-closed rule (see this
-/// module's doc comment). `is_macos` is `cfg!(target_os = "macos")` at the
-/// one real call site; parameterized here so `#[cfg(test)]` can exercise
-/// the refusal branch even when this crate's own test suite happens to run
-/// ON macOS.
-fn resolve_gapped_spawn(is_macos: bool, seatbelt_profile: String) -> GappedSpawnDecision {
-    if is_macos {
-        GappedSpawnDecision::Sandbox {
+/// module's doc comment). `host_os`/`linux_strategy` are parameters (not
+/// computed inside this function) so `#[cfg(test)]` can exercise every
+/// branch — including Linux's three fallback-ladder outcomes — on
+/// whichever host this crate's own tests happen to run on: the ONE real
+/// call site (`pty_create`) builds `host_os` from `cfg!(target_os = ...)`
+/// and `linux_strategy` from [`current_linux_sandbox_strategy`] (the
+/// `#[cfg(target_os = "linux")]`-gated real-environment probe, or an inert
+/// placeholder on every other host — see that function's own doc comment
+/// for why passing a placeholder here is always safe: this function only
+/// ever reads `linux_strategy` inside the `HostOs::Linux` arm, which is
+/// only ever reached when the app is ACTUALLY running on Linux).
+///
+/// Linux's own fallback-ladder DECISION (bwrap vs. self-unshare vs.
+/// refuse) is not re-implemented here — `airgap::linux::decide_sandbox_
+/// strategy`/`probe_sandbox_strategy` already own that, fully tested in
+/// their own module. This function's job is narrower: given the verdict,
+/// decide what `pty_create` should DO with it, on par with the macOS
+/// branch's own `Sandbox { cmd, args }`.
+fn resolve_gapped_spawn(
+    host_os: HostOs,
+    seatbelt_profile: String,
+    linux_strategy: airgap::linux::SandboxStrategy,
+) -> GappedSpawnDecision {
+    match host_os {
+        HostOs::MacOs => GappedSpawnDecision::Sandbox {
             cmd: "/usr/bin/sandbox-exec",
             args: vec!["-p".to_string(), seatbelt_profile],
-        }
+        },
+        HostOs::Linux => GappedSpawnDecision::Linux(linux_strategy),
+        HostOs::Other => GappedSpawnDecision::RefuseUnsupportedOs,
+    }
+}
+
+/// The real fallback-ladder verdict for THIS host: `airgap::linux::
+/// probe_sandbox_strategy()`'s real `$PATH` scan + `/proc/sys/...` reads on
+/// Linux. See the module doc comment on [`resolve_gapped_spawn`] for why a
+/// tiny wrapper exists here rather than calling `probe_sandbox_strategy()`
+/// directly at the one call site: it keeps this file's OWN `#[cfg(target_os
+/// = "linux")]` split to exactly one spot instead of threading a `#[cfg]`
+/// through `pty_create`'s body.
+///
+/// Verification boundary (same honest caveat `airgap::linux`'s own module
+/// doc comment states, worth restating at this integration's real call
+/// site): this crate's native `cargo check`/`cargo test` gates run on
+/// macOS and therefore never type-check this `#[cfg(target_os = "linux")]`
+/// arm at all. It compiles cross-checked (`cargo check -p tome-shim
+/// --target x86_64-unknown-linux-gnu` proves the SIBLING crate's Linux ABI
+/// usage; THIS call — a plain, dependency-free function call into
+/// `airgap::linux`, itself already cross-check-covered by that same
+/// sibling-crate boundary's absence... see note below) but has never
+/// actually run on Linux. Concretely: **this specific line is not
+/// re-verified by any of this slice's own local gates** — the whole `tome`
+/// package (not just `tome-shim`) is never cross-checked for
+/// `x86_64-unknown-linux-gnu` by this task's gate list, only natively
+/// checked on macOS (where this arm is `#[cfg]`d away entirely) — so the
+/// new `.github/workflows/linux-sandbox.yml` job's own `cargo build
+/// --workspace` on a real ubuntu runner is the FIRST time this line is
+/// even type-checked, and its `#[ignore]`d integration tests are the first
+/// time it actually runs. Never claim this "works" from this repo's own
+/// local state — only that it compiles for Linux and is CI-gated.
+#[cfg(target_os = "linux")]
+fn current_linux_sandbox_strategy() -> airgap::linux::SandboxStrategy {
+    airgap::linux::probe_sandbox_strategy()
+}
+
+/// Inert placeholder for every host that isn't Linux — [`resolve_gapped_spawn`]
+/// only ever reads this parameter inside its `HostOs::Linux` arm, which
+/// `pty_create`'s one real call site only ever reaches when
+/// `cfg!(target_os = "linux")` is actually true. An empty reason string
+/// (rather than, say, `airgap::linux::INSTALL_BUBBLEWRAP_HINT`) makes that
+/// "never actually read" property visible at a glance in any debug output,
+/// instead of printing a plausible-looking message that never applies.
+#[cfg(not(target_os = "linux"))]
+fn current_linux_sandbox_strategy() -> airgap::linux::SandboxStrategy {
+    airgap::linux::SandboxStrategy::Refuse { reason: String::new() }
+}
+
+/// Builds the bwrap/self-unshare argv for whichever non-refusing rung
+/// `strategy` names, from an already-fully-populated `spec`. Pure — no
+/// syscalls, no I/O, just delegating to `airgap::linux`'s own already-
+/// tested pure builders — so this stays `#[cfg(test)]`-able on every host,
+/// same as everything else in this file's gapped-spawn decision layer.
+///
+/// Total, not a `panic!`/`unreachable!`, even though `pty_create`'s one
+/// real call site only ever reaches this AFTER already handling
+/// `SandboxStrategy::Refuse` itself (see that function's body): a
+/// `Refuse` input here still returns its `reason` as an `Err` rather than
+/// crashing, so this function can never be made to panic by a future call
+/// site that forgets that precondition.
+fn build_linux_wrap_argv(
+    strategy: &airgap::linux::SandboxStrategy,
+    spec: &airgap::linux::GappedSpawnSpec,
+) -> Result<Vec<String>, String> {
+    match strategy {
+        airgap::linux::SandboxStrategy::Bwrap => Ok(airgap::linux::build_bwrap_argv(spec)),
+        airgap::linux::SandboxStrategy::SelfUnshare => Ok(airgap::linux::build_self_unshare_argv(spec)),
+        airgap::linux::SandboxStrategy::Refuse { reason } => Err(reason.clone()),
+    }
+}
+
+/// The bare login-shell invocation every pane's command line embeds
+/// somewhere — `[shell, "-l"]` for a plain terminal, `[shell, "-l", "-c",
+/// cmd]` for an agent. ONE shared builder for every wrap shape
+/// [`build_pty_command`] assembles: `SandboxWrap::None`/`Prefix` splice
+/// this in directly, and Linux's `SandboxWrap::Full` (built earlier, in
+/// `pty_create`'s gapped-spawn setup, before the sandbox is even chosen)
+/// uses this SAME vector as `airgap::linux::GappedSpawnSpec::inner_argv` —
+/// so a gapped Linux pane's agent line is never a second,
+/// independently-written copy of this "-l"/"-c" shape that could drift
+/// from the ungapped/macOS one.
+///
+/// Uses the harvested login shell (`login_env::login_env().await.shell`)
+/// at every real call site, NOT a hardcoded `zsh` — THE DESIGN's own
+/// example line (`... -- zsh -l -c '<agent>'`) is illustrative, not a
+/// literal requirement to hardcode: this codebase already generalizes "the
+/// login shell" for exactly this reason (`resolve_shell`'s own doc comment
+/// in `login_env.rs` — zsh is macOS's default, but not every Linux
+/// distro's), and a gapped Linux pane should run the SAME shell an
+/// ungapped one on the same box would, for the same reasons.
+fn login_shell_argv(shell: &str, agent_cmd: Option<&str>) -> Vec<String> {
+    let mut argv = vec![shell.to_string()];
+    match agent_cmd {
+        Some(cmd) => argv.extend(["-l".to_string(), "-c".to_string(), cmd.to_string()]),
+        None => argv.push("-l".to_string()),
+    }
+    argv
+}
+
+/// Resolves the absolute path to the `tome-shim` sidecar this process
+/// should hand to bwrap/self-unshare as the in-sandbox helper binary. Two
+/// branches, matching how this binary actually lands on disk in each case
+/// (`tauri.conf.json`'s `bundle.externalBin` entry + `scripts/
+/// build-sidecar.sh` are the other two pieces of this same contract):
+///
+/// - **Dev** (`tauri::is_dev()`): a plain `cargo build -p tome-shim`
+///   output, landing in the SAME shared workspace target directory as this
+///   very running binary — `target/debug/tome-shim` next to
+///   `target/debug/tome`. This generalizes one step further than the
+///   literal "target/debug" the phase-4 plan names: it reuses whichever
+///   directory [`tauri::utils::platform::current_exe`] is ACTUALLY running
+///   from (via [`shim_path_in`]) rather than hardcoding a profile name, so
+///   a `--release` dev run resolves correctly too. Requires a developer to
+///   have run `cargo build -p tome-shim` at least once — this function
+///   does not build it; see this module's own notes on that gap.
+/// - **Bundled**: Tauri's `externalBin` mechanism copies the sidecar into
+///   the installed app's own binary directory, KEEPING its build-time
+///   target-triple suffix in the filename (`tome-shim-<target-triple>`) —
+///   that suffix is what lets the same naming scheme serve every platform
+///   Tauri could bundle this app for, even though today only Linux ever
+///   actually spawns it.
+///
+/// Uses `tauri::utils::platform::current_exe`/`target_triple` rather than
+/// `std::env::current_exe` directly: Tauri's version additionally
+/// canonicalizes the path and rejects a macOS symlink per its own doc
+/// comment — exactly the hardening a sidecar lookup (a security-relevant
+/// "which binary is about to run inside the sandbox" decision) should
+/// want. No new Cargo dependency: `tauri::utils` is already this crate's
+/// existing `tauri` dependency re-exporting `tauri_utils` (same crate
+/// `tauri::is_dev()`, already used elsewhere in this codebase, comes
+/// from).
+fn resolve_shim_path() -> Result<PathBuf, String> {
+    let exe = tauri::utils::platform::current_exe().map_err(|e| {
+        format!("resolve tome-shim sidecar: could not determine this process's own binary path: {e}")
+    })?;
+    let dir = exe.parent().ok_or_else(|| {
+        "resolve tome-shim sidecar: this process's own binary path has no parent directory".to_string()
+    })?;
+    if tauri::is_dev() {
+        Ok(shim_path_in(dir, None))
     } else {
-        GappedSpawnDecision::RefuseUnsupportedOs
+        let triple = tauri::utils::platform::target_triple().map_err(|e| {
+            format!("resolve tome-shim sidecar: could not determine this platform's target triple: {e}")
+        })?;
+        Ok(shim_path_in(dir, Some(&triple)))
+    }
+}
+
+/// Pure half of [`resolve_shim_path`] — plain path joining, OS-unconditional
+/// and touching neither the filesystem nor any Tauri/platform API, so it
+/// (unlike its caller) carries its own `#[cfg(test)]` coverage.
+fn shim_path_in(dir: &Path, target_triple: Option<&str>) -> PathBuf {
+    match target_triple {
+        Some(triple) => dir.join(format!("tome-shim-{triple}")),
+        None => dir.join("tome-shim"),
     }
 }
 
@@ -184,9 +411,10 @@ fn evaluate_reauth(payload_supplied: bool, verified: bool) -> ReauthOutcome {
 /// plain terminal, gapped or not. `agent_cmd` is
 /// `agent_spawn::build_agent_spawn_from`'s output (`None` for `terminal`,
 /// `Some(cmd)` otherwise); `sandbox`, when present, wraps the whole thing
-/// in `sandbox-exec` exactly like `index.js`'s own `if (sandbox) {
-/// spawnArgs = [...sandbox.args, spawnCmd, ...spawnArgs]; spawnCmd =
-/// sandbox.cmd }`.
+/// per [`SandboxWrap`]'s own two shapes — `Prefix` (macOS: `index.js`'s own
+/// `if (sandbox) { spawnArgs = [...sandbox.args, spawnCmd, ...spawnArgs];
+/// spawnCmd = sandbox.cmd }`) or `Full` (Linux: the whole argv is already
+/// assembled, nothing to splice).
 fn build_pty_command(
     shell: &str,
     agent_cmd: Option<&str>,
@@ -194,18 +422,18 @@ fn build_pty_command(
     env: &[(String, String)],
     sandbox: Option<&SandboxWrap>,
 ) -> CommandBuilder {
-    let mut spawn_cmd = shell.to_string();
-    let mut spawn_args: Vec<String> = match agent_cmd {
-        Some(cmd) => vec!["-l".to_string(), "-c".to_string(), cmd.to_string()],
-        None => vec!["-l".to_string()],
+    let (spawn_cmd, spawn_args): (String, Vec<String>) = match sandbox {
+        None => {
+            let argv = login_shell_argv(shell, agent_cmd);
+            (argv[0].clone(), argv[1..].to_vec())
+        }
+        Some(SandboxWrap::Prefix { cmd, args }) => {
+            let mut wrapped = args.clone();
+            wrapped.extend(login_shell_argv(shell, agent_cmd));
+            (cmd.clone(), wrapped)
+        }
+        Some(SandboxWrap::Full { argv }) => (argv[0].clone(), argv[1..].to_vec()),
     };
-    if let Some(sb) = sandbox {
-        let mut wrapped = sb.args.clone();
-        wrapped.push(spawn_cmd);
-        wrapped.extend(spawn_args);
-        spawn_args = wrapped;
-        spawn_cmd = sb.cmd.clone();
-    }
 
     let mut cmd = CommandBuilder::new(&spawn_cmd);
     for a in &spawn_args {
@@ -237,7 +465,9 @@ fn build_pty_command(
 ///    own order.
 /// 4. Resolve the spawn cwd against the open workspace roots.
 /// 5. If gapped: `resolve_gapped_spawn` — macOS gets a real `PaneProxy` +
-///    `sandbox-exec` wrap; anything else refuses outright, fail-closed.
+///    `sandbox-exec` wrap; Linux gets a real `PaneProxy` (now ALSO bound
+///    to a unix socket — the loopback bridge) + a bwrap/self-unshare wrap;
+///    anything else refuses outright, fail-closed.
 /// 6. Build the command line + environment (secrets only if agent, proxy
 ///    vars only if gapped) and spawn via `state.pty.spawn_raw` — the
 ///    primitive `spawn_terminal` is itself built on, per that function's
@@ -265,6 +495,16 @@ pub async fn pty_create(
     if !is_agent && opts.kind != "terminal" {
         return Ok(json!({}));
     }
+    // Pure, allocation-only, no I/O — moved ahead of the reauth/cwd/
+    // gapped-setup steps below (its ORIGINAL position, right before
+    // `build_pty_command`) so the Linux gapped-spawn branch can fold it
+    // straight into `GappedSpawnSpec::inner_argv` without a second,
+    // independently-written resolution later. Safe to compute even on the
+    // early-return paths above/below it — unlike `login_env::login_env()`
+    // (a cached, but first-call-EXPENSIVE shell-out, deliberately NOT
+    // moved for exactly that reason — see the gapped Linux branch below),
+    // this is a plain allowlist lookup with no cost worth guarding.
+    let agent_cmd = agent_spawn::build_agent_spawn_from(&agents, &opts.kind, opts.model.as_deref());
 
     let airgap_default = {
         let default_dir = dir.clone();
@@ -332,16 +572,118 @@ pub async fn pty_create(
     .await
     .map_err(|e| e.to_string())?;
 
-    // ---- gapped-pane setup: live proxy + (macOS-only) sandbox wrap, or
+    // ---- gapped-pane setup: live proxy + real OS enforcement, or
     // fail-closed refusal — see this module's doc comment ----
     let mut proxy_port: Option<u16> = None;
     let mut sandbox: Option<SandboxWrap> = None;
     if effective_gapped {
-        match resolve_gapped_spawn(cfg!(target_os = "macos"), airgap::seatbelt::seatbelt_profile(&dir)) {
+        let host_os = if cfg!(target_os = "macos") {
+            HostOs::MacOs
+        } else if cfg!(target_os = "linux") {
+            HostOs::Linux
+        } else {
+            HostOs::Other
+        };
+        match resolve_gapped_spawn(
+            host_os,
+            airgap::seatbelt::seatbelt_profile(&dir),
+            current_linux_sandbox_strategy(),
+        ) {
             GappedSpawnDecision::Sandbox { cmd, args } => {
-                let proxy = create_gapped_pane_proxy(&app, &state, &opts.id).await.map_err(|e| e.to_string())?;
+                let proxy =
+                    create_gapped_pane_proxy(&app, &state, &opts.id, None).await.map_err(|e| e.to_string())?;
                 proxy_port = Some(proxy.port());
-                sandbox = Some(SandboxWrap { cmd: cmd.to_string(), args });
+                sandbox = Some(SandboxWrap::Prefix { cmd: cmd.to_string(), args });
+            }
+            GappedSpawnDecision::Linux(strategy) => {
+                // Rung 3: refuse loudly with an actionable message BEFORE
+                // touching anything — no proxy created, nothing to tear
+                // down. Never a silent unenforced spawn (TOME-001).
+                if let airgap::linux::SandboxStrategy::Refuse { reason } = &strategy {
+                    events::append(
+                        &app,
+                        eventlog::make_event(
+                            "pty:blocked",
+                            vec![
+                                ("paneId", json!(opts.id)),
+                                ("kind", json!(opts.kind)),
+                                ("gapped", json!(true)),
+                                ("reason", json!(reason)),
+                            ],
+                            None,
+                        ),
+                    );
+                    return Err(reason.clone());
+                }
+
+                // Rung 1 (bwrap) or rung 2 (self-unshare): real enforcement.
+                // The loopback bridge's unix socket path — bind-mounted
+                // (bwrap) or reached at its real host path (self-unshare;
+                // no mount namespace to remap it into, see
+                // `airgap::linux`'s module doc comment) — must exist and
+                // its parent dir must already be `0700` BEFORE `PaneProxy`
+                // tries to `UnixListener::bind` it.
+                let sock_path = airgap::linux::pane_socket_path_from_env(&opts.id).ok_or_else(|| {
+                    "gapped pane refused: pane id is not a valid loopback-bridge socket path component".to_string()
+                })?;
+                if let Some(parent) = sock_path.parent() {
+                    airgap::linux::ensure_pane_socket_dir(parent).map_err(|e| e.to_string())?;
+                }
+                let shim_path = resolve_shim_path()?;
+
+                let proxy = create_gapped_pane_proxy(&app, &state, &opts.id, Some(sock_path.clone()))
+                    .await
+                    .map_err(|e| e.to_string())?;
+                proxy_port = Some(proxy.port());
+
+                // Cached (`tokio::sync::OnceCell`) — see `login_env.rs`'s
+                // module doc comment. Calling it here (rather than only at
+                // its original call site further down) does NOT re-pay the
+                // shell-out cost, and does not change WHEN the first-ever
+                // pty:create call pays it either: gapped panes never run
+                // the TOME-001 reauth ceremony above (see
+                // `pty_authority::unrestricted_spawn_needs_reauth`'s own
+                // "gapped spawn never needs reauth" contract, pinned in
+                // this file's own tests), so there is no early-return path
+                // between here and the function's start that this call
+                // could newly delay.
+                let login = login_env::login_env().await;
+                let inner_argv = login_shell_argv(&login.shell, agent_cmd.as_deref());
+
+                let spec = airgap::linux::GappedSpawnSpec {
+                    pane_id: opts.id.clone(),
+                    proxy_port: proxy.port(),
+                    host_socket_path: sock_path,
+                    app_config_dir: dir.clone(),
+                    shim_path,
+                    inner_argv,
+                    // Every `pty:create` call is an interactive pane — a
+                    // headless flow-node spawn path does not exist in this
+                    // tree yet (checked: no `src-tauri/src/flow` module,
+                    // and `ipc::runs::*` are still Phase-5 stubs), so this
+                    // is unconditionally `false` here; the day a flow
+                    // spawn path lands, IT decides this independently, the
+                    // same way `build_bwrap_argv`'s own doc comment
+                    // anticipates.
+                    headless: false,
+                };
+                // `?` here would be provably safe TODAY (the only
+                // `Refuse` case was already handled above, before the
+                // proxy existed, and `build_linux_wrap_argv` has no other
+                // failure mode) — but this module's own doc comment
+                // promises "a pane's proxy is created BEFORE the process
+                // spawns, and torn down if the spawn then fails" as a
+                // standing invariant, not a today-only fact, so this stays
+                // explicit rather than relying on a future reader/refactor
+                // to re-derive why a bare `?` would still be safe here.
+                let argv = match build_linux_wrap_argv(&strategy, &spec) {
+                    Ok(argv) => argv,
+                    Err(reason) => {
+                        close_pane_and_proxy(&app, &state, &opts.id);
+                        return Err(reason);
+                    }
+                };
+                sandbox = Some(SandboxWrap::Full { argv });
             }
             GappedSpawnDecision::RefuseUnsupportedOs => {
                 events::append(
@@ -352,20 +694,18 @@ pub async fn pty_create(
                             ("paneId", json!(opts.id)),
                             ("kind", json!(opts.kind)),
                             ("gapped", json!(true)),
-                            ("reason", json!("linux sandbox lands in phase 4")),
+                            ("reason", json!("gapped panes are only supported on macOS and Linux")),
                         ],
                         None,
                     ),
                 );
                 return Err(
-                    "gapped panes are not yet enforced on this OS (linux sandbox lands in phase 4) — refusing to spawn unenforced"
+                    "gapped panes are only supported on macOS and Linux — refusing to spawn unenforced on this OS"
                         .to_string(),
                 );
             }
         }
     }
-
-    let agent_cmd = agent_spawn::build_agent_spawn_from(&agents, &opts.kind, opts.model.as_deref());
 
     let login = login_env::login_env().await;
     let process_env: HashMap<String, String> = std::env::vars().collect();
@@ -625,25 +965,126 @@ mod tests {
         assert_eq!(get("COLORTERM"), Some("truecolor".to_string()));
     }
 
-    // ================= resolve_gapped_spawn — TOME-001's Linux fail-closed rule ================
+    // ================= resolve_gapped_spawn — TOME-001's three-way OS rule ================
+
+    fn refuse_strategy() -> airgap::linux::SandboxStrategy {
+        airgap::linux::SandboxStrategy::Refuse { reason: "install bubblewrap".to_string() }
+    }
 
     #[test]
-    fn resolve_gapped_spawn_wraps_in_sandbox_exec_on_macos() {
-        match resolve_gapped_spawn(true, "(version 1)".to_string()) {
-            GappedSpawnDecision::Sandbox { cmd, args } => {
-                assert_eq!(cmd, "/usr/bin/sandbox-exec");
-                assert_eq!(args, vec!["-p".to_string(), "(version 1)".to_string()]);
+    fn resolve_gapped_spawn_wraps_in_sandbox_exec_on_macos_regardless_of_linux_strategy() {
+        for linux_strategy in
+            [airgap::linux::SandboxStrategy::Bwrap, airgap::linux::SandboxStrategy::SelfUnshare, refuse_strategy()]
+        {
+            match resolve_gapped_spawn(HostOs::MacOs, "(version 1)".to_string(), linux_strategy) {
+                GappedSpawnDecision::Sandbox { cmd, args } => {
+                    assert_eq!(cmd, "/usr/bin/sandbox-exec");
+                    assert_eq!(args, vec!["-p".to_string(), "(version 1)".to_string()]);
+                }
+                GappedSpawnDecision::Linux(_) => panic!("expected Sandbox on macOS, got Linux(_)"),
+                GappedSpawnDecision::RefuseUnsupportedOs => {
+                    panic!("expected Sandbox on macOS, got RefuseUnsupportedOs")
+                }
             }
-            GappedSpawnDecision::RefuseUnsupportedOs => panic!("expected Sandbox on macOS"),
         }
     }
 
     #[test]
-    fn resolve_gapped_spawn_refuses_on_any_non_macos_target() {
+    fn resolve_gapped_spawn_passes_the_linux_strategy_through_unchanged_on_linux() {
+        for linux_strategy in
+            [airgap::linux::SandboxStrategy::Bwrap, airgap::linux::SandboxStrategy::SelfUnshare, refuse_strategy()]
+        {
+            let decision =
+                resolve_gapped_spawn(HostOs::Linux, "(version 1)".to_string(), linux_strategy.clone());
+            assert!(
+                matches!(decision, GappedSpawnDecision::Linux(ref s) if *s == linux_strategy),
+                "expected Linux({linux_strategy:?}) passthrough"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_gapped_spawn_refuses_on_any_os_other_than_macos_or_linux() {
         assert!(matches!(
-            resolve_gapped_spawn(false, "(version 1)".to_string()),
+            resolve_gapped_spawn(HostOs::Other, "(version 1)".to_string(), refuse_strategy()),
             GappedSpawnDecision::RefuseUnsupportedOs
         ));
+        // Even a real Bwrap/SelfUnshare verdict must not leak through on an
+        // OS this app doesn't ship a Linux sandbox for — HostOs::Other
+        // never reads linux_strategy at all.
+        assert!(matches!(
+            resolve_gapped_spawn(HostOs::Other, "(version 1)".to_string(), airgap::linux::SandboxStrategy::Bwrap),
+            GappedSpawnDecision::RefuseUnsupportedOs
+        ));
+    }
+
+    // ================= build_linux_wrap_argv =================
+
+    fn sample_linux_spec() -> airgap::linux::GappedSpawnSpec {
+        airgap::linux::GappedSpawnSpec {
+            pane_id: "pty-1".to_string(),
+            proxy_port: 54321,
+            host_socket_path: PathBuf::from("/run/user/1000/tome/pane-pty-1.sock"),
+            app_config_dir: PathBuf::from("/home/tester/.config/tome"),
+            shim_path: PathBuf::from("/opt/tome/tome-shim"),
+            inner_argv: vec!["/bin/zsh".to_string(), "-l".to_string(), "-c".to_string(), "claude".to_string()],
+            headless: false,
+        }
+    }
+
+    #[test]
+    fn build_linux_wrap_argv_bwrap_matches_airgap_linux_build_bwrap_argv() {
+        let spec = sample_linux_spec();
+        assert_eq!(
+            build_linux_wrap_argv(&airgap::linux::SandboxStrategy::Bwrap, &spec).unwrap(),
+            airgap::linux::build_bwrap_argv(&spec)
+        );
+    }
+
+    #[test]
+    fn build_linux_wrap_argv_self_unshare_matches_airgap_linux_build_self_unshare_argv() {
+        let spec = sample_linux_spec();
+        assert_eq!(
+            build_linux_wrap_argv(&airgap::linux::SandboxStrategy::SelfUnshare, &spec).unwrap(),
+            airgap::linux::build_self_unshare_argv(&spec)
+        );
+    }
+
+    #[test]
+    fn build_linux_wrap_argv_refuse_returns_the_reason_as_an_error_rather_than_panicking() {
+        let spec = sample_linux_spec();
+        let strategy = airgap::linux::SandboxStrategy::Refuse { reason: "install bubblewrap".to_string() };
+        assert_eq!(build_linux_wrap_argv(&strategy, &spec), Err("install bubblewrap".to_string()));
+    }
+
+    // ================= login_shell_argv =================
+
+    #[test]
+    fn login_shell_argv_is_a_bare_login_shell_with_no_agent_cmd() {
+        assert_eq!(login_shell_argv("/bin/zsh", None), vec!["/bin/zsh".to_string(), "-l".to_string()]);
+    }
+
+    #[test]
+    fn login_shell_argv_runs_the_agent_command_via_dash_c() {
+        assert_eq!(
+            login_shell_argv("/bin/zsh", Some("claude")),
+            vec!["/bin/zsh".to_string(), "-l".to_string(), "-c".to_string(), "claude".to_string()]
+        );
+    }
+
+    // ================= shim_path_in / resolve_shim_path's pure half =================
+
+    #[test]
+    fn shim_path_in_dev_mode_has_no_target_triple_suffix() {
+        assert_eq!(shim_path_in(Path::new("/app/target/debug"), None), PathBuf::from("/app/target/debug/tome-shim"));
+    }
+
+    #[test]
+    fn shim_path_in_bundled_mode_appends_the_target_triple() {
+        assert_eq!(
+            shim_path_in(Path::new("/usr/lib/tome"), Some("x86_64-unknown-linux-gnu")),
+            PathBuf::from("/usr/lib/tome/tome-shim-x86_64-unknown-linux-gnu")
+        );
     }
 
     // ================= build_pty_command =================
@@ -665,7 +1106,10 @@ mod tests {
 
     #[test]
     fn build_pty_command_wraps_the_whole_line_in_sandbox_exec_when_gapped() {
-        let sandbox = SandboxWrap { cmd: "/usr/bin/sandbox-exec".to_string(), args: vec!["-p".to_string(), "PROFILE".to_string()] };
+        let sandbox = SandboxWrap::Prefix {
+            cmd: "/usr/bin/sandbox-exec".to_string(),
+            args: vec!["-p".to_string(), "PROFILE".to_string()],
+        };
         let cmd = build_pty_command("/bin/zsh", Some("claude"), Path::new("/work"), &[], Some(&sandbox));
         let argv: Vec<String> = cmd.get_argv().iter().map(|s| s.to_string_lossy().into_owned()).collect();
         assert_eq!(
@@ -680,6 +1124,28 @@ mod tests {
                 "claude".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn build_pty_command_uses_a_full_linux_argv_verbatim_ignoring_shell_and_agent_cmd() {
+        // The defining structural difference from Prefix: shell/agent_cmd
+        // are NOT consulted at all when sandbox is Full — the whole argv
+        // (already ending in this same pane's login_shell_argv, folded in
+        // earlier via GappedSpawnSpec::inner_argv) is used exactly as
+        // given.
+        let argv = vec![
+            "bwrap".to_string(),
+            "--unshare-user".to_string(),
+            "--unshare-net".to_string(),
+            "--".to_string(),
+            "/opt/tome/tome-shim".to_string(),
+        ];
+        let sandbox = SandboxWrap::Full { argv: argv.clone() };
+        // Deliberately mismatched shell/agent_cmd — must be completely
+        // ignored.
+        let cmd = build_pty_command("/bin/NEVER-USED", Some("also-never-used"), Path::new("/work"), &[], Some(&sandbox));
+        let got: Vec<String> = cmd.get_argv().iter().map(|s| s.to_string_lossy().into_owned()).collect();
+        assert_eq!(got, argv);
     }
 
     #[test]

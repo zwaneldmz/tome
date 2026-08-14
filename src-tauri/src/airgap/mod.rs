@@ -97,6 +97,7 @@
 #![allow(dead_code)]
 
 pub mod allowlist;
+pub mod linux;
 pub mod proxy;
 pub mod seatbelt;
 

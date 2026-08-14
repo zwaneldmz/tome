@@ -27,6 +27,7 @@
 //! the JS original's override path, not a fidelity gap that widens
 //! anything. Flagged in this slice's task report.
 
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -140,12 +141,31 @@ pub(crate) fn push_state_event<E: AirgapEnv>(env: &E, state: &AppState) {
 /// `airgap:state` — mirrors `createPaneProxy`'s own `panes.set(...);
 /// pushState()` on a successful bind.
 ///
+/// `unix_socket_path`: `None` on macOS (`ipc::pty::pty_create`'s only
+/// caller there — seatbelt needs no loopback bridge, so the proxy never
+/// binds a second listener). `Some(path)` on Linux — Phase 4/slice L3's
+/// wiring of the seam `airgap::proxy::PaneProxy::spawn` has carried since
+/// Phase 3 (see that function's own "Linux seam" doc comment): threaded
+/// straight through so `tome-shim`'s in-namespace bridge has a bind-mounted
+/// (bwrap) or directly-reachable (self-unshare — no mount namespace to
+/// remap into, see `airgap::linux`'s module doc comment) unix socket to
+/// shovel bytes to. On a successful bind with a unix path, this also locks
+/// the socket down to `0600` (THE DESIGN's own requirement — see
+/// `airgap::linux::secure_pane_socket_permissions`'s doc comment for why
+/// `PaneProxy::spawn` itself doesn't do this: it has no opinion on Linux's
+/// specific permission requirements, only on binding the socket). The
+/// PARENT directory's own `0700` lockdown
+/// (`airgap::linux::ensure_pane_socket_dir`) is the caller's job, before
+/// this function ever runs — `PaneProxy::spawn`'s `UnixListener::bind`
+/// needs the directory to already exist.
+///
 /// `pub(crate)`: `ipc::pty::pty_create` is the only caller (its own doc
 /// comment covers exactly when this path is taken vs. refused).
 pub(crate) async fn create_gapped_pane_proxy<E: AirgapEnv>(
     env: &E,
     state: &AppState,
     pane_id: &str,
+    unix_socket_path: Option<PathBuf>,
 ) -> std::io::Result<std::sync::Arc<crate::airgap::proxy::PaneProxy>> {
     let initial_allowed = effective_allow_patterns(state);
     let blocked_env = env.clone();
@@ -164,7 +184,16 @@ pub(crate) async fn create_gapped_pane_proxy<E: AirgapEnv>(
         }
     };
 
-    let proxy = crate::airgap::proxy::PaneProxy::spawn(initial_allowed, None, on_blocked).await?;
+    let proxy = crate::airgap::proxy::PaneProxy::spawn(initial_allowed, unix_socket_path, on_blocked).await?;
+    // `#[cfg(unix)]`, not `target_os = "linux"` — matches
+    // `secure_pane_socket_permissions`'s own gate (unix permission bits are
+    // a unix-wide concept). Only ever non-`None` when the caller passed a
+    // unix path in the first place (macOS's own call site never does), so
+    // this is a no-op on every macOS spawn regardless of the `#[cfg]`.
+    #[cfg(unix)]
+    if let Some(path) = proxy.unix_path() {
+        crate::airgap::linux::secure_pane_socket_permissions(path)?;
+    }
     let proxy = std::sync::Arc::new(proxy);
     state.proxies.lock().expect("AppState.proxies lock poisoned").insert(pane_id.to_string(), proxy.clone());
     state.airgap.register_pane(pane_id);
@@ -584,18 +613,39 @@ mod tests {
     #[tokio::test]
     async fn create_gapped_pane_proxy_registers_a_live_proxy_reachable_on_its_reported_port() {
         let env = TestEnv::new();
-        let proxy = create_gapped_pane_proxy(&env, &env.state, "pty-1").await.unwrap();
+        let proxy = create_gapped_pane_proxy(&env, &env.state, "pty-1", None).await.unwrap();
 
         assert_eq!(env.state.airgap.pane_mode("pty-1"), Some(crate::airgap::PaneMode::Providers));
         assert!(env.state.proxies.lock().unwrap().contains_key("pty-1"));
         assert!(tokio::net::TcpStream::connect(("127.0.0.1", proxy.port())).await.is_ok());
         assert!(env.pushes.lock().unwrap().iter().any(|(k, _)| k == "airgap:state"));
+        assert!(proxy.unix_path().is_none(), "no unix path was requested — none should be bound");
+    }
+
+    // Phase 4/slice L3: the Linux loopback-bridge seam — `unix_socket_path`
+    // threaded all the way from this function's own parameter down to a
+    // REAL bound-and-locked-down socket file, the exact wiring
+    // `ipc::pty::pty_create`'s Linux gapped branch depends on.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn create_gapped_pane_proxy_binds_and_locks_down_a_given_unix_socket_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let env = TestEnv::new();
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("pane-pty-1.sock");
+
+        let proxy = create_gapped_pane_proxy(&env, &env.state, "pty-1", Some(sock_path.clone())).await.unwrap();
+
+        assert_eq!(proxy.unix_path(), Some(&sock_path));
+        assert!(sock_path.exists());
+        let mode = std::fs::metadata(&sock_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "the loopback-bridge socket must be locked to 0600, got {mode:o}");
     }
 
     #[tokio::test]
     async fn close_pane_and_proxy_tears_down_the_live_proxy_and_cancels_its_timer() {
         let env = TestEnv::new();
-        let proxy = create_gapped_pane_proxy(&env, &env.state, "pty-1").await.unwrap();
+        let proxy = create_gapped_pane_proxy(&env, &env.state, "pty-1", None).await.unwrap();
         let port = proxy.port();
         drop(proxy); // this fn's own Arc, not AppState.proxies' — the map below still holds one
         schedule_unlock(&env, &env.state, "pty-1", 15); // arms a (long) real timer

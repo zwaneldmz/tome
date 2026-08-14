@@ -1,0 +1,29 @@
+[package]
+name = "tome-shim"
+version = "0.1.0"
+edition = "2021"
+description = "Linux in-sandbox helper: netns loopback bridge + confined exec for gapped agent panes."
+
+# `[lib]` exists ONLY so the main `tome` crate's own test suite can depend
+# on this package (as a `[dev-dependencies]` path dependency — see its own
+# Cargo.toml) and call the REAL `tome_shim::args::parse_args` against the
+# REAL argv `airgap::linux::build_bwrap_argv`/`build_self_unshare_argv`
+# build — a genuine cross-crate contract test, rather than two independently
+# green unit-test suites that each only ever construct/consume their own
+# half of the wire contract (see `args.rs`'s own top doc comment for the
+# drift this closes). The shipped sidecar is still exactly the `[[bin]]`
+# below; `main.rs` itself now just calls into this lib, same as any other
+# lib+bin package in this workspace style.
+[lib]
+name = "tome_shim"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tome-shim"
+path = "src/main.rs"
+
+[dependencies]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { version = "0.29", features = ["net", "sched", "process", "user", "mount", "fs", "socket", "signal"] }
+libc = "0.2"

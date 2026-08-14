@@ -20,3 +20,7 @@ docs/*
 src-tauri/target/
 dist-web/
 src-tauri/gen/
+# Sidecar staging dir scripts/build-sidecar.sh writes into — platform/arch-
+# specific build output (tome-shim-<target-triple>), not source. See that
+# script and tauri.conf.json's bundle.externalBin entry.
+src-tauri/binaries/

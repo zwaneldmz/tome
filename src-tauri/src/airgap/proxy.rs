@@ -55,17 +55,22 @@
 //! still mid-handshake — rather than only ever seeing it once every risky
 //! write has already succeeded.
 //!
-//! ## Linux seam (built now, wired in Phase 4)
+//! ## Linux seam (built in Phase 3, wired in Phase 4/slice L3)
 //!
 //! [`PaneProxy::spawn`] optionally binds a Unix domain socket alongside
 //! the TCP listener, serving the identical proxy logic over both — Phase
-//! 4's `tome-shim` (a fresh network namespace's PID 1) will shovel bytes
-//! from a bind-mounted copy of that socket to a TCP listener bound
-//! *inside* the namespace, since a namespaced process cannot reach the
-//! host's `127.0.0.1:<port>` directly. Nothing here implements the shim;
-//! this file only makes sure the same per-connection handler already
-//! works over `UnixStream` as well as `TcpStream` (see
-//! [`handle_connection`]'s generic bound).
+//! 4's `tome-shim` (a fresh network namespace's PID 1) shovels bytes from
+//! a bind-mounted copy of that socket to a TCP listener bound *inside*
+//! the namespace, since a namespaced process cannot reach the host's
+//! `127.0.0.1:<port>` directly. Nothing here implements the shim itself —
+//! that's `crates/tome-shim`'s own job; this file only makes sure the
+//! same per-connection handler works over `UnixStream` as well as
+//! `TcpStream` (see [`handle_connection`]'s generic bound). The real
+//! caller supplying a `Some(unix_socket_path)` is
+//! `ipc::airgap::create_gapped_pane_proxy`, itself called from
+//! `ipc::pty::pty_create`'s Linux gapped branch — see that function's own
+//! doc comment for the fallback-ladder decision this socket only ever
+//! gets bound for.
 //!
 //! ## Blocked-event signal
 //!

@@ -1,0 +1,91 @@
+name: linux-sandbox
+
+# Phase 4/slice L3 of the Electron -> Rust+Tauri rewrite: the Linux air-gap
+# enforcement (bubblewrap + tome-shim) is written and unit-tested on macOS
+# (this repo's own dev host, which has no network namespaces to exercise
+# it for real) but only ever PROVEN on a real Linux box. This job is that
+# proof — see src-tauri/src/linux_sandbox_integration_tests.rs's own doc
+# comment for exactly what each test in the curl matrix checks and this
+# job's own honest scope limits (bwrap/rung-1 only; rung 2's self-unshare
+# fallback has no integration coverage here yet).
+#
+# Three things happen here that no other job in this repo can do yet:
+# 1. The FIRST real `cargo build`/`cargo test` of the whole src-tauri
+#    workspace for a genuine Linux target (every other Rust gate in this
+#    repo's own local dev loop runs on macOS; only src-tauri/crates/
+#    tome-shim gets a `--target x86_64-unknown-linux-gnu` CROSS-check
+#    there, and that check never touches the main `tome` package at all).
+# 2. Staging the tome-shim sidecar the same way `tauri build` would
+#    (scripts/build-sidecar.sh), proving that script on a clean checkout.
+# 3. Actually running the `#[ignore]`d curl-matrix integration tests —
+#    real bwrap, real netns, real curl.
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main, rewrite/tauri]
+  pull_request:
+
+jobs:
+  linux-sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # bubblewrap: the actual mechanism under test. The rest of this list
+      # is Tauri v2's own documented Ubuntu build prerequisites (needed to
+      # compile the real `tome` binary — webkitgtk/gtk bindings and
+      # friends) plus `procps` for `pgrep`, which
+      # linux_sandbox_integration_tests.rs's orphan-process check shells
+      # out to directly.
+      - name: Install bubblewrap + Tauri Linux build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bubblewrap \
+            procps \
+            curl \
+            wget \
+            file \
+            build-essential \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Confirm bubblewrap actually works on this runner
+        # THE DESIGN's own risk callout: bwrap needs either a setuid-root
+        # helper or working unprivileged user namespaces, and some
+        # container-based CI runners restrict both. Fail loudly and early,
+        # with a clear diagnostic, rather than deep inside a confusing
+        # integration-test failure.
+        run: |
+          bwrap --version
+          bwrap --unshare-user --unshare-net --dev-bind / / -- /bin/echo "bwrap smoke test OK"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: cargo build --workspace (the real Linux compile no other job performs)
+        working-directory: src-tauri
+        run: cargo build --workspace --all-targets
+
+      - name: cargo test --workspace (non-ignored — the same ~500 unit tests this repo's macOS gates already run, now proven on real Linux too)
+        working-directory: src-tauri
+        run: cargo test --workspace
+
+      - name: Stage the tome-shim sidecar (scripts/build-sidecar.sh — the same step tauri build's beforeBuildCommand runs)
+        run: bash scripts/build-sidecar.sh
+
+      - name: Curl matrix — real gapped-pane enforcement (#[ignore]'d integration tests)
+        working-directory: src-tauri
+        env:
+          TOME_SHIM_BIN: ${{ github.workspace }}/src-tauri/target/release/tome-shim
+        run: cargo test --workspace -- --ignored --test-threads=1

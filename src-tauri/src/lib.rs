@@ -9,6 +9,22 @@ mod eventlog;
 mod fs;
 mod git;
 mod ipc;
+// Phase 4/slice L3: the real-bwrap curl-matrix proof — #[ignore]'d #[test]s
+// that actually spawn tome-shim inside a real Linux network namespace. See
+// that file's own doc comment for the full rationale, and
+// .github/workflows/linux-sandbox.yml for the only place these ever run.
+// `cfg(all(test, target_os = "linux"))` — BOTH conditions matter:
+// `target_os = "linux"` means this module is not merely skipped at
+// test-run time on macOS, it is never even parsed/compiled there, so this
+// crate's native `cargo check`/`cargo test` gates can never be broken by
+// anything in it; `test` means it is never pulled into a normal
+// (non-test) build EVEN ON LINUX, which matters because the file uses
+// `tempfile` — a `[dev-dependencies]`-only crate that a plain `cargo
+// build`/`cargo check` of the real shipped binary does not link at all.
+// Omitting the `test` half would make a real Linux release build fail to
+// compile.
+#[cfg(all(test, target_os = "linux"))]
+mod linux_sandbox_integration_tests;
 mod lock_gate;
 mod login_env;
 mod menu;
