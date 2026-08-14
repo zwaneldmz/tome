@@ -10,6 +10,7 @@ index.js
 tome-council-report.pdf
 reviews/
 docs/*
+!docs/AFFORDANCES-PLAN.md
 !docs/how-tome-works.html
 !docs/icon.png
 !docs/screenshot.png
