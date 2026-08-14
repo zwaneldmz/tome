@@ -79,3 +79,17 @@ for TARGET_TRIPLE in "${WANTED[@]}"; do
   chmod +x "$DEST"
   echo "build-sidecar: staged $DEST"
 done
+
+# The BUNDLER looks for the pseudo-target suffix too: a universal build
+# compiles per-arch (tauri-build's check, satisfied above) and then lipos
+# into target/universal-apple-darwin/release and copies
+# binaries/tome-shim-universal-apple-darwin into the .app. lipo the two
+# per-arch sidecars into that name.
+if [ "${TAURI_ENV_TARGET_TRIPLE:-}" = "universal-apple-darwin" ]; then
+  lipo -create \
+    "${OUT_DIR}/tome-shim-aarch64-apple-darwin" \
+    "${OUT_DIR}/tome-shim-x86_64-apple-darwin" \
+    -output "${OUT_DIR}/tome-shim-universal-apple-darwin"
+  chmod +x "${OUT_DIR}/tome-shim-universal-apple-darwin"
+  echo "build-sidecar: staged ${OUT_DIR}/tome-shim-universal-apple-darwin (lipo)"
+fi
