@@ -4,7 +4,10 @@
 //! scope note below). OpenAI wire ports `streamOpenAI` SSE directly;
 //! Anthropic goes through a hand-rolled `/v1/messages` SSE client on
 //! `reqwest` rather than the SDK. Deltas stream via the event bus (see the
-//! transport note below); abort via a `CancellationToken` held per chat id.
+//! transport note below); abort delegates to `conductor::chat::abort_chat`,
+//! which cancels the `CancellationToken` `conductor::Conductor` now holds
+//! per chat id (see the tool-loop note below — this file no longer owns
+//! that registry itself).
 //!
 //! ## Transport: event bus, not a Channel — a deliberate, noted deviation
 //! from this phase's own default
@@ -25,74 +28,56 @@
 //! insufficient (it hasn't — chat deltas are far lower-rate than pty output:
 //! word-at-a-time text, not a `cat` of a large file).
 //!
-//! ## Scope boundary: no multi-turn tool loop here (phase 5b's job)
+//! ## Tool loop: delegated to `conductor::chat::run_chat` (phase 5b)
 //!
 //! `index.js`'s real `chat:send` handler is a thin wrapper that resolves
 //! the provider, builds `system` from `conductor.SYSTEM` (+ brain vault
 //! context when `brainWs` is given), and hands off to `conductor.runChat`
 //! — an 8-turn loop that streams text, executes tool calls against live
 //! ptys (`chat:tool` events), and re-sends the transcript with tool
-//! results appended. `conductor.js` is a phase 5b module (it depends on
-//! chat, per the rewrite plan's explicit phase split) and does not exist
-//! in this tree yet — no `src-tauri/src/conductor.rs`. This file therefore
-//! implements the layer chat-client.js itself actually owns: ONE
-//! `chat::sse::stream_chat` call per `chat:send`, streaming `chat:delta`
-//! text as it arrives and firing exactly one `chat:done` at the end.
-//! Concretely, relative to the full JS behavior:
-//! - `system` is `None` — `conductor.SYSTEM` doesn't exist yet, and
-//!   `brainWs`-driven vault context (`brain.contextFor`) belongs to the
-//!   sibling `brain` slice, which this file must not depend on (each
-//!   phase-5a leaf subsystem is independently ported). `brain_ws` is still
-//!   accepted as a parameter — so a real renderer payload deserializes
-//!   cleanly and the wire contract stays documented — but is otherwise
-//!   unused this phase.
-//! - `tools` is always empty, so the model has nothing to call and a
-//!   `stop_reason` of `tool_use` should not arise in practice yet; if it
-//!   ever does (a provider offering its own implicit tools, say), this
-//!   still ends the turn cleanly (same `chat:done` as a plain `end`) rather
-//!   than inventing a partial tool-loop — no `chat:tool` event is emitted
-//!   anywhere in this file. Full tool-loop parity (including `chat:tool`)
-//!   arrives with conductor in phase 5b.
-//! - The renderer already resends its full transcript on every `chat.send`
-//!   call (`panels/chat.js`'s `tome.chat.send(this.chatId, this.history,
-//!   brainWs)`), so plain multi-turn TEXT conversations work correctly
-//!   even without server-side history — only agentic tool use is deferred.
+//! results appended. This file now mirrors that split exactly:
+//! `chat_send` still owns provider resolution / key-missing handling /
+//! betas-fallbacks (unchanged from before this phase), then builds a
+//! `conductor::env::ConductorEnv` and calls `conductor::chat::run_chat` for
+//! the actual multi-turn work — `run_chat` owns the abort registry, the
+//! per-turn `tokio::select!` race, `TOOLS`, tool dispatch, and the
+//! terminal `chat:done` for every internal exit path; this file's own
+//! `catch`-equivalent (the `Err` arm below) only ever classifies a
+//! genuine, non-abort stream failure (401/authy), exactly the split
+//! `conductor::chat`'s own doc comment describes.
+//!
+//! Remaining, deliberate gap (unchanged from before this phase, still not
+//! this file's or conductor's to close): `brain_ws`-driven vault context
+//! (`brain.contextFor`) has no Rust port yet anywhere in this tree (grep
+//! `brain.rs` — no `context_for`), so `system` here is `conductor`'s own
+//! prompt alone, never `brain_ws`-extended. `brain_ws` stays accepted as a
+//! parameter for wire-shape completeness.
+//!
+//! The renderer already resends its full transcript on every `chat.send`
+//! call (`panels/chat.js`'s `tome.chat.send(this.chatId, this.history,
+//! brainWs)`), so server-side history is never needed either way.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio_util::sync::CancellationToken;
 
-use crate::chat::{providers, sse};
+use crate::chat::providers;
+use crate::conductor;
 use crate::state::AppState;
 use crate::{lock_gate, login_env, store};
 
-/// In-flight `chat:send` calls keyed by chat id — the Rust analogue of
-/// `conductor.js`'s module-level `inflight` Map (`chatId ->
-/// AbortController`). A domain-local static rather than an `AppState`
-/// field: `state.rs`'s own doc comment explicitly invites this ("later
-/// slices extend THEIR OWN modules... rather than adding fields here, so
-/// this file stays a rare merge-conflict site across parallel agents") —
-/// this task's ownership is `src-tauri/src/chat/`, `ipc/chat.rs`, and one
-/// line of `lib.rs`, not `state.rs`. Same pattern `login_env.rs` already
-/// uses for its own module-local cache.
-static INFLIGHT: std::sync::OnceLock<Mutex<HashMap<String, CancellationToken>>> =
-    std::sync::OnceLock::new();
-
-fn inflight() -> &'static Mutex<HashMap<String, CancellationToken>> {
-    INFLIGHT.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// One shared `reqwest::Client` for connection reuse across sends — same
-/// module-local-static rationale as `inflight()` above. `reqwest::Client`
+/// One shared `reqwest::Client` for connection reuse across sends — a
+/// module-local static rather than an `AppState` field, same rationale
+/// `login_env.rs` uses for its own module-local cache. `reqwest::Client`
 /// is `Clone + Send + Sync` and documented as cheap to share via a
 /// long-lived reference; building a fresh one per `chat:send` would throw
-/// connection pooling away for no benefit.
+/// connection pooling away for no benefit. `pub(crate)` — `conductor::env`'s
+/// `production_env` is the tool loop's own caller of this, one turn at a
+/// time.
 static HTTP_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
 
-fn http_client() -> &'static reqwest::Client {
+pub(crate) fn http_client() -> &'static reqwest::Client {
     HTTP_CLIENT.get_or_init(reqwest::Client::new)
 }
 
@@ -142,8 +127,7 @@ pub async fn chat_providers(app: AppHandle, state: State<'_, AppState>) -> Resul
 }
 
 /// `chat:send` (`index.js` ~1271-1305). See this file's module doc comment
-/// for the exact scope this implements versus the full JS behavior
-/// (`conductor.runChat`'s tool loop is phase 5b).
+/// for the provider-resolution/tool-loop split with `conductor::chat`.
 #[tauri::command]
 #[allow(unused_variables)] // brain_ws: accepted for wire-shape completeness, unused this phase — see module doc comment
 pub async fn chat_send(
@@ -197,65 +181,30 @@ pub async fn chat_send(
         (None, None)
     };
 
-    let token = CancellationToken::new();
-    inflight()
-        .lock()
-        .expect("chat inflight lock poisoned")
-        .insert(id.clone(), token.clone());
+    // conductor.SYSTEM + brain vault context — brain_ws-driven vault context
+    // is not yet ported (see module doc comment); system is conductor's own
+    // prompt alone, exactly the fallback `run_chat` would apply itself, made
+    // explicit here to mirror index.js's `let system = conductor.SYSTEM`
+    // assignment site.
+    let system = state.conductor.system_prompt();
+    let conductor_env = conductor::env::production_env(app.clone(), provider, betas, fallbacks);
 
-    let emit_app = app.clone();
-    let emit_id = id.clone();
-    let on_text = move |text: &str| {
-        let _ = emit_app.emit("chat:delta", json!({ "id": emit_id, "text": text }));
-    };
-
-    let args = sse::StreamChatArgs {
-        // conductor.SYSTEM + brain vault context land in phase 5b — see
-        // module doc comment.
-        system: None,
-        messages: &messages,
-        tools: &[],
-        betas: betas.as_deref(),
-        fallbacks: fallbacks.as_deref(),
-    };
-
-    // Races the stream against chat_abort's cancellation — dropping the
-    // stream_chat future (the losing branch) drops its in-flight reqwest
-    // request, which cancels the underlying connection the same way a JS
-    // AbortController.abort() feeding fetch's `signal` would. See this
-    // file's module doc comment for why chat::sse itself takes no signal
-    // parameter at all.
-    let outcome = tokio::select! {
-        result = sse::stream_chat(http_client(), &provider, args, on_text) => Outcome::Finished(result),
-        _ = token.cancelled() => Outcome::Aborted,
-    };
-
-    inflight()
-        .lock()
-        .expect("chat inflight lock poisoned")
-        .remove(&id);
-
-    match outcome {
-        Outcome::Aborted => emit_done(&app, &id, true, Some("Stopped.".to_string())),
-        Outcome::Finished(Ok(resp)) if resp.stop_reason == "refusal" => emit_done(
-            &app,
-            &id,
-            false,
-            Some("Request declined by safety classifiers.".to_string()),
-        ),
-        // Covers both 'end' and 'tool_use' — see module doc comment on why
-        // tool_use is not specially handled without conductor's loop.
-        Outcome::Finished(Ok(_)) => emit_done(&app, &id, false, None),
-        Outcome::Finished(Err(err)) => {
-            let msg = err.message();
-            let authy = err.status() == Some(401) || is_authy_message(&msg);
-            let friendly = if authy {
-                "Chat credentials rejected. Check the provider key (MOONSHOT_API_KEY / ZHIPU_API_KEY / ANTHROPIC_API_KEY / REQUESTY_API_KEY) in your shell and restart Tome.".to_string()
-            } else {
-                msg
-            };
-            emit_done(&app, &id, false, Some(friendly));
-        }
+    // `run_chat` owns the whole multi-turn loop, including the abort race
+    // and its OWN `chat:done` emit for every internal exit path (refusal,
+    // clean end, token budget, loop limit, abort) — see that function's doc
+    // comment for the exact `Ok`/`Err` split. Only a genuine, non-abort
+    // stream failure reaches here as `Err`, for the same 401/authy
+    // classification the JS original's outer `catch` applies.
+    if let Err(err) = conductor::chat::run_chat(&state.conductor, &conductor_env, id.clone(), Some(system), messages).await
+    {
+        let msg = err.message();
+        let authy = err.status() == Some(401) || is_authy_message(&msg);
+        let friendly = if authy {
+            "Chat credentials rejected. Check the provider key (MOONSHOT_API_KEY / ZHIPU_API_KEY / ANTHROPIC_API_KEY / REQUESTY_API_KEY) in your shell and restart Tome.".to_string()
+        } else {
+            msg
+        };
+        emit_done(&app, &id, false, Some(friendly));
     }
     Ok(json!({}))
 }
@@ -266,21 +215,8 @@ pub async fn chat_send(
 #[tauri::command]
 pub async fn chat_abort(state: State<'_, AppState>, id: String) -> Result<Value, String> {
     lock_gate::guard(&state, "chat:abort")?;
-    if let Some(token) = inflight()
-        .lock()
-        .expect("chat inflight lock poisoned")
-        .get(&id)
-    {
-        token.cancel();
-    }
+    conductor::chat::abort_chat(&state.conductor, &id);
     Ok(json!({}))
-}
-
-/// `chat_send`'s two race outcomes — see its own doc comment on the
-/// `tokio::select!` this backs.
-enum Outcome {
-    Finished(Result<sse::NormalizedResponse, sse::ChatError>),
-    Aborted,
 }
 
 /// Emits `chat:done` — see this file's module doc comment on why every

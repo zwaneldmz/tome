@@ -96,6 +96,14 @@ use std::time::Duration;
 use portable_pty::{native_pty_system, Child, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde_json::{json, Value};
 use tauri::ipc::Channel;
+
+/// A per-pane output tap: called with each flushed (batched, UTF-8-decoded)
+/// chunk on the batcher task, alongside the `pty:data` Channel send. Kept a
+/// bare `Fn(&str)` so this module stays conductor-agnostic (matching
+/// `TerminalOpts`'s "no policy fields" design) — `ipc::pty::pty_create`
+/// installs one that captures an `Arc<Conductor>` + pane id and calls
+/// `Conductor::record`, the scrollback ring `read_terminal` reads back.
+pub type DataTap = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -300,6 +308,7 @@ impl Registry {
         &self,
         opts: TerminalOpts,
         channel: Channel<Value>,
+        tap: Option<DataTap>,
         on_exit: impl FnOnce(i64) + Send + 'static,
     ) -> Result<(), String> {
         let id = opts.id.clone();
@@ -310,7 +319,7 @@ impl Registry {
             pixel_height: 0,
         };
         let cmd = build_terminal_command(&opts);
-        self.spawn_raw(id, cmd, size, channel, on_exit).await
+        self.spawn_raw(id, cmd, size, channel, tap, on_exit).await
     }
 
     /// The mechanism every spawn path shares — `spawn_terminal` above is a
@@ -362,6 +371,7 @@ impl Registry {
         cmd: CommandBuilder,
         size: PtySize,
         channel: Channel<Value>,
+        tap: Option<DataTap>,
         on_exit: impl FnOnce(i64) + Send + 'static,
     ) -> Result<(), String> {
         let pty_system = native_pty_system();
@@ -417,7 +427,7 @@ impl Registry {
                 )
             }
         });
-        let batcher_task = tokio::spawn(batcher_loop(rx, id.clone(), channel, batcher_done_tx));
+        let batcher_task = tokio::spawn(batcher_loop(rx, id.clone(), channel, tap, batcher_done_tx));
 
         {
             let mut entries = self.entries();
@@ -584,6 +594,7 @@ async fn batcher_loop(
     mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
     id: String,
     channel: Channel<Value>,
+    tap: Option<DataTap>,
     done: tokio::sync::oneshot::Sender<()>,
 ) {
     let mut buf: Vec<u8> = Vec::new();
@@ -595,7 +606,7 @@ async fn batcher_loop(
         };
         buf.extend_from_slice(&chunk);
         if buf.len() >= PTY_FLUSH_BYTES {
-            flush_buf(&id, &channel, &mut buf, false);
+            flush_buf(&id, &channel, tap.as_ref(), &mut buf, false);
             continue 'outer;
         }
         // A flush window is now open, PTY_FLUSH_MS from THIS first chunk —
@@ -606,7 +617,7 @@ async fn batcher_loop(
         loop {
             tokio::select! {
                 _ = &mut deadline => {
-                    flush_buf(&id, &channel, &mut buf, false);
+                    flush_buf(&id, &channel, tap.as_ref(), &mut buf, false);
                     continue 'outer;
                 }
                 next = rx.recv() => {
@@ -614,7 +625,7 @@ async fn batcher_loop(
                         Some(c) => {
                             buf.extend_from_slice(&c);
                             if buf.len() >= PTY_FLUSH_BYTES {
-                                flush_buf(&id, &channel, &mut buf, false);
+                                flush_buf(&id, &channel, tap.as_ref(), &mut buf, false);
                                 continue 'outer;
                             }
                             // still under threshold — loop back and keep
@@ -626,7 +637,7 @@ async fn batcher_loop(
                             // one must not hold back an incomplete UTF-8
                             // tail forever, since there is no "next flush"
                             // coming (see flush_buf/drain_ready).
-                            flush_buf(&id, &channel, &mut buf, true);
+                            flush_buf(&id, &channel, tap.as_ref(), &mut buf, true);
                             break 'outer;
                         }
                     }
@@ -639,9 +650,21 @@ async fn batcher_loop(
 
 /// Sends whatever [`drain_ready`] says is ready, if anything — mirrors
 /// `flushPtyData`'s `if (buf.data) win?.webContents.send(...)` guard
-/// (never emits an empty `pty:data`).
-fn flush_buf(id: &str, channel: &Channel<Value>, buf: &mut Vec<u8>, is_final: bool) {
+/// (never emits an empty `pty:data`). `tap` (when present) sees the exact
+/// same decoded chunk, mirroring `conductor.js`'s `p.onData = data => {
+/// conductor.record(id, data); queuePtyData(id, data) }` — one tap call per
+/// `pty:data` send, same text.
+fn flush_buf(
+    id: &str,
+    channel: &Channel<Value>,
+    tap: Option<&DataTap>,
+    buf: &mut Vec<u8>,
+    is_final: bool,
+) {
     if let Some(data) = drain_ready(buf, is_final) {
+        if let Some(tap) = tap {
+            tap(&data);
+        }
         let _ = channel.send(json!({"id": id, "data": data}));
     }
 }
@@ -992,6 +1015,7 @@ mod tests {
             sh_command("printf hi"),
             size80x24(),
             channel,
+            None,
             on_exit,
         )
         .await
@@ -1013,12 +1037,42 @@ mod tests {
         assert!(!reg.contains("t1"));
     }
 
+    /// The scrollback tap (`ipc::pty::pty_create` installs one calling
+    /// `Conductor::record`) sees exactly the same decoded chunks the
+    /// `pty:data` Channel does — the feed `read_terminal` reads back.
+    #[tokio::test]
+    async fn the_data_tap_receives_the_same_output_the_channel_does() {
+        let reg = Registry::new();
+        let (channel, mut rx) = recording_channel();
+        let (on_exit, exit_rx) = recording_exit();
+        let seen = Arc::new(Mutex::new(String::new()));
+        let tap: DataTap = {
+            let seen = seen.clone();
+            Arc::new(move |data: &str| seen.lock().unwrap().push_str(data))
+        };
+        reg.spawn_raw(
+            "tap1".to_string(),
+            sh_command("printf hi"),
+            size80x24(),
+            channel,
+            Some(tap),
+            on_exit,
+        )
+        .await
+        .expect("spawn_raw failed");
+
+        let data_msg = recv_within(&mut rx, 5).await;
+        assert_eq!(data_msg["data"], "hi");
+        let _ = recv_exit(exit_rx, 5).await;
+        assert_eq!(*seen.lock().unwrap(), "hi", "tap must observe the same bytes the channel did");
+    }
+
     #[tokio::test]
     async fn nonzero_exit_code_is_reported() {
         let reg = Registry::new();
         let (channel, _rx) = recording_channel();
         let (on_exit, exit_rx) = recording_exit();
-        reg.spawn_raw("t2".to_string(), sh_command("exit 7"), size80x24(), channel, on_exit)
+        reg.spawn_raw("t2".to_string(), sh_command("exit 7"), size80x24(), channel, None, on_exit)
             .await
             .expect("spawn_raw failed");
 
@@ -1033,7 +1087,7 @@ mod tests {
         let (on_exit, _exit_rx) = recording_exit();
         let mut cat = CommandBuilder::new("/bin/cat");
         cat.env_clear();
-        reg.spawn_raw("t3".to_string(), cat, size80x24(), channel, on_exit)
+        reg.spawn_raw("t3".to_string(), cat, size80x24(), channel, None, on_exit)
             .await
             .expect("spawn_raw failed");
 
@@ -1070,6 +1124,7 @@ mod tests {
             sh_command("sleep 5"),
             size80x24(),
             channel,
+            None,
             on_exit,
         )
         .await
@@ -1092,6 +1147,7 @@ mod tests {
             sh_command("sleep 30"),
             size80x24(),
             channel,
+            None,
             on_exit,
         )
         .await
@@ -1140,6 +1196,7 @@ mod tests {
             sh_command("sleep 30"),
             size80x24(),
             channel_a,
+            None,
             on_exit_a,
         )
         .await
@@ -1153,6 +1210,7 @@ mod tests {
             sh_command("sleep 30"),
             size80x24(),
             channel_b,
+            None,
             on_exit_b,
         )
         .await
@@ -1193,7 +1251,7 @@ mod tests {
         channel: Channel<Value>,
     ) -> JoinHandle<()> {
         let (done_tx, _done_rx) = tokio::sync::oneshot::channel();
-        tokio::spawn(batcher_loop(rx, id.to_string(), channel, done_tx))
+        tokio::spawn(batcher_loop(rx, id.to_string(), channel, None, done_tx))
     }
 
     #[tokio::test]

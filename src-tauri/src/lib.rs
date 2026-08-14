@@ -4,10 +4,12 @@ mod airgap;
 mod authlock;
 mod brain;
 mod chat;
+mod conductor;
 mod confine;
 mod custom_agents;
 mod events;
 mod eventlog;
+mod flow;
 mod fs;
 mod git;
 mod ipc;
@@ -319,6 +321,15 @@ pub fn run() {
                 // would keep its loopback port bound, and any of its live
                 // tunnels would keep piping bytes, past process exit.
                 shutdown_all_proxies(&state);
+                // Matches index.js's `will-quit`/`window-all-closed` both
+                // calling `flowRunner.killAll()` — a background flow run's
+                // headless node processes are their own process-group
+                // leaders (see `flow::runner::spawn`'s doc comment), so
+                // nothing signals them when this process exits on its own;
+                // left unwired, they would outlive the app entirely,
+                // orphaned with no window and no way left to cancel them.
+                // Idempotent, like `shutdown_all_proxies` above.
+                flow::runner::kill_all(&state.flow);
                 // Matches index.js's `lsp.shutdownAll()` quit-path call —
                 // language servers are child processes of no window either;
                 // `lsp::shutdown_all`'s own doc comment covers why this stays

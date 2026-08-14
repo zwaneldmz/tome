@@ -7,7 +7,6 @@
 //! a separate `ws` domain file.
 
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
 
 use tauri::State;
 
@@ -16,38 +15,19 @@ use crate::{confine, ipc::airgap::recompile_all_proxies, lock_gate, state::AppSt
 /// Mirrors `src/main/conductor.js`'s module-level `let panes = []` — the
 /// renderer's pane snapshot (`[{id, title}, ...]`), synced fire-and-forget
 /// on every pane open/close/rename via `ipcMain.on('panes:sync', (e, list)
-/// => conductor.setPanes(list))`.
-///
-/// `conductor.rs` (a different domain file — `ipc::conductor`, not this
-/// one) has no real state yet: its `conductor_allow_run`/
-/// `conductor_allow_read` commands are still stubs. `AppState` is out of
-/// this slice's scope to extend for a field only this command would use
-/// (see this slice's task notes), so the synced list is retained locally
-/// here instead, behind the same file that owns the command. Whichever
-/// slice ports `conductor.js` for real should fold this into that module's
-/// own state and delete this local copy.
-static PANES: OnceLock<Mutex<Vec<serde_json::Value>>> = OnceLock::new();
-
-/// Mirrors `conductor.js`'s `setPanes(list)`: `panes = Array.isArray(list)
-/// ? list : []` — anything but a JSON array collapses to empty, same as
-/// the JS's `Array.isArray` guard. Kept as untyped `serde_json::Value`
-/// entries (rather than a typed `{id, title}` struct) because nothing
-/// reads this list yet either side of the port; typing it is whichever
-/// slice ports `conductor.js` for real.
+/// => conductor.setPanes(list))`. Delegates straight to
+/// `state.conductor.set_panes` (`conductor::Conductor::set_panes` mirrors
+/// `setPanes`'s own `Array.isArray(list) ? list : []` guard) — this used to
+/// keep its own local static here before `conductor::Conductor` existed to
+/// fold it into; see that module's doc comment for the state it now lives
+/// alongside (pane meta, scrollback, read consent).
 #[tauri::command]
 pub async fn panes_sync(
     state: State<'_, AppState>,
     list: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     lock_gate::guard(&state, "panes:sync")?;
-    let items = match list {
-        serde_json::Value::Array(items) => items,
-        _ => Vec::new(),
-    };
-    *PANES
-        .get_or_init(|| Mutex::new(Vec::new()))
-        .lock()
-        .expect("panes_sync: PANES lock poisoned") = items;
+    state.conductor.set_panes(list);
     Ok(serde_json::json!({}))
 }
 

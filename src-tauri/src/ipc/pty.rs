@@ -378,8 +378,11 @@ fn shim_path_in(dir: &Path, target_triple: Option<&str>) -> PathBuf {
 }
 
 /// The TOME-001 re-auth ceremony's three possible outcomes — see this
-/// module's doc comment and [`evaluate_reauth`].
-enum ReauthOutcome {
+/// module's doc comment and [`evaluate_reauth`]. `pub(crate)`: reused
+/// verbatim (not duplicated) by `ipc::runs::runs_start`'s own re-auth
+/// ceremony for background flow runs — the second, independent
+/// unrestricted-spawn path this same TOME-001 rule applies to.
+pub(crate) enum ReauthOutcome {
     /// No `auth` payload arrived at all — the renderer's first attempt,
     /// before it has collected anything. No failure recorded.
     NeedsCredentials,
@@ -399,7 +402,7 @@ enum ReauthOutcome {
 /// the JS original's exact shape: `const ok = auth && (... ? verifyTotp(...)
 /// : verifyPassphrase(...)); if (!ok) { if (auth) recordFailure(...); return
 /// { reauth: true, error: auth ? '...' : null } }`.
-fn evaluate_reauth(payload_supplied: bool, verified: bool) -> ReauthOutcome {
+pub(crate) fn evaluate_reauth(payload_supplied: bool, verified: bool) -> ReauthOutcome {
     if !payload_supplied {
         ReauthOutcome::NeedsCredentials
     } else if verified {
@@ -732,11 +735,26 @@ pub async fn pty_create(
 
     let exit_id = opts.id.clone();
     let exit_app = app.clone();
+    // The per-chunk scrollback tap `conductor.js`'s `p.onData` performs
+    // (`conductor.record(id, data)`) — the feed for `read_terminal`'s
+    // consent-gated scrollback. `Arc<Conductor>` (see `AppState.conductor`)
+    // so this closure can outlive the command on the batcher task. `record`
+    // is a no-op until `register` (below, after a successful spawn) opens the
+    // pane's ring; the batcher's 4ms window makes any first output strictly
+    // later than that register call.
+    let tap_conductor = state.conductor.clone();
+    let tap_id = opts.id.clone();
+    let tap: crate::pty::DataTap =
+        std::sync::Arc::new(move |data: &str| tap_conductor.record(&tap_id, data));
     let spawn_result = state
         .pty
-        .spawn_raw(opts.id.clone(), cmd, size, on_data, move |exit_code| {
+        .spawn_raw(opts.id.clone(), cmd, size, on_data, Some(tap), move |exit_code| {
             let _ = exit_app.emit("pty:exit", json!({"id": exit_id, "exitCode": exit_code}));
             let exit_state = exit_app.state::<AppState>();
+            // Mirrors index.js's `p.onExit(({ exitCode }) => { ...;
+            // conductor.markExited(id); airgap.closePane(id); ... })` —
+            // markExited BEFORE closePane, same order.
+            exit_state.conductor.mark_exited(&exit_id);
             close_pane_and_proxy(&exit_app, &exit_state, &exit_id);
         })
         .await;
@@ -747,6 +765,17 @@ pub async fn pty_create(
         close_pane_and_proxy(&app, &state, &opts.id);
         return Err(err);
     }
+    // Mirrors index.js's `ptys.set(id, p); conductor.register(id, { kind,
+    // cwd: spawnCwd, airgap: effectiveGapped })` — registered only once the
+    // real spawn has succeeded, so the conductor's tools (list_panes'
+    // enrichment, read_terminal's consent gate) can see this pane. `record`
+    // (the per-chunk scrollback tap conductor.js's `p.onData` also calls)
+    // has no equivalent call site here: `Registry::spawn_raw` hands the raw
+    // data stream straight to the `on_data` Tauri Channel with no Rust-side
+    // interception point, and adding one is a `pty.rs` (Phase 2) reader-loop
+    // change outside this slice's safe blast radius — left as a follow-up
+    // (see `conductor::state`'s module doc comment).
+    state.conductor.register(&opts.id, &opts.kind, &spawn_cwd.to_string_lossy(), effective_gapped);
     Ok(json!({}))
 }
 
@@ -796,6 +825,12 @@ pub async fn pty_resize(
 pub async fn pty_kill(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<Value, String> {
     lock_gate::guard(&state, "pty:kill")?;
     state.pty.kill(&id).await;
+    // Mirrors index.js's `ptys.get(id)?.kill(); ptys.delete(id);
+    // conductor.forget(id); airgap.closePane(id)` — forget BEFORE
+    // closePane, same order; drops meta/scrollback/read-consent/
+    // read-requested together so a reopened pane with the same id starts
+    // clean rather than inheriting a stale consent grant.
+    state.conductor.forget(&id);
     close_pane_and_proxy(&app, &state, &id);
     Ok(json!({}))
 }

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::Notify;
 use tokio::task::AbortHandle;
 
-use crate::{airgap, authlock};
+use crate::{airgap, authlock, conductor, flow};
 
 /// Shared app state, installed once via `.manage(AppState::new())` in
 /// `lib.rs::run()` and reached from commands as `State<'_, AppState>`.
@@ -158,6 +158,33 @@ pub struct AppState {
     /// flag lives on `AppState` directly (`locked`/`auth_unlocked` above),
     /// per `authlock.rs`'s own doc comment on that split.
     pub auth: Mutex<Option<authlock::AuthLock>>,
+
+    /// The live background-flow-run registry — `flow::runner::Runner`
+    /// (Phase 5b), mirroring `flow-runner.js`'s module-level `const runs =
+    /// new Map()`. `Arc`-wrapped (the same reasoning as `proxies` above,
+    /// just one level up): `runs:start`'s own background scheduling loop,
+    /// per-node exit-await tasks, and kill-escalation timers all outlive
+    /// the single command invocation that spawned them, and each needs its
+    /// own strong reference to the SAME registry — a bare `Runner` field
+    /// only ever reachable via `State<'_, AppState>`'s short-lived borrow
+    /// cannot be captured into a `tokio::spawn`'d `'static` future the way
+    /// an `Arc` clone can.
+    pub flow: std::sync::Arc<flow::Runner>,
+
+    /// The assistant tool loop's live session state — `conductor::Conductor`
+    /// (Phase 5b), mirroring `conductor.js`'s module-level `meta`/`scrolls`/
+    /// `readConsent`/`panes`/`allowRun`/`inflight` `let`s. A plain value
+    /// field, not `Arc`-wrapped: unlike `flow` above, nothing here is read
+    /// from a `tokio::spawn`'d background task outliving a single command
+    /// invocation — the tool loop runs inline inside `chat_send`'s own
+    /// async fn (see `conductor::chat::run_chat`'s doc comment) — so a bare
+    /// value reachable through the ordinary `State<'_, AppState>` borrow
+    /// each command already gets is enough, the same shape `pty`/`airgap`
+    /// above already use for the identical reason.
+    /// `Arc` (not a bare field like the others) so the pty output batcher's
+    /// `'static` data-tap closure can hold its own strong reference to feed
+    /// `record()` — the per-chunk scrollback tap `read_terminal` reads back.
+    pub conductor: std::sync::Arc<conductor::Conductor>,
 }
 
 impl AppState {
@@ -176,6 +203,8 @@ impl AppState {
             relock_timers: Mutex::new(HashMap::new()),
             relock_timer_generation: std::sync::atomic::AtomicU64::new(0),
             auth: Mutex::new(None),
+            flow: std::sync::Arc::new(flow::Runner::new()),
+            conductor: std::sync::Arc::new(conductor::Conductor::new()),
         }
     }
 }
