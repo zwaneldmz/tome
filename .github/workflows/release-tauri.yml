@@ -41,10 +41,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # universal-apple-darwin is a tauri-bundler TARGET (it lipo's the
+          # arm64+x64 builds into one), not a rustup target — asking rustup
+          # for it fails ("component 'rust-std' ... unavailable"). Install
+          # the two real targets and pass the bundler target separately.
           - os: macos-latest
             targets: universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
           - os: ubuntu-22.04
             targets: x86_64-unknown-linux-gnu
+            rust-targets: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -68,7 +74,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.targets }}
+          targets: ${{ matrix.rust-targets }}
 
       - uses: Swatinem/rust-cache@v2
         with:
