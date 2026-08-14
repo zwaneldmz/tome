@@ -112,11 +112,16 @@ jobs:
           security default-keychain -s "$KEYCHAIN"
           rm -f "$CERT_PATH"
 
+      # tauri-action exports APPLE_SIGNING_IDENTITY into the bundler
+      # verbatim; with the secret unset that's the EMPTY string, which the
+      # bundler reads as "sign with identity ''" — codesign then fails
+      # ("no identity found") instead of skipping signing. Default to '-'
+      # (ad-hoc) when no real identity is configured.
       - name: Build Tauri bundles
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
