@@ -4,7 +4,6 @@
   "version": "0.1.0",
   "description": "A coding harness: agents, terminals, editors, and chat in one bound workspace.",
   "author": "Lwando Zwane",
-  "main": "out/main/index.js",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -13,7 +12,7 @@
   "homepage": "https://github.com/zwaneldmz/tome",
   "bugs": "https://github.com/zwaneldmz/tome/issues",
   "keywords": [
-    "electron",
+    "tauri",
     "coding-agents",
     "air-gap",
     "sandbox",
@@ -23,39 +22,13 @@
   "engines": {
     "node": ">=22"
   },
-  "build": {
-    "appId": "tech.abantu.tome",
-    "productName": "Tome",
-    "files": [
-      "out/**",
-      "package.json"
-    ],
-    "asar": true,
-    "asarUnpack": [
-      "**/node_modules/node-pty/**"
-    ],
-    "directories": {
-      "output": "dist"
-    },
-    "mac": {
-      "icon": "build/icon.icns",
-      "identity": null,
-      "hardenedRuntime": true,
-      "gatekeeperAssess": false,
-      "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
-    }
-  },
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "tauri dev",
     "test": "vitest run",
-    "build": "electron-vite build",
+    "build": "vite build",
     "lint": "eslint src",
-    "start": "electron-vite preview",
-    "postinstall": "electron-rebuild -f -w node-pty",
-    "fix:electron": "sh scripts/fix-electron.sh",
     "icon": "node scripts/gen-icon.mjs",
-    "package": "electron-vite build && electron-builder --mac --dir",
+    "package": "tauri build",
     "dev:renderer": "vite",
     "build:renderer": "vite build",
     "tauri": "tauri"
@@ -74,16 +47,11 @@
     "codemirror": "^6.0.0",
     "dockview-core": "^4.0.0",
     "mammoth": "^1.12.0",
-    "node-pty": "^1.0.0",
     "prettier": "^3.9.6",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
-    "@electron/rebuild": "^4.2.0",
     "@tauri-apps/cli": "^2",
-    "electron": "^43.3.0",
-    "electron-builder": "^26.15.3",
-    "electron-vite": "^3.0.0",
     "eslint": "^9.0.0",
     "vite": "^6.0.0",
     "vitest": "^4.1.0"

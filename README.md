@@ -21,14 +21,13 @@ phone home.
 
 ## Quick start
 
-You need **Node 22+** and the Xcode Command Line Tools (for building `node-pty`).
+You need **Node 22+** and a stable **Rust toolchain** (plus the Xcode Command
+Line Tools on macOS).
 
 ```bash
-npm install     # installs deps and builds node-pty for Electron
-npm run dev     # launch the app
+npm install     # installs the renderer deps
+npm run dev     # launch the app (tauri dev)
 ```
-
-If `npm run dev` fails with `Error: Electron uninstall`, run `npm run fix:electron` once.
 
 To use the assistant, set an API key for one provider (see [The assistant](#the-assistant)).
 Everything else works without a key.
@@ -146,15 +145,15 @@ vulnerability.
 
 ## Platform support
 
-macOS first. The allowlist proxy is platform-neutral, but the sandbox uses
-macOS seatbelt today; Linux support (bwrap/namespaces) is designed but not yet
-built.
+macOS and Linux. The sandbox uses macOS seatbelt (sandbox-exec) on macOS and
+bubblewrap network namespaces on Linux; the allowlist proxy itself is
+platform-neutral.
 
 ## Stack
 
-Electron + electron-vite · dockview (pane grid) · xterm + node-pty (real
-terminals) · CodeMirror 6 · mammoth + SheetJS (documents) · the Anthropic SDK
-and OpenAI-compatible providers (assistant).
+Rust + Tauri v2 · Vite · dockview (pane grid) · xterm (terminals, PTYs owned
+by the Rust backend) · CodeMirror 6 · mammoth + SheetJS (documents) · the
+Anthropic SDK and OpenAI-compatible providers (assistant).
 
 ## License
 
