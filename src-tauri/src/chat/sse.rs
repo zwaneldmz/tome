@@ -41,18 +41,27 @@
 //! this parser structurally identical to the OpenAI one, which never reads
 //! anything but `data:` lines either.
 //!
-//! ## Betas/fallbacks wire mechanics — a lower-confidence judgment call
+//! ## Betas/fallbacks wire mechanics — verified against the pinned SDK
 //!
 //! `betas` (an array of beta-flag strings) is well-established, long-stable
 //! Anthropic API surface: the SDK's own `betas` request param becomes the
 //! `anthropic-beta` HTTP header (comma-joined), never a JSON body field —
 //! high confidence. `fallbacks` (`provider.fallbacks = 'default'` in
-//! `index.js`) is newer/less-documented surface this port cannot verify
-//! against live docs from here; it is sent as a top-level JSON body field
-//! (`"fallbacks": "default"`), mirroring how the JS SDK's own `args.fallbacks
-//! = provider.fallbacks` merges it into the SAME params object that becomes
-//! the request body for everything else. Flagged as a judgment call to
-//! verify once real API access is available — see this task's final notes.
+//! `index.js`) was initially flagged as a lower-confidence guess; it is now
+//! VERIFIED against the pinned `@anthropic-ai/sdk` 0.115 type definitions
+//! (node_modules/@anthropic-ai/sdk/resources/beta/messages/messages.d.ts):
+//! `BetaFallbacksParam = Array<BetaFallbackParam> | 'default'`, a top-level
+//! body param of the beta `/v1/messages` endpoint ("Opt-in server-side
+//! retry on one or more substitute models… The string \"default\" requests
+//! the requested model's server-defined default fallback configuration"),
+//! and `server-side-fallback-2026-07-01` (the beta flag `ipc::chat`
+//! attaches alongside it, porting `index.js`) is a named member of the
+//! SDK's `AnthropicBeta` union. So: top-level JSON body field
+//! (`"fallbacks": "default"`), exactly as `build_anthropic_request_body`
+//! sends it — the string form is all this app uses, matching the JS
+//! original's own `'default'` literal. The array form (per-attempt model
+//! overrides with optional max_tokens/thinking/speed) is not needed here
+//! and would be a new feature, not a port fix.
 
 use serde_json::{json, Map, Value};
 
