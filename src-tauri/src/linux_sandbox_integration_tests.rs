@@ -643,10 +643,16 @@ async fn killing_the_wrap_leaves_no_orphan_process() {
     // A distinctive, unlikely-to-collide literal so `pgrep -f` can find it
     // specifically (and ONLY it) both before and after the kill.
     const MARKER: &str = "tome-orphan-check-sentinel-274b3a";
+    // `exec -a` is a bashism — Ubuntu's /bin/sh is dash, whose `exec` has
+    // no `-a` ("exec: -a: not found", exit 127), which is exactly what
+    // this test's first real CI run died of: the sandboxed process never
+    // became the renamed sleep, so the pgrep precondition below could
+    // never hold. bash is present on every Linux CI runner (and is what
+    // the sentinel rename needs), so name it explicitly.
     let fixture = build_fixture(
         "orphan-check",
         vec!["127.0.0.1".to_string()],
-        vec!["/bin/sh".to_string(), "-c".to_string(), format!("exec -a {MARKER} sleep 300")],
+        vec!["/bin/bash".to_string(), "-c".to_string(), format!("exec -a {MARKER} sleep 300")],
     )
     .await;
 
