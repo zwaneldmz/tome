@@ -566,8 +566,20 @@ async fn records_a_missing_cli_as_a_failed_node_instead_of_taking_the_run_down()
     let id = result["id"].as_str().unwrap().to_string();
     let run = settled(&runs, &id, 8000).await;
     assert_eq!(run["status"], json!("failed"));
-    let log = run["nodes"][0]["log"].as_str().unwrap();
-    assert!(std::fs::read_to_string(log).unwrap().contains("ENOENT"));
+    let log = run["nodes"][0]["log"].as_str().unwrap().to_string();
+    // The failure line is written by the runner task just before the
+    // status flip; poll briefly rather than assuming the write is
+    // visible the instant the run settles (a lost race here flaked
+    // linux-sandbox CI).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let body = std::fs::read_to_string(&log).unwrap_or_default();
+        if body.contains("ENOENT") {
+            break;
+        }
+        assert!(std::time::Instant::now() <= deadline, "log never recorded ENOENT: {body:?}");
+        tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+    }
 }
 
 // ======================================================================

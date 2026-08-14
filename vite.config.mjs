@@ -1,11 +1,10 @@
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 
-// Plain Vite config that drives the Tauri build. Parallel to (and
-// independent of) electron.vite.config.mjs, which still drives the Electron
-// build during the coexistence period (Phase 7 removes it). src-tauri's
-// tauri.conf.json build.devUrl/frontendDist point at this config's dev
-// server and build output respectively.
+// Plain Vite config that drives the Tauri build — the only frontend build
+// since the Electron removal. src-tauri's tauri.conf.json
+// build.devUrl/frontendDist point at this config's dev server and build
+// output respectively.
 //
 // Deliberately NOT read by `npx vitest run`: vitest.config.mjs is a
 // dedicated Vitest config, so Vitest resolves against it alone and never
@@ -25,7 +24,7 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       // popout.html is the shell document a dragged-out pane gets its own OS
-      // window for — mirrors electron.vite.config.mjs's renderer inputs.
+      // window for — both documents are built from the same renderer tree.
       input: {
         index: here('src/renderer/index.html'),
         popout: here('src/renderer/popout.html'),

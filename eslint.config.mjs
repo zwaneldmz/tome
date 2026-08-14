@@ -5,7 +5,7 @@ export default [
     ignores: ['out/**', 'dist/**', 'node_modules/**', 'index.js'],
   },
   {
-    files: ['src/main/**/*.js', 'src/preload/**/*.js', 'src/shared/**/*.js'],
+    files: ['src/shared/**/*.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
