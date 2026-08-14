@@ -2,6 +2,8 @@ mod agent_env;
 mod agent_spawn;
 mod airgap;
 mod authlock;
+mod brain;
+mod chat;
 mod confine;
 mod custom_agents;
 mod events;
@@ -27,12 +29,14 @@ mod ipc;
 mod linux_sandbox_integration_tests;
 mod lock_gate;
 mod login_env;
+mod lsp;
 mod menu;
 mod pty;
 mod pty_authority;
 mod state;
 mod store;
 mod store_keys;
+mod stt;
 mod totp;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -204,7 +208,7 @@ pub fn run() {
             ipc::conductor::conductor_allow_run,
             ipc::conductor::conductor_allow_read,
             // doc
-            ipc::doc::doc_read,
+            ipc::doc::doc_read_bytes,
             // theme
             ipc::theme::theme_set,
             // shell
@@ -315,6 +319,11 @@ pub fn run() {
                 // would keep its loopback port bound, and any of its live
                 // tunnels would keep piping bytes, past process exit.
                 shutdown_all_proxies(&state);
+                // Matches index.js's `lsp.shutdownAll()` quit-path call —
+                // language servers are child processes of no window either;
+                // `lsp::shutdown_all`'s own doc comment covers why this stays
+                // fast enough for the 1.5s cap above.
+                lsp::shutdown_all().await;
                 app_handle.exit(0);
             });
         })

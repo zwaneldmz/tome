@@ -72,6 +72,9 @@ export default [
         queueMicrotask: 'readonly',
         matchMedia: 'readonly',
         Element: 'readonly',
+        atob: 'readonly',
+        Worker: 'readonly',
+        self: 'readonly',
       },
     },
     rules: {

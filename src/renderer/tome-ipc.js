@@ -86,6 +86,60 @@
   // as the preload's single ipcRenderer.on('pty:data', …) listener was.
   const ptyDataSubs = []
 
+  // ---- fs.format: prettier runs in a renderer Web Worker (plan §Prettier)
+  // ----
+  // Created lazily, on the FIRST fs.format() call rather than at boot, so a
+  // session that never saves with format-on-save never pays for Prettier's
+  // plugin bundle at all. `fmt_format` (the Tauri command, ipc/fmt.rs)
+  // still exists as a safe fallback but is deliberately not called from
+  // here — this is the "shim calls the worker directly, no Rust
+  // round-trip" wiring the phase 5a-docs task chose as the cleanest path,
+  // since prettier/standalone needs no privileged access at all.
+  let fmtWorker = null
+  let fmtReqId = 0
+  const fmtPending = new Map() // id -> resolve
+  const FMT_TIMEOUT_MS = 10000 // a wedged worker must never hang Mod-S forever
+
+  function settleFmt(id, value) {
+    const resolve = fmtPending.get(id)
+    if (!resolve) return // already settled (timeout raced the real reply)
+    fmtPending.delete(id)
+    resolve(value)
+  }
+
+  function getFmtWorker() {
+    if (fmtWorker) return fmtWorker
+    try {
+      fmtWorker = new Worker(new URL('./fmt-worker.js', import.meta.url), { type: 'module' })
+    } catch (err) {
+      console.warn('[tome-ipc] fmt worker failed to start:', err)
+      return null
+    }
+    fmtWorker.onmessage = (e) => settleFmt(e.data.id, e.data.value)
+    fmtWorker.onerror = (err) => {
+      // A worker-level error (script failed to load, an exception outside
+      // fmt-worker.js's own try/catch) leaves any in-flight requests with
+      // no reply coming — resolve them `null`, the same "no parser for
+      // this file type" shape a save-with-format-on-save already treats as
+      // a no-op, rather than let them hang on the timeout below.
+      console.warn('[tome-ipc] fmt worker crashed, will restart on next format:', err.message)
+      for (const id of [...fmtPending.keys()]) settleFmt(id, null)
+      fmtWorker = null // next call gets a fresh worker
+    }
+    return fmtWorker
+  }
+
+  function formatInWorker(path, content) {
+    const worker = getFmtWorker()
+    if (!worker) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      const id = ++fmtReqId
+      fmtPending.set(id, resolve)
+      setTimeout(() => settleFmt(id, null), FMT_TIMEOUT_MS)
+      worker.postMessage({ id, path, content })
+    })
+  }
+
   const boot = window.__TOME_BOOT__ || {}
 
   window.tome = {
@@ -117,9 +171,10 @@
       watch: (p) => call('fs_watch', { path: p }),
       unwatch: (p) => call('fs_unwatch', { path: p }),
       onChanged: (cb) => on('fs:changed', cb),
-      // Lives under `fs` in the preload object shape but rides the
-      // 'fmt:format' wire channel — kept verbatim.
-      format: (path, content) => call('fmt_format', { path, content }),
+      // Lives under `fs` in the preload object shape; the wire channel
+      // this used to ride ('fmt:format') is now a renderer Web Worker
+      // instead of a Tauri command — see the fmt-worker block above.
+      format: (path, content) => formatInWorker(path, content),
     },
 
     store: {
@@ -175,7 +230,12 @@
     },
 
     doc: {
-      read: (p) => call('doc_read', { path: p }),
+      // Returns raw bytes ({ base64 }), not a pre-rendered { html } — the
+      // renderer converts docx/xlsx itself now (see doc-convert.js and
+      // panels/doc.js). Renamed from `read` to name that contract change
+      // honestly, matching the Rust command's own doc_read -> doc_read_bytes
+      // rename (ipc/doc.rs).
+      readBytes: (p) => call('doc_read_bytes', { path: p }),
     },
 
     theme: {

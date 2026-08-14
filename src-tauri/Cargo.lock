@@ -4799,12 +4799,14 @@ name = "tome"
 version = "0.1.0"
 dependencies = [
  "base32",
+ "futures-util",
  "hmac 0.13.0",
  "keyring",
  "notify",
  "notify-debouncer-mini",
  "portable-pty",
  "rand",
+ "regex",
  "reqwest",
  "scrypt",
  "serde",
@@ -4818,6 +4820,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tempfile",
  "tokio",
+ "tokio-util",
  "tome-shim",
 ]
 

@@ -656,7 +656,22 @@ mod tests {
         assert!(env.state.relock_timers.lock().unwrap().get("pty-1").is_none());
         assert_eq!(env.state.airgap.pane_state("pty-1"), None);
         // The real listener must actually be down, not just forgotten about.
-        assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err());
+        // `proxy.shutdown()` signals the listener's accept loop rather than
+        // synchronously joining it, so the OS-level socket close can lag
+        // this call by a scheduler tick or two — same tolerance brain.rs's
+        // own `start_watch_with_detects_a_change_and_fires_after_the_debounce`
+        // test gives its async teardown, applied here to a much shorter
+        // deadline (this has no real debounce to wait out, just scheduling
+        // slack under a busy `cargo test` run).
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let connect = tokio::net::TcpStream::connect(("127.0.0.1", port)).await;
+            if connect.is_err() {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "listener on port {port} never went down");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
     }
 
     #[tokio::test]

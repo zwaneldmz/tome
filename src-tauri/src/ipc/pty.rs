@@ -90,7 +90,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::agent_spawn::{self, AgentEntry};
 use crate::ipc::airgap::{close_pane_and_proxy, create_gapped_pane_proxy};
 use crate::ipc::auth::ceil_seconds;
-use crate::{agent_env, airgap, custom_agents, events, eventlog, lock_gate, login_env, pty_authority, state::AppState, store};
+use crate::{agent_env, airgap, brain, custom_agents, events, eventlog, lock_gate, login_env, pty_authority, state::AppState, store};
 
 /// Wire shape of `pty:create`'s options object. `tome-ipc.js`'s
 /// `pty.create: (opts) => { const ch = new Channel(); ...; return
@@ -101,10 +101,13 @@ use crate::{agent_env, airgap, custom_agents, events, eventlog, lock_gate, login
 /// `{ id, kind, cwd, airgap: gapped, ws, model, auth }` (line 633).
 ///
 /// `ws`/`model` are accepted here — so a real renderer payload always
-/// deserializes cleanly, and the struct documents the full wire contract —
-/// but `ws` is write-only this phase: it only ever mattered for
-/// `brain::ensureBrain`/`TOME_BRAIN` (Phase 5; no `brain.rs` module exists
-/// in this tree yet). `model`/`auth` ARE wired below (model pinning via
+/// deserializes cleanly, and the struct documents the full wire contract.
+/// `ws`, when present, drives [`resolve_brain_env`]'s `TOME_BRAIN`/
+/// `TOME_CORE_VAULT` wiring below (`brain::ensureBrain`/`brain::coreInfo`
+/// in the JS original) — unconditionally on `is_agent`/`gapped`, matching
+/// `buildAgentEnv`'s own `if (ws) { ... }` block, which runs for a plain
+/// terminal pane on an open workspace exactly the same as for an agent
+/// pane. `model`/`auth` are wired below too (model pinning via
 /// `agent_spawn::build_agent_spawn_from`; `auth` is the TOME-001 re-auth
 /// ceremony's credential payload).
 #[derive(Debug, Deserialize)]
@@ -113,7 +116,6 @@ pub struct PtyCreateOpts {
     pub kind: String,
     pub cwd: Option<String>,
     pub airgap: Option<bool>,
-    #[allow(dead_code)] // Phase 5 (brain.rs does not exist yet) — see struct doc comment
     pub ws: Option<String>,
     pub model: Option<String>,
     pub auth: Option<Value>,
@@ -710,13 +712,19 @@ pub async fn pty_create(
     let login = login_env::login_env().await;
     let process_env: HashMap<String, String> = std::env::vars().collect();
     let secrets = if is_agent { login.secrets.clone() } else { HashMap::new() };
-    let extras = agent_env::AgentEnvExtras {
-        is_agent,
-        secrets,
-        brain_path: None,     // Phase 5 — see PtyCreateOpts's doc comment
-        core_vault_root: None, // Phase 5
-        proxy_port,
+    // `if (ws) { env.TOME_BRAIN = await brain.ensureBrain(ws); ... }` —
+    // unconditional on is_agent/gapped, matching buildAgentEnv's own order
+    // (see PtyCreateOpts's doc comment on `ws`).
+    let (brain_path, core_vault_root) = match opts.ws.clone() {
+        Some(ws) => {
+            let dir_for_brain = dir.clone();
+            tokio::task::spawn_blocking(move || resolve_brain_env(&ws, &dir_for_brain, locked))
+                .await
+                .map_err(|e| e.to_string())??
+        }
+        None => (None, None),
     };
+    let extras = agent_env::AgentEnvExtras { is_agent, secrets, brain_path, core_vault_root, proxy_port };
     let env = pane_env(&process_env, &login.path, &extras);
 
     let cmd = build_pty_command(&login.shell, agent_cmd.as_deref(), &spawn_cwd, &env, sandbox.as_ref());
@@ -798,6 +806,43 @@ pub async fn pty_kill(app: AppHandle, state: State<'_, AppState>, id: String) ->
 /// decision is unit-testable without a live `AppHandle`/`State`.
 fn is_agent_kind(agents: &[AgentEntry], kind: &str) -> bool {
     agents.iter().any(|a| a.id == kind)
+}
+
+/// Resolves `TOME_CORE_VAULT` for a workspace-scoped pane, given the
+/// already-resolved `core-vault` store value — ports the second half of
+/// `index.js`'s `if (ws) { ...; const info = await brain.coreInfo(...); if
+/// (info.configured) env.TOME_CORE_VAULT = info.root }`. Split out from
+/// [`resolve_brain_env`] (which additionally calls `brain::ensure_brain`,
+/// a real `$HOME`-writing side effect — see that function's own doc
+/// comment) specifically so this half is unit-testable hermetically, with
+/// no real home directory touched.
+fn resolve_core_vault_root(core_vault_store_value: Option<&str>) -> Option<String> {
+    brain::core_info(core_vault_store_value).configured_root().map(str::to_string)
+}
+
+/// Resolves `TOME_BRAIN`/`TOME_CORE_VAULT` for a workspace-scoped pane —
+/// ports the `if (ws) { ... }` block of `index.js`'s `buildAgentEnv`
+/// (~index.js:678-682) verbatim: `ensureBrain` always runs (creating the
+/// vault directory + seeding `AGENTS.md` as a side effect) whenever `ws`
+/// is present, regardless of `is_agent`/`gapped` — a plain terminal pane
+/// on an open workspace gets `$TOME_BRAIN` too, same as an agent pane. A
+/// failure here (`ensure_brain`'s mkdir/write can fail) propagates and
+/// fails the whole `pty:create` call, matching the JS original: nothing
+/// wraps `buildAgentEnv`'s `await brain.ensureBrain(ws)` in a try/catch,
+/// so a throw there rejects `createPty` entirely.
+///
+/// Not unit-tested directly: `brain::ensure_brain` resolves its vault root
+/// off the REAL `$HOME` (see that function's own doc comment on why
+/// `brain.rs`'s own test suite avoids calling it directly too — there is
+/// no way to override that path for a hermetic test without changing
+/// `brain::ensure_brain`'s signature, out of scope for this fix). The
+/// `TOME_CORE_VAULT` half has no such coupling and IS unit-tested — see
+/// [`resolve_core_vault_root`].
+fn resolve_brain_env(ws: &str, dir: &Path, locked: bool) -> Result<(Option<String>, Option<String>), String> {
+    let brain_path = brain::ensure_brain(ws)?.to_string_lossy().into_owned();
+    let core_vault = store::get(dir, "core-vault", locked);
+    let core_root = core_vault.as_str().map(str::to_string);
+    Ok((Some(brain_path), resolve_core_vault_root(core_root.as_deref())))
 }
 
 /// The env every pane (agent or plain terminal, gapped or not) is spawned
@@ -910,6 +955,30 @@ mod tests {
         let customs = json!([{ "id": "evil", "label": "Evil", "bin": "/bin/sh" }]);
         let agents = custom_agents::merge_agents(agent_spawn::AGENTS, &customs);
         assert!(!is_agent_kind(&agents, "evil"));
+    }
+
+    // ================= resolve_core_vault_root — TOME_CORE_VAULT half of the
+    // TOME_BRAIN wiring (the ensure_brain half is $HOME-coupled — see
+    // resolve_brain_env's own doc comment for why that half stays
+    // integration-only) =================
+
+    #[test]
+    fn resolve_core_vault_root_returns_the_root_when_configured() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("sub")).unwrap();
+        let root_str = tmp.path().to_str().unwrap();
+        assert_eq!(resolve_core_vault_root(Some(root_str)), Some(root_str.to_string()));
+    }
+
+    #[test]
+    fn resolve_core_vault_root_is_none_when_no_core_vault_is_stored() {
+        assert_eq!(resolve_core_vault_root(None), None);
+    }
+
+    #[test]
+    fn resolve_core_vault_root_is_none_for_an_empty_or_unreadable_root() {
+        assert_eq!(resolve_core_vault_root(Some("")), None);
+        assert_eq!(resolve_core_vault_root(Some("/definitely/does/not/exist/core-vault-xyz")), None);
     }
 
     // ================= pane_env — the login-shell PATH override + layering ================

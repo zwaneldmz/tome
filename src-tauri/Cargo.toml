@@ -49,6 +49,15 @@ hmac = "0.13.0"
 sha1 = "0.11.0"
 rand = "0.10.2"
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "http2", "json", "stream", "charset"] }
+regex = "1.13.1"
+# chat/sse.rs: CancellationToken backing chat_abort (ipc/chat.rs's INFLIGHT
+# registry) and StreamExt::next() for reading reqwest's bytes_stream() —
+# both already resolved transitively (reqwest/tauri pull them in); declared
+# directly here since chat/sse.rs `use`s them itself. Versions match what
+# Cargo.lock already had resolved, so adding these direct entries does not
+# bump anything.
+tokio-util = "0.7"
+futures-util = "0.3"
 
 [dev-dependencies]
 tempfile = "3"

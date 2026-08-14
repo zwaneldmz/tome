@@ -1,8 +1,13 @@
-//! Prettier formatting. Per the plan, this becomes a renderer Web Worker
-//! running `prettier/standalone` (no Rust formatter — semantics would
-//! drift from running Prettier's own logic through a different engine),
-//! so this command exists only for wire-shape parity during the
-//! coexistence period.
+//! Prettier formatting. Per the plan, real formatting runs in a renderer Web
+//! Worker (`src/renderer/fmt-worker.js`, `prettier/standalone` + language
+//! plugins — no Rust formatter, since running Prettier's own logic through a
+//! different engine would drift from its actual output). The phase 5a-docs
+//! task wired `tome-ipc.js`'s `fs.format` straight to that worker — no Tauri
+//! round-trip — so in the running app this command is never actually
+//! invoked; it survives as a safe fallback and for wire-shape parity with
+//! `lock_gate::CHANNEL_OF_COMMAND`'s registration (that table's own doc
+//! comment covers why a channel stays listed independent of whether
+//! anything still calls its command body).
 
 use serde_json::Value;
 use tauri::State;
@@ -10,14 +15,16 @@ use tauri::State;
 use crate::{lock_gate, state::AppState};
 
 /// Always takes the JS handler's "no parser for this file type" branch
-/// (`if (!info.inferredParser) return null`): real formatting is Phase-5,
-/// renderer-side work. Returning `null` unconditionally is the same
-/// everyday path a file with no registered Prettier parser already takes
-/// today — the editor saves the content as typed instead of failing the
-/// save outright, which is why this is a real body rather than the usual
-/// `Err("unimplemented: ...")` stub (an error here would regress every
-/// save-with-format-on-save into a failure, not just silently skip
-/// formatting).
+/// (`if (!info.inferredParser) return null`): the real formatting work is
+/// the renderer worker described in this file's module doc comment.
+/// Returning `null` unconditionally is the same everyday path a file with
+/// no registered Prettier parser already took under the Electron original
+/// — the editor saves the content as typed instead of failing the save
+/// outright — which is why this stays a real body rather than the usual
+/// `Err("unimplemented: ...")` stub: an error here would regress every
+/// save-with-format-on-save into a failure the moment anything calls this
+/// command directly, rather than just being the unreached dead code it is
+/// today.
 #[tauri::command]
 pub async fn fmt_format(
     state: State<'_, AppState>,

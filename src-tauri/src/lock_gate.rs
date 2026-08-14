@@ -168,7 +168,7 @@ pub const CHANNEL_OF_COMMAND: &[(&str, &str)] = &[
     ("ws_sync", "ws:sync"),
     ("conductor_allow_run", "conductor:allowRun"),
     ("conductor_allow_read", "conductor:allowRead"),
-    ("doc_read", "doc:read"),
+    ("doc_read_bytes", "doc:readBytes"),
     ("theme_set", "theme:set"),
     ("shell_open_path", "shell:openPath"),
     ("airgap_state", "airgap:state"),
