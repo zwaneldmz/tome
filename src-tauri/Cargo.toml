@@ -77,3 +77,9 @@ tome-shim = { path = "crates/tome-shim" }
 
 [workspace]
 members = ["crates/tome-shim"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
+objc2 = "0.6.4"
+objc2-foundation = "0.3.2"
+objc2-local-authentication = "0.3.2"

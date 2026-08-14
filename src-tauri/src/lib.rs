@@ -42,6 +42,7 @@ mod store;
 mod store_keys;
 mod stt;
 mod totp;
+mod touchid;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -68,6 +69,81 @@ fn truthy_env(name: &str) -> bool {
 /// Tauri equivalent of. `WebviewWindowBuilder::initialization_script`
 /// would NOT reach the main window here, since that window comes from
 /// `tauri.conf.json`, not a programmatic builder call.
+/// Popout window support — the Tauri replacement for Electron's
+/// `setWindowOpenHandler` + `did-create-window` pair (`src/main/index.js`
+/// ~411-437). dockview tears a pane group off with `window.open()` on
+/// `popout.html`; wry has no same-context `window.open`, so Tauri routes
+/// that navigation through this plugin's `window_created_with` hook, which
+/// turns it into a real `WebviewWindow` (labelled `popout-*`, matching
+/// `capabilities/default.json`'s window scope) and vetoes the navigation
+/// in the original webview.
+///
+/// The window's own URL keeps the requested `popout.html` — dev mode
+/// resolves it against the vite dev server, packaged mode against the
+/// bundled frontend dist, exactly like the main window's own load. The
+/// label carries the popout group's name through (dockview names each
+/// popout window `${dockId}-${groupId}` and passes it as `window.open`'s
+/// frameName, which arrives here in the navigation URL's query — see
+/// `panes.js`'s `addPopoutGroup` call) so the close-request handshake can
+/// map a window back to the panes inside it, the same job Electron's
+/// `frameName` did.
+fn popout_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("tome-popout")
+        .on_navigation(|window, url| {
+            // Only the main window can spawn a popout; a popout navigating
+            // itself (its own initial load, or anything else) passes
+            // through untouched.
+            if window.label() != "main" {
+                return true;
+            }
+            if !url.path().ends_with("/popout.html") {
+                // Only popout navigations are intercepted; everything else
+                // (the main window's own initial load, in-app hash
+                // changes) passes through untouched. External links never
+                // reach here at all: the renderer routes those through
+                // `tome.shell.openExternal` → `tauri-plugin-opener`,
+                // which opens the OS browser — the same split Electron's
+                // `setWindowOpenHandler`/`shell.openExternal` pairing had.
+                return true;
+            }
+            let app = window.app_handle().clone();
+            let url = url.clone();
+            // The window build must not happen inside the navigation
+            // callback itself (wry re-entrancy) — defer one tick.
+            tauri::async_runtime::spawn(async move {
+                use tauri::{WebviewUrl, WebviewWindowBuilder};
+                static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+                let label = format!("popout-{n}");
+                // A real title bar, unlike the main window's hiddenTitle —
+                // popout.html has no topbar to offer as a drag region, and
+                // the bar leaves dockview's tab strip free as a drop
+                // target for panes dragged in from another window (the JS
+                // original's own overrideBrowserWindowOptions comment).
+                // `WebviewUrl::External` keeps the navigation URL's
+                // scheme/host intact — in dev that's the vite dev-server
+                // URL the renderer resolved `popout.html` against; in a
+                // packaged build it's the same `tauri://localhost` (macOS)
+                // / `http://tauri.localhost` (Linux/Windows) origin the
+                // main window itself loaded from, so the popout document
+                // stays same-origin with it (dockview's DOM move requires
+                // that).
+                if let Err(e) = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url))
+                    .title("Tome")
+                    .min_inner_size(320.0, 200.0)
+                    .inner_size(940.0, 640.0)
+                    .build()
+                {
+                    eprintln!("[tome-popout] failed to create popout window: {e}");
+                }
+            });
+            // Always veto the in-webview navigation — the popout lives in
+            // its own window now.
+            false
+        })
+        .build()
+}
+
 fn boot_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let home = std::env::home_dir()
         .map(|p| p.to_string_lossy().into_owned())
@@ -167,6 +243,7 @@ pub fn run() {
             }
         }))
         .plugin(boot_plugin())
+        .plugin(popout_plugin())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::new())
@@ -320,7 +397,65 @@ pub fn run() {
         // to close immediately, which — this being the app's only window —
         // exits the app via Tauri's default all-windows-closed behavior).
         .on_window_event(move |window, event| {
+            // ---- popout windows: veto-first close handshake ----
+            // Ports `watchPopout` (`src/main/index.js` ~375-385): a popout
+            // asking to close is held open until the MAIN window's
+            // renderer answers its move-or-close prompt with
+            // `popout:close` (`ipc::popout::popout_close`), which arms the
+            // label in `AppState.popout_approved` — never arming it is how
+            // "cancel" works. Never veto during a quit (`quitting`), or
+            // once the main window is gone — there would be nothing left
+            // to show the prompt (the JS original's own `win.isDestroyed()`
+            // guard).
             if window.label() != "main" {
+                let label = window.label().to_string();
+                match event {
+                    WindowEvent::CloseRequested { api, .. } => {
+                        if !label.starts_with("popout") || quitting.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        let state = window.app_handle().state::<AppState>();
+                        let mut approved = state
+                            .popout_approved
+                            .lock()
+                            .expect("AppState.popout_approved lock poisoned");
+                        if approved.remove(&label) {
+                            return; // renderer-approved: let it close
+                        }
+                        drop(approved);
+                        let Some(main) = window.app_handle().get_webview_window("main") else {
+                            return; // no main window left to prompt in
+                        };
+                        api.prevent_close();
+                        // Same payload shape Electron sent
+                        // (`win.webContents.send('popout:close-request',
+                        // { id, name })`) — `id` is the window label here
+                        // (Tauri has no numeric window ids), `name` is the
+                        // same label: it uniquely names the popout group
+                        // for the renderer's `dock.groups` lookup, the job
+                        // Electron's `frameName` did.
+                        let _ = main.emit(
+                            "popout:close-request",
+                            serde_json::json!({ "id": label, "name": label }),
+                        );
+                    }
+                    WindowEvent::Destroyed => {
+                        // Mirrors `child.on('closed', () =>
+                        // popoutApproved.delete(child.id))` — a stale armed
+                        // label must not outlive its window (labels are
+                        // counter-unique, so reuse is impossible, but the
+                        // set would grow without bound otherwise).
+                        if label.starts_with("popout") {
+                            let state = window.app_handle().state::<AppState>();
+                            state
+                                .popout_approved
+                                .lock()
+                                .expect("AppState.popout_approved lock poisoned")
+                                .remove(&label);
+                        }
+                    }
+                    _ => {}
+                }
                 return;
             }
             let WindowEvent::CloseRequested { api, .. } = event else {

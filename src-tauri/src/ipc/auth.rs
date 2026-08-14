@@ -9,11 +9,14 @@
 //! `auth_status`. See `state.rs`'s doc comments on both fields for exactly
 //! how they relate and why they are two fields, not one.
 //!
-//! Touch ID (`auth_touchid`) is explicitly out of scope this phase —
-//! `objc2-local-authentication` is not wired — so it always returns the
-//! same honest "not available" shape on every platform, on every call. The
-//! passphrase (+ optional TOTP) path is the one this phase must fully work,
-//! and does.
+//! Touch ID (`auth_touchid`) is wired through `crate::touchid`
+//! (`objc2-local-authentication`'s `LAContext`, the same framework
+//! Electron's `systemPreferences.promptTouchID` wraps). On macOS with
+//! Touch ID hardware it puts up the real system prompt; everywhere else
+//! (and on Macs without enrolled biometrics) `auth_status`'s `touchId`
+//! bit is `false`, the lock screen never offers the button, and
+//! `auth_touchid` itself returns the same honest refusal shape the
+//! pre-Touch-ID build returned on every platform.
 
 use serde_json::{json, Value};
 use tauri::State;
@@ -31,9 +34,10 @@ pub(crate) fn ceil_seconds(wait_ms: u64) -> u64 {
 /// Mirrors `authlock.authStatus()` merged with the `auth:status` handler's
 /// own additions (`{ ...authlock.authStatus(), unlocked: authlock.isUnlocked(),
 /// touchId: process.platform === 'darwin' && systemPreferences.canPromptTouchID() }`).
-/// `touchId` is hardcoded `false` on every platform — see this module's doc
-/// comment: advertising a capability `auth_touchid` cannot back yet would
-/// make the lock screen offer a button that always fails.
+/// `touchId` is `crate::touchid::can_prompt()` — the direct port of
+/// `canPromptTouchID()` (both wrap `LAContext canEvaluatePolicy:`): `true`
+/// only on macOS with usable biometrics, so the lock screen's Touch ID
+/// button appears exactly when the prompt behind it can actually work.
 #[tauri::command]
 pub async fn auth_status(state: State<'_, AppState>) -> Result<Value, String> {
     lock_gate::guard(&state, "auth:status")?;
@@ -47,7 +51,7 @@ pub async fn auth_status(state: State<'_, AppState>) -> Result<Value, String> {
         "configured": configured,
         "totp": totp,
         "unlocked": unlocked,
-        "touchId": false,
+        "touchId": crate::touchid::can_prompt(),
     }))
 }
 
@@ -91,16 +95,28 @@ pub async fn auth_login(
     Ok(json!({"ok": true}))
 }
 
-/// Touch ID is out of scope this phase (`objc2-local-authentication` is not
-/// a wired dependency) — always the same honest refusal, on every OS,
-/// mirroring the SHAPE `auth:touchid`'s JS `catch` branch produces
-/// (`{ ok: false, error: err.message || 'Touch ID failed.' }`) without ever
-/// claiming to have prompted anything. Never flips `locked`/`auth_unlocked`
-/// — there is no success path yet.
+/// Direct port of the JS `auth:touchid` handler (`index.js` ~855):
+/// `try { await systemPreferences.promptTouchID('unlock the Tome
+/// workspace'); authlock.markUnlocked(); return { ok: true } } catch (err)
+/// { return { ok: false, error: err.message || 'Touch ID failed.' } }` —
+/// `crate::touchid::prompt()` is the `promptTouchID` call, `mark_unlocked`
+/// is the same one-way flip `auth_login` uses, and the `catch` branch's
+/// shape is preserved on every failure (user cancel, lockout, no hardware,
+/// non-macOS stub). Like the original, a successful prompt unlocks the
+/// session WITHOUT touching the passphrase/TOTP throttle counters — the
+/// biometric prompt is its own rate-limiter (macOS locks biometry out
+/// after repeated failures), and the JS original recorded no
+/// `'auth:login'` failure for a cancelled Touch ID prompt either.
 #[tauri::command]
 pub async fn auth_touchid(state: State<'_, AppState>) -> Result<Value, String> {
     lock_gate::guard(&state, "auth:touchid")?;
-    Ok(json!({"ok": false, "error": "Touch ID is not available in this build yet."}))
+    match crate::touchid::prompt().await {
+        Ok(()) => {
+            mark_unlocked(&state);
+            Ok(json!({"ok": true}))
+        }
+        Err(error) => Ok(json!({"ok": false, "error": error})),
+    }
 }
 
 /// Flips both one-way session-unlock fields — the single place every login

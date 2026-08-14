@@ -175,64 +175,77 @@ window.addEventListener('drop', (e) => {
   }
 })
 
-// ---- OS-level drag-drop under Tauri (plan §8) ----
-// Kept alongside, not merged into, the DOM listeners above: dragDropEnabled
-// routes a native OS drag through tome-ipc.js's `dragDrop` bridge instead of
-// the DOM 'Files' drag those listeners gate on.
+// ---- OS-level drag-drop under Tauri (revived; plan §8) ----
+// tauri.conf.json's dragDropEnabled is TRUE again, so wry installs its
+// native drag-drop handler and OS file drops arrive as tauri://drag-drop
+// events (already-resolved absolute paths — no File/webUtils two-step)
+// through the tome.dragDrop bridge below.
 //
-// This does more than decide which of the two listener sets above sees a
-// *file* drop, and the risk is bigger than "platform-dependent, unconfirmed"
-// makes it sound. Verified against the pinned crates (Cargo.lock: wry
-// 0.55.1, tauri-runtime-wry 2.11.4): enabling dragDropEnabled makes wry
-// install a drag_drop_handler that unconditionally returns `true` for every
-// DragDropEvent — Enter/Over/Drop/Leave alike — landing on this webview
-// (tauri-runtime-wry's with_drag_drop_handler closure, src/lib.rs, ends
-// every branch with a bare `true`). On macOS, that `true` is what makes
-// WryWebView's NSDraggingDestination override
-// (wry-0.55.1/src/wkwebview/drag_drop.rs: dragging_updated /
-// perform_drag_operation) short-circuit to NSDragOperation::Copy / Bool::YES
-// WITHOUT ever calling `super(this)` — and that super call, not anything
-// this app can hook independently, is what runs WKWebView's own internal
-// DragController and is what actually dispatches dragover/drop into the
-// DOM. That gate is keyed on "is dragDropEnabled on", not on "does this
-// drag carry files", so it applies to ANY drag session landing on the
-// webview, including one that starts and ends inside it — e.g.
-// dockview-core's own tab-header drag (`draggable = true` unless
-// `disableDnd` is set, which this app never does — `grep -rn disableDnd
-// src/renderer/` is empty; see
-// dockview-core.esm.js:4861/5106/5155/5263/5288) and this file's own
-// tear-off detection below (`dragend` + `e.dataTransfer.dropEffect`). So
-// this is a real, source-verified candidate for silently breaking tab
-// reordering and tear-off on macOS — not merely a question of whether the
-// DOM 'Files' listeners above also happen to fire for the same drag (that
-// narrower question is the one still actually open, and only for
-// WebKitGTK/Linux — no Linux runtime available to check against).
+// Why that is safe now, when Phase 6 switched the flag OFF over it: the
+// verified hazard (see git history for the full source trace) is that
+// wry's handler claims EVERY native drag session landing on the webview —
+// Enter/Over/Drop/Leave all return true — which on macOS keeps WKWebView's
+// own DragController from ever dispatching dragover/drop/dragend into the
+// DOM. That kills dockview's in-page tab/group drags (they are plain
+// HTML5 drags) and this file's tear-off detection (dragend +
+// dropEffect). The key property that makes the flag affordable now:
+// dockview's disableDnd option is hot-swappable at runtime
+// (dockviewComponent.updateOptions → updateDragAndDropState re-sets every
+// tab's `draggable` and its drag handler), and wry's handler only sees a
+// drag session when some element inside the webview is actually
+// `draggable`. So: whenever a dockview drag starts, we disable DnD — no
+// draggable element remains, the OS drag ends with it, wry's handler
+// never sees a native session to claim, and WKWebView's DragController
+// dispatches the full HTML5 sequence into the DOM exactly as with the
+// flag off. When the drag ends we re-enable, so OS file drops from
+// outside the window work the rest of the time. An OS file drag entering
+// from OUTSIDE can't collide with this: it isn't a dockview drag, so
+// onWillDrag* never fires for it.
 //
-// DECISION (Phase 6): tauri.conf.json now sets dragDropEnabled: FALSE, so
-// wry never installs that NSDraggingDestination override — WKWebView's own
-// DragController runs and dispatches dragover/drop/dragend into the DOM
-// normally, which is what dockview tab-reorder and the tear-off detection
-// below actually need. For a tiling pane-grid harness, pane drag/reorder/
-// tear-off is core; OS-file-drop-to-open is a convenience with working
-// substitutes (click a file in the tree, or File > Open). We keep the core
-// interaction and defer file-drop-to-open. (Because the flag defaulted true
-// since Phase 1, this also un-breaks tab-drag that boot smokes never
-// exercised.) Flagged to the product owner for ratification.
-//
-// Consequence: `tome.dragDrop` below is now DORMANT — with the native
-// handler off, no tauri://drag-drop events fire, so onEnter/onLeave/onDrop
-// never run. The bridge is left in place (harmless, and it lights back up if
-// the flag is ever re-enabled) rather than deleted, so the file-drop-to-open
-// path can be revived without re-deriving all of the above.
+// The DOM 'Files' listeners above stay as the Electron path (Electron
+// never fires tauri://drag-drop, and tome.dragDrop is undefined there —
+// the optional chains below no-op). Under Tauri they stay dormant: wry's
+// handler claims the drop before the DOM sees it.
 //
 // This block does not touch `dropDepth` — a shared counter across two
 // independently-firing sources risks desync (a leave from one side
 // clearing a count the other still holds open); classList add/remove is
 // idempotent, so the two can't fight into a highlight stuck on even if a
 // platform fires both.
-// `tome.dragDrop` is undefined under Electron's real preload (no such
-// bridge there — the DOM path above already covers Electron), hence the
-// optional chains.
+let dndDisabledForDrag = false
+const setDockDnd = (on) => {
+  if (dndDisabledForDrag === !on) return
+  dndDisabledForDrag = !on
+  try {
+    dock.updateOptions({ disableDnd: !on })
+  } catch {
+    // pre-init or mid-teardown — DnD state settles on the next drag
+  }
+}
+// One pair of listeners per document a pane drag can live in — the main
+// document here, and each popout window's document as it opens (a drag
+// that starts in a popout fires dragstart THERE, not here). watchDragDnd
+// is idempotent per document via a marker property.
+export function watchDragDnd(doc) {
+  if (doc.__tomeDndWatched) return
+  doc.__tomeDndWatched = true
+  doc.addEventListener(
+    'dragstart',
+    () => {
+      // Any HTML5 drag starting in a tome document while the bridge
+      // exists is a dockview pane/tab drag (nothing else here sets
+      // draggable) — disarm the native-claim hazard for its duration.
+      if (tome.dragDrop) setDockDnd(false)
+    },
+    true
+  )
+  doc.addEventListener('dragend', () => setDockDnd(true), true)
+  // A drop inside the window also ends the drag without a reliable
+  // dragend on this document when the drag crossed windows.
+  doc.addEventListener('drop', () => setDockDnd(true), true)
+}
+watchDragDnd(document)
+
 tome.dragDrop?.onEnter?.(() => dockEl.classList.add('drop-target'))
 tome.dragDrop?.onLeave?.(() => dockEl.classList.remove('drop-target'))
 tome.dragDrop?.onDrop?.(({ paths } = {}) => {
@@ -324,6 +337,9 @@ function popout(item, at) {
         w.document.body.classList.add('tome-popout')
         // a drag released in this window ends here, not in the main document
         watchDragCleanup(w.document)
+        // and a drag STARTING in this window needs the same native-drag
+        // disarm the main document gets (see watchDragDnd above)
+        watchDragDnd(w.document)
         const untrack = trackThemedDocument(w.document)
         w.addEventListener('pagehide', untrack, { once: true })
       },

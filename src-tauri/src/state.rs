@@ -78,6 +78,17 @@ pub struct AppState {
     /// above.
     pub pty: crate::pty::Registry,
 
+    /// Popout window labels the renderer has cleared to close, armed by
+    /// `ipc::popout::popout_close` and consulted (then cleared) by
+    /// `lib.rs`'s `CloseRequested` handler — the direct port of
+    /// `src/main/index.js`'s `popoutApproved` Set of BrowserWindow ids,
+    /// keyed by Tauri window label instead (Tauri has no numeric window
+    /// ids). A popout's close is vetoed until its label lands here; the
+    /// entry is removed when the window actually finishes closing
+    /// (`Destroyed`), mirroring the original's `child.on('closed', () =>
+    /// popoutApproved.delete(child.id))`.
+    pub popout_approved: Mutex<std::collections::HashSet<String>>,
+
     /// Airgap pane-gapping state machine, repo-allowlist consent
     /// bookkeeping, and unlock/relock deadline tracking —
     /// `airgap::AirgapState` (Phase 3, Task A3; see that module's doc
@@ -198,6 +209,7 @@ impl AppState {
             quit_ready: Notify::new(),
             watchers: Mutex::new(HashMap::new()),
             pty: crate::pty::Registry::new(),
+            popout_approved: Mutex::new(std::collections::HashSet::new()),
             airgap: airgap::AirgapState::new(),
             proxies: Mutex::new(HashMap::new()),
             relock_timers: Mutex::new(HashMap::new()),

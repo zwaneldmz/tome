@@ -94,6 +94,16 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
+      # MUST come before any plain `cargo build`/`cargo test` of the main
+      # package: tauri.conf.json's bundle.externalBin makes tauri-build's
+      # build script REQUIRE the triple-suffixed sidecar path to exist at
+      # compile time ("resource path `binaries/tome-shim-<triple>` doesn't
+      # exist" fails the build script, before any Rust compiles) — the
+      # first run of this job learned that the hard way. This is the same
+      # step `tauri build`'s beforeBuildCommand runs, just earlier.
+      - name: Stage the tome-shim sidecar (scripts/build-sidecar.sh — required by tauri-build's externalBin check)
+        run: bash scripts/build-sidecar.sh
+
       - name: cargo build --workspace (the real Linux compile no other job performs)
         working-directory: src-tauri
         run: cargo build --workspace --all-targets
@@ -101,9 +111,6 @@ jobs:
       - name: cargo test --workspace (non-ignored — the same ~500 unit tests this repo's macOS gates already run, now proven on real Linux too)
         working-directory: src-tauri
         run: cargo test --workspace
-
-      - name: Stage the tome-shim sidecar (scripts/build-sidecar.sh — the same step tauri build's beforeBuildCommand runs)
-        run: bash scripts/build-sidecar.sh
 
       - name: Curl matrix — real gapped-pane enforcement (#[ignore]'d integration tests)
         working-directory: src-tauri

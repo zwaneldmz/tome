@@ -391,11 +391,13 @@
       close: (id) => call('popout_close', { id }),
       // Not present on the Electron preload object at all, so
       // `tome.popout.supported` is `undefined` there — falsy, so any
-      // renderer code gating on it stays correct under Electron too. wry
-      // cannot move live DOM into a same-context window.open() the way
-      // dockview's popout does (the one genuine Phase-1 regression); real
-      // popout support returns in Phase 6 via a dedicated WebviewWindow.
-      supported: false,
+      // renderer code gating on it stays correct under Electron too.
+      // Under Tauri this is real: dockview's window.open(popout.html) is
+      // intercepted by the Rust `tome-popout` plugin (lib.rs), which
+      // spawns a dedicated WebviewWindow for it, and the close handshake
+      // below (`popout:close-request` → `popout_close`) is the direct
+      // port of Electron's popoutApproved veto.
+      supported: true,
     },
   }
 })()
