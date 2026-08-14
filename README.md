@@ -1,6 +1,6 @@
 # <img src="docs/icon.png" width="28" align="top" alt=""> Tome
 
-**Run your coding agents behind an air gap, in one workspace.** Agents,
+**Run your coding agents in a containment cell, in one workspace.** Agents,
 terminals, editors, documents, and an AI assistant share one grid — light or
 dark, following your system by default.
 
@@ -13,37 +13,42 @@ New here? [Take the interactive tour.](https://zwaneldmz.github.io/tome/how-tome
 
 ## What it is
 
-Tome is a macOS desktop app for working with AI coding agents. You open agents,
+Tome is a desktop app for working with AI coding agents. You open agents,
 terminals, editors, and documents as panes in a tiling grid, and an assistant
-sits alongside them. The point of difference: **agents run sandboxed with no
-network access by default**, so a tool you don't fully trust can't quietly
-phone home.
+sits alongside them. The point of difference: **agents run in an OS-level
+sandbox with no network access by default**, so a tool you don't fully trust
+can't quietly phone home.
 
 ## Quick start
 
 You need **Node 22+** and a stable **Rust toolchain** (plus the Xcode Command
-Line Tools on macOS).
+Line Tools on macOS). On Linux, also install **bubblewrap** — it's what the
+sandbox is built on.
 
 ```bash
 npm install     # installs the renderer deps
 npm run dev     # launch the app (tauri dev)
 ```
 
+Prebuilt bundles (macOS universal, Linux `.deb`/`.rpm`/`.AppImage`) are on the
+[releases page](https://github.com/zwaneldmz/tome/releases) — unsigned for
+now, with checksums and build provenance you can verify.
+
 To use the assistant, set an API key for one provider (see [The assistant](#the-assistant)).
 Everything else works without a key.
 
-## The air gap
+## The containment cell
 
-Agent panes run inside a macOS sandbox that blocks all network access. The only
-way out is a small local proxy that allows **model-provider domains and nothing
-else**.
+An agent pane runs inside an OS sandbox that blocks all network access. The
+only way out is a small local proxy that allows **model-provider domains and
+nothing else**.
 
 - A pane's **cyan strip** opens that pane's proxy for 15, 30, or 60 minutes,
   then it re-locks on its own. Opening it asks for your second factor (an
   authenticator code, or your passphrase). Blocked hosts show up on the strip.
-- Opening a pane widens the **proxy**, never the sandbox — a sandboxed pane
+- Opening a pane widens the **proxy**, never the sandbox — a contained pane
   still can't touch raw sockets, SSH, or your Tome config files.
-- Need full, normal network access? Spawn an **unrestricted pane** from the
+- Need full, normal network access? Spawn an **uncontained pane** from the
   `＋` menu. Because that pane can run anything with your privileges, Tome asks
   for your passphrase or code first — every time.
 - A repo can ship a **team allowlist** at `.tome/airgap.json`. Tome validates
@@ -73,7 +78,7 @@ files, and type into a terminal. Two guardrails:
   the `＋` menu (off by default). With it off, nothing is submitted without your
   Enter.
 - It can **read** a terminal's scrollback only for panes you approve — Tome
-  asks before the first read, and air-gapped panes are never readable.
+  asks before the first read, and contained panes are never readable.
 
 **Voice is fully local.** The `🎙` button records push-to-talk audio and
 transcribes it with a local whisper.cpp sidecar — audio never leaves your
@@ -92,8 +97,9 @@ command to fetch the model file.
   window edge); your layout is saved.
 - **Flows** — wire agents into a small graph in a `.flow.json` file: each node
   says what it needs and what it produces. **Run** executes the graph in the
-  background, one headless agent per node, in dependency order — inside the same
-  air gap a normal pane would get. Starter graphs: [examples/flows/](examples/flows/).
+  background, one headless agent per node, in dependency order — inside the
+  same containment a normal pane would get. Starter graphs:
+  [examples/flows/](examples/flows/).
 - **Editor** — CodeMirror 6 with language auto-detect, `⌘S` to save, and a
   dirty indicator.
 - **Documents** — PDFs, images, and converted `.docx` / `.xlsx` open in
@@ -109,7 +115,7 @@ command to fetch the model file.
 ## Building a release
 
 ```bash
-npm run package     # → dist/mac-arm64/Tome.app  (unsigned)
+npm run package     # tauri build → src-tauri/target/release/bundle/  (unsigned)
 ```
 
 Local packages are **unsigned by design**, so contributors don't need an Apple
@@ -120,17 +126,23 @@ dev build:
 xattr -dr com.apple.quarantine /Applications/Tome.app
 ```
 
-Tagged releases (`vX.Y.Z`) build in `.github/workflows/release.yml` and publish
-a `.dmg`/`.zip` with a `SHA256SUMS` manifest, a CycloneDX SBOM, and a
-build-provenance attestation. **Code signing and notarization are on the
-roadmap** — until the Apple credentials are configured, released builds are
-unsigned too. Once signed, verify a download before opening it:
+Tagged releases (`vX.Y.Z`) build in `.github/workflows/release-tauri.yml` and
+publish a macOS universal `.dmg` and Linux `.deb` / `.rpm` / `.AppImage` with
+`SHA256SUMS` manifests and a build-provenance attestation. **Code signing and
+notarization are on the roadmap** — until the Apple credentials are
+configured, released builds are unsigned too. Verify a download before opening
+it:
 
 ```bash
-shasum -c SHA256SUMS --ignore-missing   # matches the manifest
+shasum -a 256 -c SHA256SUMS-macos-latest   # matches the manifest
+```
+
+Once signing lands, also:
+
+```bash
 codesign --verify --deep --strict Tome.app
-spctl -a -vv Tome.app                    # Gatekeeper accepts it
-xcrun stapler validate Tome.app          # notarization is stapled
+spctl -a -vv Tome.app                      # Gatekeeper accepts it
+xcrun stapler validate Tome.app            # notarization is stapled
 ```
 
 ## Security
@@ -145,7 +157,7 @@ vulnerability.
 
 ## Platform support
 
-macOS and Linux. The sandbox uses macOS seatbelt (sandbox-exec) on macOS and
+macOS and Linux. The sandbox uses macOS seatbelt (`sandbox-exec`) on macOS and
 bubblewrap network namespaces on Linux; the allowlist proxy itself is
 platform-neutral.
 
