@@ -110,17 +110,25 @@ mark('module evaluation start')
   // whisper-cli model warm-up for push-to-talk; main gates it on the
   // 'voice-warmup' store key (default off) and swallows all failures.
   tome.stt.warmup().catch(() => {})
-  if (tome.shotMode && wsState.activeRoot) {
-    // screenshot/demo mode: open a representative set of panes
-    const id = `pty-${++counters.seq}`
-    dock.addPanel({
-      id,
-      component: 'terminal',
-      title: `⛨ zsh — demo`,
-      params: { ptyId: id, kind: 'terminal', cwd: wsState.activeRoot, airgap: true },
-    })
-    openFile(`${wsState.activeRoot}/package.json`)
-    addChat()
-    addBrain()
+  if (tome.shotMode && dock.panels.length === 0) {
+    // screenshot/demo mode: open a representative set of panes against the
+    // active workspace's first folder — only when no layout restored one
+    // (a pre-seeded layout file drives the dedicated tour shots).
+    // activeRoot starts null (it is only set by clicking a tree root), so
+    // fall back through activeWorkspace — the same chain paneCwd() uses
+    // for every real pane spawn.
+    const root = wsState.activeRoot || activeWorkspace()?.folders[0]
+    if (root) {
+      const id = `pty-${++counters.seq}`
+      dock.addPanel({
+        id,
+        component: 'terminal',
+        title: `⛨ zsh — demo`,
+        params: { ptyId: id, kind: 'terminal', cwd: root, airgap: true },
+      })
+      openFile(`${root}/package.json`)
+      addChat()
+      addBrain()
+    }
   }
 })()
