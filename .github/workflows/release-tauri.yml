@@ -37,6 +37,10 @@ on:
 
 jobs:
   build:
+    env:
+      HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      HAS_APPLE_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+      HAS_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -93,9 +97,8 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Import Developer ID certificate (macOS, no-op without secrets)
-        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE_PRESENT == 'true'
+        if: runner.os == 'macOS' && env.HAS_APPLE_CERTIFICATE == 'true'
         env:
-          APPLE_CERTIFICATE_PRESENT: ${{ secrets.APPLE_CERTIFICATE != '' }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
@@ -134,6 +137,25 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.targets }}
+
+      # F5: prove the .app tauri-action just produced is actually signed and
+      # Gatekeeper-clean (and notarized when an ASC API key is configured)
+      # rather than silently shipping an unsigned bundle. Gated on the Apple
+      # secrets; ad-hoc/unsigned builds intentionally skip these.
+      - name: Verify macOS code signature and Gatekeeper (no-op without an identity)
+        if: runner.os == 'macOS' && env.HAS_APPLE_IDENTITY == 'true'
+        run: |
+          set -euo pipefail
+          APP="$(find src-tauri/target -type d -name 'Tome.app' -path '*/bundle/macos/*' | head -1)"
+          codesign --verify --deep --strict "$APP"
+          spctl -a -vv "$APP"
+
+      - name: Verify notarization staple (no-op without an ASC API key)
+        if: runner.os == 'macOS' && env.HAS_APPLE_API_KEY == 'true'
+        run: |
+          set -euo pipefail
+          APP="$(find src-tauri/target -type d -name 'Tome.app' -path '*/bundle/macos/*' | head -1)"
+          xcrun stapler validate "$APP"
 
       # tauri-action uploads the bundles it knows about to the draft
       # release directly. The checksum manifest below is generated from

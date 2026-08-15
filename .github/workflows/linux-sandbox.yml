@@ -126,3 +126,44 @@ jobs:
         env:
           TOME_SHIM_BIN: ${{ github.workspace }}/src-tauri/target/release/tome-shim
         run: cargo test --workspace -- --ignored --test-threads=1
+
+  # F3: Fedora proof — the same curl-matrix run on the other major Linux
+  # family this repo claims to support. Experimental and non-blocking
+  # (continue-on-error): it uses Fedora's own rust/cargo from dnf (not
+  # dtolnay, which targets the host for a container job), and bwrap inside
+  # a docker container depends on the runner's userns policy, which varies
+  # — so this job is best-effort until it proves out on a real run. Linux
+  # aarch64 remains a follow-up (needs an arm64 runner or a cross
+  # toolchain).
+  fedora-sandbox:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    continue-on-error: true
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bubblewrap + Tauri Linux build prerequisites + Rust (dnf)
+        run: |
+          dnf -y install \
+            bubblewrap procps-ng curl wget file \
+            gcc gcc-c++ rust cargo \
+            webkit2gtk4.1-devel openssl-devel \
+            libayatana-appindicator3-devel librsvg2-devel
+
+      - name: Stage the tome-shim sidecar (required by tauri-build's externalBin check)
+        run: bash scripts/build-sidecar.sh
+
+      - name: cargo build --workspace
+        working-directory: src-tauri
+        run: cargo build --workspace --all-targets
+
+      - name: cargo test --workspace (unit)
+        working-directory: src-tauri
+        run: cargo test --workspace
+
+      - name: Curl matrix (#[ignore]'d integration tests)
+        working-directory: src-tauri
+        env:
+          TOME_SHIM_BIN: ${{ github.workspace }}/src-tauri/target/release/tome-shim
+        run: cargo test --workspace -- --ignored --test-threads=1
