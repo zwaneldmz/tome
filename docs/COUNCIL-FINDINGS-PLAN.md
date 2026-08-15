@@ -52,3 +52,21 @@
 
 `npm test` (282) · `npm run lint` · `npm run build` · `~/.cargo/bin/cargo check`
 for any Rust change.
+
+## Progress log
+
+- **Phase 1 (merged → PR #14):** F1 docs reconciled + tracked · F4 macOS cargo
+gate · F3 Ubuntu 22.04/24.04 matrix · F7 layout-guard logic test · F6 version
+bump · F8 noted · F10 restore-layout fix carried forward.
+- **Phase 2 (this branch):**
+  - **F5** — `release-tauri.yml` now verifies `codesign --verify` / `spctl -a` /
+    `xcrun stapler validate` on the produced `.app` (gated on the Apple
+    secrets), and the Developer-ID import step's env scoping was fixed. Actual
+    signing still blocked on Apple credentials.
+  - **F3** — added an experimental, non-blocking `fedora-sandbox` container job
+    to `linux-sandbox.yml`; Linux aarch64 remains a follow-up.
+  - **F2** — wrote `docs/LINUX-LANDLOCK-DESIGN.md` (allow-list vs deny-list,
+    required allow-set, change set, test matrix) and pointed the
+    `TODO(landlock)` comment at it. Not implemented: a correct Landlock
+    whitelist needs the workspace/brain/agent-config paths threaded through
+    and a real-Linux test pass.

@@ -21,6 +21,7 @@ docs/*
 !docs/COUNCIL-FINDINGS-PLAN.md
 !docs/THREATMODEL.md
 !docs/perf.md
+!docs/LINUX-LANDLOCK-DESIGN.md
 .agents/
 .superpowers/
 src-tauri/target/

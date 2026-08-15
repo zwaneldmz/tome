@@ -247,12 +247,13 @@ fn self_unshare() -> io::Result<()> {
     std::fs::write("/proc/self/uid_map", id_map_line(0, uid))?;
     std::fs::write("/proc/self/gid_map", id_map_line(0, gid))?;
 
-    // TODO(landlock): file-confinement rules for the app config dir /
-    // auth file (bwrap's `--tmpfs <appConfigDir>` equivalent) belong here
-    // as a follow-up — see this module's top doc comment. Not attempted
-    // this slice: the netns egress kill above is the property TOME-001
-    // actually needs closed; a half-finished Landlock ruleset would be
-    // worse than an honestly-absent one.
+    // TODO(landlock): file-confinement rules (bwrap's `--tmpfs
+    // <appConfigDir>` equivalent) belong here — the full design, including
+    // why this MUST be an allow-list (Landlock has no deny/except rule) and
+    // the allow-set the shim needs threaded through, is in
+    // docs/LINUX-LANDLOCK-DESIGN.md. Not implemented yet: the netns egress
+    // kill above is the load-bearing control; an unverified Landlock
+    // whitelist would break agent CLIs worse than an honestly-absent one.
     Ok(())
 }
 
