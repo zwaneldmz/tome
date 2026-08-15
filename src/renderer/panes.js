@@ -598,7 +598,7 @@ export async function restoreLayout() {
   const w = activeWorkspace()
   const saved = await tome.store.get(layoutKey(w))
   layoutLoaded = true
-  if (!saved || !Array.isArray(saved.panels) || !Object.keys(saved.panels).length) return
+  if (!saved || !saved.panels || typeof saved.panels !== 'object' || !Object.keys(saved.panels).length) return
   restoring = true
   try {
     dock.fromJSON(saved)
@@ -611,11 +611,15 @@ export async function restoreLayout() {
     return
   }
   // Panels that failed to deserialize (e.g. a doc iframe with a null content
-  // element) come back without a renderer-side instance — drop them.
+  // element) come back without a renderer-side instance — drop them. A panel
+  // whose content element exists but isn't connected yet is NOT stale: that
+  // is a background tab (dockview's 'onlyWhenVisible' renderer keeps its
+  // content detached until it is active) or a component whose async init is
+  // still running (FlowPanel's fs read). The re-drive loop below reactivates
+  // those, so dropping them here would lose valid panes.
   const stale = []
   for (const p of dock.panels) {
-    const node = p.view?.content?.element
-    if (!node || !node.isConnected) stale.push(p)
+    if (!p.view?.content?.element) stale.push(p)
   }
   for (const p of stale) {
     try {
@@ -643,6 +647,7 @@ export async function restoreLayout() {
           // falls back to the CLI default on a miss (lib/agent-spawn.js).
           // Screening it here too would fork that rule into two copies.
           spawnTerminal({ kind, cwd: params.cwd, airgap: params.airgap, wsName: params.ws, model: params.model, saved: p })
+          removePanel(p) // the fromJSON shell already spawned a doomed pty — drop it; the fresh panel above replaces it in the same group
         } else if (component === 'chat') {
           spawnChat(p)
         } else if (component === 'brain') {
