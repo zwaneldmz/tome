@@ -25,6 +25,7 @@ import { plusIcon, popoutIcon } from './icons.js'
 import { AGENTS } from '../shared/pane-kinds.js'
 import { createFlow } from '../shared/flow-model.js'
 import { stripControlChars } from '../shared/terminal-text.js'
+import { isValidSavedLayout } from '../shared/layout.js'
 
 class Watermark {
   constructor() {
@@ -598,7 +599,7 @@ export async function restoreLayout() {
   const w = activeWorkspace()
   const saved = await tome.store.get(layoutKey(w))
   layoutLoaded = true
-  if (!saved || !saved.panels || typeof saved.panels !== 'object' || !Object.keys(saved.panels).length) return
+  if (!isValidSavedLayout(saved)) return
   restoring = true
   try {
     dock.fromJSON(saved)
