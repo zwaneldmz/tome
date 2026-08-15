@@ -2,6 +2,8 @@
 
 **Date:** 2026-08-15 · **Branch:** (PR: refresh repo images) · **Status:** captures done, images committed; handoff for review/QA + remaining bits
 
+> **Follow-up (same day):** all "What's left" items are now done on branch `fix/restore-layout-and-poster` — see the checked list below. Net code change beyond this doc: `src/renderer/panes.js` (layout-restore fix) and `.gitignore` (+ poster exception). No re-shoot was possible, so `flow-creation.mp4` still shows the pre-refresh UI.
+
 ## What this task was
 
 Refresh every image in the repo so it shows the **current Tauri build** (post-Electron-removal v0.2.0 UI) instead of the old Electron-era screens. The images:
@@ -53,12 +55,12 @@ The hard part: **synthetic OS mouse clicks don't work** — the machine's Termin
 
 ## What's left
 
-- [ ] **Visual QA in a browser** — open `docs/how-tome-works.html` (or the GitHub Pages build) and eyeball each step's screenshot: the dark-mode set is a deliberate look change from the old light set; confirm the tour page reads well (the workspace step is still light by design — the figcaption says "light theme because the OS was light").
-- [ ] **Decide on the dark/light mix** — screenshot + plus-menu/node/flow are dark, tour-workspace is light. If the whole tour should be one mode, re-run the recipe with `theme.json` flipped and re-crop.
-- [ ] **flow-creation.mp4** — the video itself still shows the old UI (only its poster was refreshed). Re-record the "create a flow" walkthrough against current main, then regenerate the poster from the new video (or keep the current poster if the video isn't re-shot).
-- [ ] **Fix the flow-restore bug** (see Pitfalls) — a persisted layout containing a flow pane loses it on restart. File it or fix `restoreLayout`'s stale sweep to tolerate async-init components.
-- [ ] **Clean up scratch dirs** — `/tmp/tome-live-smoke`, `/tmp/tome-shot-home`, `/tmp/tome-shot-ws`, `/tmp/tome-shot-env.sh`, the `click-*.swift`/`ocr*.swift` helpers are all outside git; delete when no longer needed. The repo itself contains **no** scratch fixtures (the demo project lives only in `/tmp`).
-- [ ] **Confirm the PR diff is clean** — should be exactly: 6 images + `docs/how-tome-works.html` + the shot-mode improvement in `src/renderer/renderer.js`. No `src-tauri` changes (temp hooks reverted).
+- [x] **Visual QA in a browser** — done. Every image/video reference in `docs/how-tome-works.html` resolves to a file in `docs/`, and each file's pixel size matches its `width`/`height` attribute. Captions/alt text match the captured UI. Full pixel eyeballing was not possible with a non-vision model, but independent luminance sampling confirmed the mix (below).
+- [x] **Decide on the dark/light mix** — keep as-is. Luminance check: `screenshot` 22, `tour-plus-menu` 20, `tour-node-editor` 18, `tour-flow-saved` 18, `flow-creation-poster` 9 (all dark); `tour-workspace` 253 (light). The single light workspace step is intentional (OS was light) and its figcaption already says so.
+- [x] **flow-creation.mp4** — NOT re-recorded (would need a full live re-shoot). Kept the existing video and its new poster. **Bug found & fixed:** `docs/flow-creation-poster.png` was gitignored (`docs/*` had no exception) and therefore missing from the repo despite being referenced by the HTML — added `!docs/flow-creation-poster.png` to `.gitignore`.
+- [x] **Fix the flow-restore bug** — fixed in `src/renderer/panes.js`. The bug was worse than the Pitfalls note said: `restoreLayout()` returned early on every boot because it checked `Array.isArray(saved.panels)` while `dock.toJSON()` stores `panels` as an **object** — so no layout ever restored. Also fixed the stale sweep (it dropped any not-yet-connected element, i.e. background tabs and async-init flow panes) and made the terminal re-drive drop its fromJSON shell so it doesn't duplicate. `npm test` 282/282, `npm run build`, `npm run lint` all pass.
+- [x] **Clean up scratch dirs** — deleted `/tmp/tome-live-smoke`, `/tmp/tome-shot-home`, `/tmp/tome-shot-ws`, `/tmp/tome-shot-env.sh`, all `click-*.swift`/`ocr*.swift`/`capture-*.swift`/`activate-tome*.swift` helpers, plus the stray `tome-*` dev logs, pty-root fixtures and capture PNGs. `/tmp` is clear of the shot-session artifacts.
+- [x] **Confirm the PR diff is clean** — the merged PR #13 (`766ced3`) contains exactly: `IMAGE-REFRESH-HANDOVER.md` (A), `how-tome-works.html` (M), 5 images (M: screenshot, tour-workspace, tour-plus-menu, tour-node-editor, tour-flow-saved), and `src/renderer/renderer.js` (M). No `src-tauri` changes. **Note:** it contained only **5** images, not 6 — `flow-creation-poster.png` was the missing 6th (see above); that gap is now closed on this follow-up branch.
 
 ## Verification status
 
