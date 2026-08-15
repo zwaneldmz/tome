@@ -1,66 +1,85 @@
 # Security
 
 Tome is a desktop coding harness: agent CLIs (Claude Code, opencode, pi),
-terminals, editors, and an assistant in one Electron workspace. Its security
-claim in one sentence: **agent panes run inside an OS sandbox with no direct
-network egress, and the only route out — a per-pane allowlist proxy — widens
-only behind a second factor, never the sandbox itself.**
+terminals, editors, and an assistant in one Tauri window — a Rust backend
+(`src-tauri/src/`) and a single webview renderer (`src/renderer/`). Its
+security claim in one sentence: **agent panes run inside an OS sandbox with
+no direct network egress, and the only route out — a per-pane allowlist
+proxy — widens only behind a second factor, never the sandbox itself.**
 
 This document is the evaluation-facing summary. The maintainer-facing
 invariants live in [docs/THREATMODEL.md](docs/THREATMODEL.md).
 
 ## Trust boundaries
 
-1. **Renderer ↔ main.** The renderer is sandboxed (`sandbox: true`) and
-   reaches main only over vetted IPC channels. Every handler refuses while
-   the app is locked except an explicit pre-login allowlist (fail-closed lock
-   gate); the channels that stay open pre-login accept only slug-shaped keys
-   and can never reach the credential file or the egress allowlist.
+1. **Renderer ↔ backend.** The renderer is a Tauri webview — there is no
+   Electron `sandbox: true` flag; the trust boundary is renderer ↔ Rust
+   over Tauri IPC, gated fail-closed. Every `#[tauri::command]` calls
+   `lock_gate::guard` (`src-tauri/src/lock_gate.rs`) and refuses while the
+   app is locked except an explicit `OPEN_CHANNELS` allowlist; the store
+   channels that stay open pre-login accept only slug-shaped keys
+   (`src-tauri/src/store_keys.rs`) and can never reach the credential file
+   or the egress allowlist (`RESERVED_KEYS`).
 2. **Agent pane ↔ host.** Agent CLIs run under the macOS seatbelt
-   (`sandbox-exec`) with all direct egress denied, DNS included. The only way
-   out is a per-pane CONNECT proxy on `127.0.0.1` enforcing the
-   model-provider allowlist. Freeing a pane widens the *proxy*, never the
-   sandbox — the seatbelt profile is fixed at spawn and no code path weakens
-   it afterward; the proxy remains the only route out even when open.
-3. **Model ↔ tools.** The assistant (conductor) reads terminal scrollback and
-   issues tool calls against the workspace — a classic confused deputy, since
-   any program can print text that looks like instructions. Caps: scrollback
-   is ANSI/control-stripped before the model sees it; the tool loop is
-   bounded to 8 turns; `type_in_terminal` only submits (`\r`) when the user
-   has explicitly enabled auto-run, and with auto-run off, control characters
-   that would submit or signal on their own are stripped from typed text;
-   file opens on the model's behalf are confinement-checked against open
-   workspace folders and brain vaults.
+   (`sandbox-exec`, profile built in `src-tauri/src/airgap/seatbelt.rs`) or
+   the Linux bubblewrap/unshare ladder (`src-tauri/src/airgap/linux.rs`)
+   with all direct egress denied, DNS included. The only way out is a
+   per-pane CONNECT proxy on `127.0.0.1`
+   (`src-tauri/src/airgap/proxy.rs`) enforcing the model-provider
+   allowlist (`src-tauri/src/airgap/allowlist.rs`). Freeing a pane widens
+   the *proxy*, never the sandbox — the seatbelt profile / bwrap wrap is
+   fixed at spawn and no code path weakens it afterward; the proxy remains
+   the only route out even when open.
+3. **Model ↔ tools.** The assistant (conductor, `src-tauri/src/conductor/`)
+   reads terminal scrollback and issues tool calls against the workspace — a
+   classic confused deputy, since any program can print text that looks like
+   instructions. Caps: scrollback is capped (`SCROLL_CAP`) and
+   ANSI/control-stripped before the model sees it; the tool loop is bounded
+   to 8 turns (`MAX_TURNS`); `type_in_terminal` only submits (`\r`) when the
+   user has explicitly enabled auto-run, and with auto-run off, control
+   characters that would submit or signal on their own are stripped from
+   typed text; file opens on the model's behalf are confinement-checked
+   against open workspace folders and brain vaults (`src-tauri/src/confine.rs`).
 
 ## Key invariants
 
 - **Second-factor pane unlock.** App login already proves the passphrase (or
   Touch ID); freeing an air-gapped pane therefore demands a *second* factor —
-  the TOTP code when enrolled, the passphrase again otherwise.
+  the TOTP code when enrolled, the passphrase again otherwise
+  (`src-tauri/src/authlock.rs`).
 - **Credentials and allowlist are unreachable from panes.** The seatbelt
   denies sandboxed panes reads of the auth file (scrypt passphrase hash +
-  TOTP secret, 0600) and writes under `userData` generally (allowlist
-  tamper). The note vault lives outside `userData` precisely so agents get
-  full read/write of it with zero sandbox changes.
+  TOTP secret, 0600) and writes under the app config dir generally
+  (allowlist tamper). On Linux, the bwrap wrap replaces the config dir with
+  a fresh tmpfs; the self-unshare fallback's file confinement is still a
+  documented TODO (see THREATMODEL.md). The note vault lives outside the app
+  config dir (`~/Tome/Brains/<ws>`, `src-tauri/src/brain.rs`) precisely so
+  agents get full read/write of it with zero sandbox changes.
 - **Vetted pane kinds.** The renderer names a pane kind from a shared
-  allowlist; main builds the command line. A compromised renderer cannot
-  request arbitrary binaries or arguments.
+  allowlist; the Rust backend builds the command line
+  (`src-tauri/src/agent_spawn.rs`, `src-tauri/src/custom_agents.rs`). A
+  compromised renderer cannot request arbitrary binaries or arguments.
 - **Secrets are scoped.** Provider keys are read once from an interactive
-  login shell and merged into the env of agent panes only; the chat API key
-  lives in main and never enters the renderer.
+  login shell (`src-tauri/src/login_env.rs`) and merged into the env of
+  agent panes only; the chat API key lives in the Rust backend and never
+  enters the renderer.
 - **Repo allowlists are untrusted input.** A repo's `.tome/airgap.json` is
   validated by the same wildcard compiler as the user allowlist (over-broad
-  patterns refused), and honored only after user consent. Consent is verified
-  and stored in main, pinned to the file's SHA-1: main re-hashes the file at
-  consent time, at every boot, and at every workspace sync — a post-consent
-  edit re-prompts, and deleting the file is a real revocation. A compromised
-  renderer can only *ask* main to re-check the file; it cannot widen egress.
-- **The event log records actions, never payloads.** `userData/events.jsonl`
-  keeps a capped, append-only audit of security-relevant actions — conductor
-  tool calls (name, ids, outcome), air-gap unlocks/relocks, blocked egress
-  hosts. Tool inputs/outputs and typed text stay out by design: they may
-  contain secrets. The renderer reads it only through the lock-gated
-  `events:list` channel.
+  patterns refused, `src-tauri/src/airgap/allowlist.rs`), and honored only
+  after user consent. Consent is verified and stored in the backend
+  (`src-tauri/src/airgap/mod.rs`), pinned to the file's SHA-1: the backend
+  re-hashes the file at consent time, at every boot, and at every workspace
+  sync — a post-consent edit re-prompts, and deleting the file is a real
+  revocation. A compromised renderer can only *ask* the backend to re-check
+  the file; it cannot widen egress.
+- **The event log records actions, never payloads.**
+  `<app_data_dir>/events.jsonl` keeps a capped, append-only audit of
+  security-relevant actions — conductor tool calls (name, ids, outcome),
+  air-gap unlocks/relocks, blocked egress hosts
+  (`src-tauri/src/eventlog.rs`, cap 5000; `src-tauri/src/events.rs`). Tool
+  inputs/outputs and typed text stay out by design: they may contain
+  secrets. The renderer reads it only through the lock-gated `events:list`
+  channel.
 
 ## Independent review
 
@@ -87,7 +106,8 @@ allowlists, confused-deputy paths through the conductor that defeat the
 auto-run guard.
 
 **Out of scope:** `TOME_SHOT` dev mode — a lock-gate bypass that exists for
-development screenshots, gated on `!app.isPackaged` and documented in the
+development screenshots, gated on `tauri::is_dev()` (see
+`src-tauri/src/lib.rs`'s `boot_auth_and_airgap`) and documented in the
 threat model; issues requiring physical access or an already-compromised
 host; the `xlsx` package's CDN distribution pin (deliberate, integrity-pinned
 — see [docs/THREATMODEL.md](docs/THREATMODEL.md)).

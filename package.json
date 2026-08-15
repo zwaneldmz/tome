@@ -1,7 +1,7 @@
 {
   "name": "tome",
   "productName": "Tome",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A coding harness: agents, terminals, editors, and chat in one bound workspace.",
   "author": "Lwando Zwane",
   "license": "MIT",

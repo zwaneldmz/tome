@@ -17,6 +17,10 @@ docs/*
 !docs/tour-*.png
 !docs/flow-creation-poster.png
 !docs/flow-creation.mp4
+!docs/technical-council.html
+!docs/COUNCIL-FINDINGS-PLAN.md
+!docs/THREATMODEL.md
+!docs/perf.md
 .agents/
 .superpowers/
 src-tauri/target/

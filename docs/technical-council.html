@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>Tome — Technical Council Review</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0b0b11; --bg-sunken: #050508; --surface: #13141f; --surface-2: #1a1c2b;
+  --line: rgba(255,255,255,.09); --line-2: rgba(255,255,255,.16);
+  --text: #c9d4e3; --bright: #eef4fb; --muted: #7a86a0;
+  --accent: #00e5ff; --accent-soft: rgba(0,229,255,.12); --accent-ring: rgba(0,229,255,.4);
+  --ok: #3dff9e; --warn: #ffd166; --bad: #ff5c7a;
+  --mono: ui-monospace,'SF Mono','JetBrains Mono',Menlo,monospace;
+  --sans: -apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',system-ui,sans-serif;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg:#ffffff; --bg-sunken:#f1f1f5; --surface:#f4f4f8; --surface-2:#ececf2;
+    --line:rgba(0,0,0,.1); --line-2:rgba(0,0,0,.18);
+    --text:#35353d; --bright:#101014; --muted:#6b6b73;
+    --accent:#0071e3; --accent-soft:rgba(0,113,227,.1); --accent-ring:rgba(0,113,227,.3);
+    --ok:#12925a; --warn:#9a6b00; --bad:#d02a4d;
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 var(--sans); }
+h1,h2,h3 { font-family:var(--mono); color:var(--bright); letter-spacing:-.01em; line-height:1.2; }
+a { color:var(--accent); text-underline-offset:3px; }
+code { font-family:var(--mono); font-size:.84em; background:var(--surface-2); border:1px solid var(--line); border-radius:5px; padding:.06em .34em; }
+.wrap { max-width: 900px; margin: 0 auto; padding: 0 22px; }
+.mast { display:flex; align-items:center; gap:10px; padding:16px 22px; font-family:var(--mono); font-size:13px; border-bottom:1px solid var(--line); }
+.mast .name { font-weight:600; color:var(--bright); }
+.mast .tag { margin-left:auto; color:var(--muted); }
+.hero { padding: 34px 0 6px; }
+.hero h1 { font-size: clamp(26px,5vw,42px); margin:0 0 14px; max-width:24ch; }
+.hero .sub { color:var(--muted); max-width:70ch; }
+.verdict { display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin:22px 0; }
+.score { font-family:var(--mono); font-size:40px; font-weight:600; color:var(--bright); background:var(--surface); border:1px solid var(--line-2); border-radius:14px; padding:10px 18px; }
+.score small { font-size:13px; color:var(--muted); font-weight:400; }
+.verdict p { margin:0; max-width:52ch; }
+/* nav rail */
+.nav { position: sticky; top:0; z-index:10; background:color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(10px); border-bottom:1px solid var(--line); }
+.nav .wrap { display:flex; gap:6px; overflow-x:auto; padding:10px 22px; }
+.nav a { flex:0 0 auto; font-family:var(--mono); font-size:12.5px; color:var(--text); text-decoration:none; border:1px solid var(--line); border-radius:999px; padding:6px 13px; white-space:nowrap; }
+.nav a:hover, .nav a.is-on { border-color:var(--accent-ring); color:var(--bright); background:var(--accent-soft); }
+section { padding: 34px 0 4px; border-top:1px solid var(--line); scroll-margin-top: 60px; }
+section:first-of-type { border-top:0; }
+.eyebrow { font-family:var(--mono); font-size:11.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin-bottom:8px; }
+h2 { font-size:24px; margin:0 0 12px; }
+.lead { color:var(--muted); max-width:72ch; }
+.box { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin:16px 0; }
+.box h3 { margin:0 0 10px; font-size:15px; }
+.box ul { margin:0; padding-left:18px; }
+.box li { margin:6px 0; }
+.rating { font-family:var(--mono); font-size:13px; color:var(--muted); }
+.rating b { color:var(--bright); }
+/* severity */
+.sev { font-family:var(--mono); font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; border-radius:999px; padding:2px 8px; border:1px solid; }
+.sev.crit { color:var(--bad); border-color:var(--bad); background:color-mix(in srgb, var(--bad) 12%, transparent); }
+.sev.high { color:var(--warn); border-color:var(--warn); background:color-mix(in srgb, var(--warn) 12%, transparent); }
+.sev.med  { color:var(--accent); border-color:var(--accent); background:var(--accent-soft); }
+.sev.low  { color:var(--muted); border-color:var(--line-2); background:var(--surface-2); }
+/* findings */
+.finding { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--line-2); border-radius:10px; padding:14px 16px; margin:14px 0; }
+.finding.crit { border-left-color: var(--bad); }
+.finding.high { border-left-color: var(--warn); }
+.finding.med  { border-left-color: var(--accent); }
+.finding h3 { margin:0 0 4px; font-size:15px; }
+.finding .meta { font-family:var(--mono); font-size:12px; color:var(--muted); margin-bottom:8px; }
+.finding p { margin:0 0 6px; }
+.finding .action { color:var(--ok); }
+table { border-collapse:collapse; width:100%; font-size:14px; }
+th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { font-family:var(--mono); font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+td code { font-size:.8em; }
+.plus { color:var(--ok); } .minus { color:var(--warn); }
+footer { border-top:1px solid var(--line); margin-top:50px; padding:26px 0 80px; color:var(--muted); font-size:13px; }
+footer a { color:var(--text); }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
+</style>
+</head>
+<body>
+<header class="mast"><span class="name">tome · technical council</span><span class="tag">5 experts · 2026-08-15 · commit c12256f (+2 local)</span></header>
+
+<div class="wrap">
+  <div class="hero">
+    <h1>Council review: Tome, the containment-cell coding harness</h1>
+    <p class="sub">An adversarial multi-expert assessment of the repository at
+      <code>zwaneldmz/tome</code> — a Rust + Tauri&nbsp;v2 desktop app that runs
+      AI coding agents in an OS sandbox with a provider-only network proxy. Five
+      specialists: security, architecture, quality &amp; testing, performance,
+      and documentation consistency.</p>
+    <div class="verdict">
+      <div class="score">7.6<small>/10</small></div>
+      <p><strong>Verdict:</strong> an unusually thoughtful security design and
+        strong docs/process, held back by three things that must land before it
+        can be trusted as a security product: the security/perf docs still
+        describe the <em>removed Electron</em> code, Linux is network-contained
+        but <em>not file-confined</em>, and there is no macOS Rust gate in CI.
+      </p>
+    </div>
+  </div>
+</div>
+
+<nav class="nav" aria-label="Council sections">
+  <div class="wrap">
+    <a href="#summary">Summary</a>
+    <a href="#findings">Findings</a>
+    <a href="#security">🔒 Security</a>
+    <a href="#architecture">🏗️ Architecture</a>
+    <a href="#quality">🧪 Quality</a>
+    <a href="#performance">⚡ Performance</a>
+    <a href="#docs">📚 Docs</a>
+  </div>
+</nav>
+
+<main class="wrap">
+
+<section id="summary">
+  <p class="eyebrow">executive summary</p>
+  <h2>What the council thinks</h2>
+  <p class="lead">Tome is a serious, security-first take on a crowded category. Its
+    strongest ideas — <em>widen the proxy, never the sandbox</em>, second-factor
+    pane unlock, a SHA-1-pinned repo allowlist with TOCTOU-safe re-consent, and a
+    confused-deputy-bounded conductor — are genuinely better than most agent
+    harnesses. The engineering is disciplined: 46.5k LOC, a clean renderer/shared/Rust
+    split, 282 JS + 798 Rust tests, an audit gate with reviewed exceptions, and a
+    real (if narrow) Linux proof job. The gaps are not design gaps so much as
+    <em>reconciliation and release gaps</em>.</p>
+
+  <div class="box">
+    <h3>Top 5 actions, in order</h3>
+    <ul>
+      <li><span class="sev crit">crit</span> Rewrite <code>SECURITY.md</code>, <code>docs/THREATMODEL.md</code> and <code>docs/perf.md</code> for the Tauri code — they still cite <code>src/main/</code>, <code>node-pty</code>, <code>electron-vite</code> and <code>sandbox:true</code>.</li>
+      <li><span class="sev high">high</span> Implement Landlock file confinement on Linux (today it is egress-only — <code>TODO(landlock)</code>), or soften the "containment cell" claim.</li>
+      <li><span class="sev high">high</span> Add a macOS <code>cargo test</code> gate to <code>build.yml</code>; the 798 Rust tests and the seatbelt paths are not exercised on the primary CI platform.</li>
+      <li><span class="sev high">high</span> Wire Apple Developer ID signing + notarization into the release pipeline.</li>
+      <li><span class="sev med">med</span> Add a DOM/end-to-end smoke test for layout restore + pane spawn — a shipped regression (restore was a silent no-op) is exactly what this catches.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="findings">
+  <p class="eyebrow">consolidated findings</p>
+  <h2>All findings, ranked</h2>
+  <table>
+    <tr><th>#</th><th>Severity</th><th>Finding</th><th>Owner</th></tr>
+    <tr><td>1</td><td><span class="sev crit">crit</span></td><td>Security/perf docs are Electron-era and contradict the shipped Tauri code</td><td>📚 / 🔒</td></tr>
+    <tr><td>2</td><td><span class="sev high">high</span></td><td>Linux sandbox blocks egress only — no file confinement (<code>TODO(landlock)</code>)</td><td>🔒</td></tr>
+    <tr><td>3</td><td><span class="sev high">high</span></td><td>Linux proof is Ubuntu-only; no Fedora/AppArmor case, no aarch64 bundles, no rung-2 coverage</td><td>🧪</td></tr>
+    <tr><td>4</td><td><span class="sev high">high</span></td><td>No Rust test gate on macOS CI; seatbelt only exercised locally</td><td>🧪</td></tr>
+    <tr><td>5</td><td><span class="sev high">high</span></td><td>macOS releases unsigned &amp; un-notarized</td><td>🧪</td></tr>
+    <tr><td>6</td><td><span class="sev med">med</span></td><td>Version drift: <code>package.json</code> = 0.1.0, docs/UI say v0.2.0</td><td>📚</td></tr>
+    <tr><td>7</td><td><span class="sev med">med</span></td><td>No DOM/E2E test layer; a layout-restore regression shipped unnoticed</td><td>🧪</td></tr>
+    <tr><td>8</td><td><span class="sev med">med</span></td><td><code>xlsx</code> pinned to the SheetJS CDN (integrity-pinned, but a standing supply-chain surface)</td><td>🔒</td></tr>
+    <tr><td>9</td><td><span class="sev low">low</span></td><td>Voice requires manual <code>brew install whisper-cpp</code> + model fetch</td><td>⚡</td></tr>
+    <tr><td>10</td><td><span class="sev low">low</span></td><td>Unmerged local branch <code>fix/restore-layout-and-poster</code> carries the layout-restore fix + missing poster</td><td>🧪</td></tr>
+  </table>
+</section>
+
+<section id="security">
+  <p class="eyebrow">expert 01</p>
+  <h2>🔒 Security engineer</h2>
+  <p class="rating">Rating: <b>8.0 / 10</b> — design excellent, one material platform gap.</p>
+  <p class="lead">The threat model is the strongest part of this project. The core
+    invariants are load-bearing and mostly well-reasoned.</p>
+
+  <div class="box">
+    <h3>What's strong</h3>
+    <ul class="plus">
+      <li><strong>Fail-closed lock gate.</strong> Every IPC handler refuses while locked except an explicit pre-login allowlist, with slug-shaped key vetting and reserved keys (<code>airgap</code>, <code>airgap-auth</code>) unreachable.</li>
+      <li><strong>Widen the proxy, never the sandbox.</strong> The seatbelt profile is fixed at spawn; unlocking only widens the loopback proxy. This is the right primitive and it's stated precisely.</li>
+      <li><strong>Second-factor pane unlock.</strong> Freeing a pane re-proves something (TOTP or passphrase) even though login already authenticated — correct for an egress-widening action.</li>
+      <li><strong>Confused-deputy caps.</strong> The conductor loop is bounded (8 turns), scrollback is ANSI/control-stripped, <code>type_in_terminal</code> only submits on explicit consent, and file opens are confined to workspaces/vaults.</li>
+      <li><strong>Repo allowlist consent is TOCTOU-safe.</strong> Consent is pinned to the file's SHA-1 and re-hashed at consent, boot, and sync. Better than almost every peer.</li>
+      <li><strong>Main owns the command line.</strong> Renderer supplies only a vetted <code>kind</code>; custom agents are re-vetted on every read with inert, character-guarded args.</li>
+      <li><strong>Audit log records actions, never payloads.</strong> The right call for a tool whose terminals may contain secrets.</li>
+    </ul>
+  </div>
+
+  <div class="finding high">
+    <h3>Linux is network-contained, not file-confined</h3>
+    <div class="meta">src-tauri/crates/tome-shim/src/linux.rs — <code>TODO(landlock)</code></div>
+    <p>On macOS the seatbelt profile denies agent writes to <code>userData</code> and reads of the
+      credential file. On Linux, <code>bubblewrap</code> + network namespaces block egress but there is
+      <em>no file-confinement layer yet</em> — an air-gapped agent can still read/write arbitrary files
+      in the user's home. The README's "containment cell" framing overstates what Linux delivers today.</p>
+    <p class="action">Action: implement Landlock (or a <code>--tmpfs</code>/bind-mount equivalent), or
+      explicitly scope the Linux claim to "network isolation" until it lands.</p>
+  </div>
+
+  <div class="finding crit">
+    <h3>The security docs describe code that no longer exists</h3>
+    <div class="meta">SECURITY.md · docs/THREATMODEL.md · docs/perf.md</div>
+    <p>All three still describe the Electron build: <code>src/main/</code>, <code>node-pty</code>,
+      <code>electron-vite</code>, <code>electron-rebuild</code>, "Electron userData", and a renderer
+      "sandbox: true". After the Rust + Tauri rewrite none of those files or mechanisms exist
+      (<code>src/main/</code> is gone; PTYs live in <code>src-tauri/src/pty.rs</code>). For a security
+      product, a threat model that points at the wrong code is worse than no doc at all — reviewers
+      will chase ghosts and may skip the real code.</p>
+    <p class="action">Action: re-verify every invariant against <code>lock_gate.rs</code>,
+      <code>authlock.rs</code>, <code>airgap/</code>, <code>confine.rs</code>, <code>conductor/</code>
+      and rewrite the three docs with correct paths.</p>
+  </div>
+
+  <div class="finding med">
+    <h3>SheetJS CDN pin</h3>
+    <div class="meta">package.json · THREATMODEL invariant 7</div>
+    <p><code>xlsx</code> is pinned to <code>cdn.sheetjs.com</code> with a lockfile integrity hash. It's
+      documented and defensible (the vendor stopped publishing to npm), but it's a standing third-party
+      distribution channel outside the registry.</p>
+    <p class="action">Action: keep the pin; add a periodic re-verification of the integrity hash to the
+      audit gate.</p>
+  </div>
+</section>
+
+<section id="architecture">
+  <p class="eyebrow">expert 02</p>
+  <h2>🏗️ Software architect</h2>
+  <p class="rating">Rating: <b>8.0 / 10</b> — clean boundaries, some very large files.</p>
+  <p class="lead">The split is sound: a dumb, confined renderer, a small <code>shared/</code> layer for
+    cross-boundary validation, and a Rust core that owns all authority (PTYs, proxies, fs, auth). That is
+    exactly the right shape for a security-sensitive desktop app.</p>
+
+  <div class="box">
+    <h3>What's strong</h3>
+    <ul class="plus">
+      <li>Authority is in Rust (<code>pty.rs</code>, <code>airgap/</code>, <code>authlock.rs</code>, <code>fs.rs</code>, <code>lock_gate.rs</code>); the renderer is a view + validated requests.</li>
+      <li><code>shared/</code> carries the validators (pane kinds, flow model, terminal text) so both sides agree without trusting each other.</li>
+      <li>Single-renderer pane grid (dockview + xterm) keeps the process model flat — a 6-pane workspace is not 6 browsers.</li>
+      <li>The flow subsystem (<code>flow/</code>) is self-contained and the runner keeps handoff files as plain markdown — debuggable and diffable.</li>
+    </ul>
+  </div>
+
+  <div class="finding med">
+    <h3>Large modules invite drift</h3>
+    <div class="meta">src/renderer/style.css (3.5k) · panels/flow.js (1.3k) · ipc/pty.rs (1.3k) · panes.js (1.0k)</div>
+    <p>Several files are >1k lines (with <code>style.css</code> at 3.5k). They're well-commented, but the
+      pane/flow/pty modules are where most future change will land and where the layout-restore bug lived.</p>
+    <p class="action">Action: as the flow and pane systems grow, extract narrow submodules with their own
+      tests rather than extending the giants.</p>
+  </div>
+</section>
+
+<section id="quality">
+  <p class="eyebrow">expert 03</p>
+  <h2>🧪 Quality &amp; release engineering</h2>
+  <p class="rating">Rating: <b>6.0 / 10</b> — good unit coverage, thin integration story.</p>
+  <p class="lead">The unit-test floor is genuinely good, and the CI is unusually honest. The problem is the
+    <em>middle</em>: nothing exercises the real renderer, and the Rust side isn't gated on the platform most
+    of your users run.</p>
+
+  <div class="box">
+    <h3>What's strong</h3>
+    <ul class="plus">
+      <li>282 vitest tests + 798 Rust <code>#[test]</code>s; lint and a renderer-bundle smoke check all gate on CI.</li>
+      <li>An audit gate (<code>scripts/audit-gate.mjs</code>) with reviewed, file-tracked exceptions instead of raw <code>npm audit</code>.</li>
+      <li>A dedicated <code>linux-sandbox.yml</code> that actually runs the <code>#[ignore]</code>d curl-matrix on real bwrap — rare and valuable honesty about what's unproven.</li>
+    </ul>
+  </div>
+
+  <div class="finding high">
+    <h3>No macOS Rust gate in CI</h3>
+    <div class="meta">.github/workflows/build.yml</div>
+    <p><code>build.yml</code> (macOS) runs npm audit/lint/vitest/vite + a renderer smoke check, but never
+      <code>cargo test</code> or <code>cargo check</code>. The seatbelt paths — the load-bearing macOS
+      enforcement — are only exercised on a developer's laptop, while the Linux job tests a <em>different</em>
+      sandbox on a <em>different</em> OS.</p>
+    <p class="action">Action: add <code>cargo test --lib</code> (or at least <code>cargo check</code>) to
+      <code>build.yml</code>; consider a macOS <code>#[ignore]</code>d seatbelt integration test like the Linux one.</p>
+  </div>
+
+  <div class="finding high">
+    <h3>macOS releases are unsigned and un-notarized</h3>
+    <div class="meta">tauri.conf.json (signingIdentity: null) · release-tauri.yml</div>
+    <p>Releases default to ad-hoc signing. That's documented and roadmap'd, but for a security product the
+      Gatekeeper quarantine warning is a real trust and adoption cost, and "verify the SHA256SUMS" is a poor
+      substitute for stapled notarization.</p>
+    <p class="action">Action: wire <code>APPLE_CERTIFICATE</code>/<code>APPLE_API_KEY</code> and add a
+      <code>spctl</code>/<code>stapler validate</code> step to the release job.</p>
+  </div>
+
+  <div class="finding high">
+    <h3>Linux proof is a single point</h3>
+    <div class="meta">.github/workflows/linux-sandbox.yml</div>
+    <p>Enforcement is proven on Ubuntu only. The AppArmor-userns (Ubuntu 24.04) case, Fedora, the
+      self-unshare "rung 2" fallback, and Linux aarch64 are all uncovered.</p>
+    <p class="action">Action: extend the matrix to Ubuntu 24.04 + Fedora, and add aarch64 Linux bundles.</p>
+  </div>
+
+  <div class="finding med">
+    <h3>No DOM/end-to-end test layer</h3>
+    <div class="meta">test/ (logic-only) · src/renderer/panes.js</div>
+    <p>vitest runs with no DOM. A regression shipped where <code>restoreLayout()</code> was a silent no-op
+      (it guarded on <code>Array.isArray(saved.panels)</code> while dockview stores an object), so panes never
+      restored across restarts — and nothing in CI caught it.</p>
+    <p class="action">Action: add a thin DOM harness smoke test for <code>restoreLayout</code> + pane spawn,
+      or a Tauri WebDriver test that boots the app and asserts a layout round-trips.</p>
+  </div>
+
+  <div class="finding low">
+    <h3>Unmerged fix branch</h3>
+    <div class="meta">git branch fix/restore-layout-and-poster</div>
+    <p>The layout-restore fix and the missing tour poster are committed on a local branch but not yet
+      merged or runtime-verified in the packaged app.</p>
+    <p class="action">Action: merge, then do one manual "save layout → relaunch → confirm panes restore"
+      pass in the real app.</p>
+  </div>
+</section>
+
+<section id="performance">
+  <p class="eyebrow">expert 04</p>
+  <h2>⚡ Performance engineer</h2>
+  <p class="rating">Rating: <b>7.0 / 10</b> — honest model, numbers not yet re-measured post-Tauri.</p>
+  <p class="lead">The resource model is right: one renderer, N pty processes, N proxy sockets — no per-pane
+    browser overhead. The caveat is that the <code>perf.md</code> measurements (boot marks, bundle size,
+    "node-pty rebuild") predate the Tauri rewrite and are no longer authoritative.</p>
+
+  <div class="box">
+    <h3>What's strong</h3>
+    <ul class="plus">
+      <li>Scrollback is capped (<code>SCROLL_CAP</code> 200k chars) and the event log is capped (5k records) — the two unbounded-growth vectors are bounded.</li>
+      <li>Lazy loading of <code>mammoth</code>/<code>xlsx</code> and the CodeMirror language table keeps cold-start work off the paint path.</li>
+      <li>The honest "measure it yourself" posture beats a fake headline number.</li>
+    </ul>
+  </div>
+
+  <div class="finding med">
+    <h3>Perf numbers are stale</h3>
+    <div class="meta">docs/perf.md</div>
+    <p>The boot table and "1.7 MB renderer bundle" figure are from the Electron build (<code>electron-vite</code>,
+      <code>node-pty</code>, <code>electron-rebuild</code>). The Tauri renderer is bundled by Vite to
+      <code>dist-web/</code> and the backend is Rust — re-measure.</p>
+    <p class="action">Action: re-run the <code>TOME_PROFILE</code> marks and re-print bundle sizes against the
+      current build, and drop the <code>node-pty</code> postinstall note.</p>
+  </div>
+</section>
+
+<section id="docs">
+  <p class="eyebrow">expert 05</p>
+  <h2>📚 Documentation &amp; consistency</h2>
+  <p class="rating">Rating: <b>7.0 / 10</b> — excellent content, but internally inconsistent with the shipped code.</p>
+  <p class="lead">This repo writes docs the way it writes code: carefully. The README, interactive tour,
+    launch guide, threat model and perf doc are all above-average. The problem is that the rewrite outran
+    three of them.</p>
+
+  <div class="box">
+    <h3>What's strong</h3>
+    <ul class="plus">
+      <li>README is crisp and honest (unsigned builds, platform caveats, "voice is local").</li>
+      <li>The interactive tour is a genuinely good onboarding artifact.</li>
+      <li>The threat model is unusually precise about <em>why</em> each invariant is load-bearing.</li>
+    </ul>
+  </div>
+
+  <div class="finding crit">
+    <h3>Electron-era docs vs Tauri reality</h3>
+    <div class="meta">SECURITY.md · THREATMODEL.md · perf.md</div>
+    <p>These are the same files the security expert flagged: they cite <code>src/main/</code>,
+      <code>node-pty</code>, <code>electron-vite</code>, <code>electron-rebuild</code> and "Electron userData".
+      None survive the rewrite. The threat model's file paths will send a future auditor to dead code.</p>
+    <p class="action">Action: fold into the security-doc rewrite; add a doc-link check that fails CI when a
+      referenced path no longer exists.</p>
+  </div>
+
+  <div class="finding med">
+    <h3>Version drift</h3>
+    <div class="meta">package.json = 0.1.0 · README/docs = "v0.2.0"</div>
+    <p>The renderer package is still 0.1.0 while the UI and docs call it v0.2.0. There's no single source of
+      truth (package.json vs Cargo.toml vs docs).</p>
+    <p class="action">Action: bump to a real version and keep package.json/Cargo.toml/docs in lock-step in
+      the release pipeline.</p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Generated 2026-08-15 by a five-expert council (security, architecture, quality &amp; testing,
+      performance, documentation). Evidence gathered from the repository at
+      <code>zwaneldmz/tome@c12256f</code> plus two local commits on
+      <code>fix/restore-layout-and-poster</code>. Scores are expert opinion, not a substitute for a formal
+      security review.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('.nav a'));
+  var map = {};
+  links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+  function mark(id) {
+    links.forEach(function (a) {
+      a.classList.toggle('is-on', a.getAttribute('href') === '#' + id);
+    });
+  }
+  var secs = Array.prototype.slice.call(document.querySelectorAll('section[id]'));
+  var obs = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) { if (e.isIntersecting) mark(e.target.id); });
+  }, { rootMargin: '-40% 0px -55% 0px' });
+  secs.forEach(function (s) { obs.observe(s); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    var t = e.target;
+    if (t && t.closest && t.closest('input,textarea,select,pre')) return;
+    var ids = secs.map(function (s) { return s.id; });
+    var cur = ids.indexOf((document.activeElement && document.activeElement.getAttribute('href') || '').slice(1));
+    if (cur < 0) cur = ids.indexOf(location.hash.slice(1));
+    var n = cur + (e.key === 'ArrowRight' ? 1 : -1);
+    if (n < 0 || n >= ids.length) return;
+    e.preventDefault();
+    location.hash = '#' + ids[n];
+  });
+})();
+</script>
+</body>
+</html>
