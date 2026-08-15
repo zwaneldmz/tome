@@ -30,7 +30,16 @@ on:
 
 jobs:
   linux-sandbox:
-    runs-on: ubuntu-latest
+    # Matrix over both supported Ubuntu LTS lines: 22.04 is the "common
+    # case" (unprivileged user namespaces allowed by default) and 24.04
+    # exercises the AppArmor userns restriction the
+    # "Allow unprivileged user namespaces" step below relaxes. Follow-ups
+    # not yet covered: Fedora (needs a container job, not a hosted VM image)
+    # and Linux aarch64 (needs an arm64 runner or a cross toolchain).
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4

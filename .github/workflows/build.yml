@@ -46,3 +46,31 @@ jobs:
           # class names like ChatPanel don't survive minification.
           grep -q 'chat-mic' dist-web/assets/*.js \
             && echo "renderer smoke check OK"
+
+      # --- Rust (macOS) gate -------------------------------------------------
+      # This job has always gated the renderer (npm test + vite build) but
+      # never compiled a line of Rust — the src-tauri workspace only gets a
+      # real `cargo` compile in the Linux sandbox job. Close that gap on the
+      # macOS host this repo actually targets: install a stable toolchain
+      # (no rust-toolchain(.toml) file is pinned in this repo) and compile +
+      # unit-test the workspace. `cargo test --lib` stays scoped to the lib
+      # unit tests — the #[ignore]'d Linux integration tests have no macOS
+      # meaning and stay unrun here (see linux-sandbox.yml for those).
+      - name: Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      # tauri.conf.json's bundle.externalBin makes tauri-build's build script
+      # REQUIRE the triple-suffixed sidecar to exist before any Rust compiles
+      # ("resource path `binaries/tome-shim-<triple>` doesn't exist"), and
+      # src-tauri/binaries/ is gitignored staging output — so a clean CI
+      # checkout must stage it first, exactly as the linux-sandbox job does.
+      - name: Stage the tome-shim sidecar (required by tauri-build's externalBin check)
+        run: bash scripts/build-sidecar.sh
+
+      - name: cargo check (src-tauri workspace compiles)
+        working-directory: src-tauri
+        run: cargo check --workspace
+
+      - name: cargo test --lib (macOS unit tests)
+        working-directory: src-tauri
+        run: cargo test --lib
