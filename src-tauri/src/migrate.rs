@@ -48,8 +48,7 @@
 //! inspects, or attempts to decrypt it. `authlock::AuthLock::load` already
 //! deserializes whatever lands on disk permissively, and its existing
 //! `enc:v1:`-prefix detection already fails that one field closed
-//! (verification just returns `false`) and surfaces
-//! `totp_migration_needed()` for the caller to prompt re-enrollment — this
+//! (verification just returns `false`) — this
 //! file adds no logic of its own for that path, on purpose.
 //!
 //! ## Idempotency and safety

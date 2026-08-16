@@ -65,17 +65,10 @@ pub struct AppState {
     /// in `lib.rs::run()` awaits this, capped at 1.5s — see that handler's
     /// doc comment for the full handshake.
     pub quit_ready: Notify,
-    /// Live filesystem watcher handles keyed by watched path, backing the
-    /// `fs_watch`/`fs_unwatch` commands. Placeholder value type — becomes
-    /// the real notify/notify-debouncer-mini handle when `fs.rs` grows a
-    /// body; kept here now only so that slice never needs to touch this
-    /// struct.
-    pub watchers: Mutex<HashMap<String, ()>>,
     /// Live PTY panes, keyed by pane id — backs the `pty_write`/
     /// `pty_resize`/`pty_kill` commands (`pty_create` itself is a later
     /// slice's work; see `pty.rs`'s module doc comment for the exact
-    /// phase-2 split). Real from Phase 2 slice P1 on, unlike `watchers`
-    /// above.
+    /// phase-2 split). Real from Phase 2 slice P1 on.
     pub pty: crate::pty::Registry,
 
     /// Popout window labels the renderer has cleared to close, armed by
@@ -216,7 +209,6 @@ impl AppState {
             folders_synced: RwLock::new(false),
             theme: RwLock::new(serde_json::Value::Null),
             quit_ready: Notify::new(),
-            watchers: Mutex::new(HashMap::new()),
             pty: crate::pty::Registry::new(),
             popout_approved: Mutex::new(std::collections::HashSet::new()),
             airgap: airgap::AirgapState::new(),
