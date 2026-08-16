@@ -53,7 +53,8 @@ pub fn can_prompt() -> bool {
     // Any error (no hardware, not enrolled, biometry locked out, MDM
     // restriction) means "cannot prompt", matching Electron's
     // canPromptTouchID, which returns NO in exactly those cases.
-    unsafe { ctx.canEvaluatePolicy_error(LAPolicy::DeviceOwnerAuthenticationWithBiometrics) }.is_ok()
+    unsafe { ctx.canEvaluatePolicy_error(LAPolicy::DeviceOwnerAuthenticationWithBiometrics) }
+        .is_ok()
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -77,26 +78,27 @@ pub async fn prompt() -> Result<(), String> {
         let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
         let ctx = unsafe { LAContext::new() };
         let reason = NSString::from_str(REASON);
-        let handler = block2::RcBlock::new(move |success: objc2::runtime::Bool, err: *mut NSError| {
-            let result = if success.as_bool() {
-                Ok(())
-            } else {
-                // Mirror Electron's rejection: the NSError's
-                // localizedDescription is the message Electron surfaces
-                // ("Canceled by user.", "Biometry is locked out.", …).
-                // A nil error with success=NO is not a real combination,
-                // but don't unwrap on it — fall back to the JS original's
-                // own generic string.
-                let msg = unsafe { err.as_ref() }
-                    .map(|e| e.localizedDescription().to_string())
-                    .unwrap_or_else(|| "Touch ID failed.".to_string());
-                Err(msg)
-            };
-            // If the receiver hung up (caller dropped the future — e.g.
-            // the app is quitting), dropping the send is the right move:
-            // the prompt outcome no longer has anyone to report to.
-            let _ = tx.send(result);
-        });
+        let handler =
+            block2::RcBlock::new(move |success: objc2::runtime::Bool, err: *mut NSError| {
+                let result = if success.as_bool() {
+                    Ok(())
+                } else {
+                    // Mirror Electron's rejection: the NSError's
+                    // localizedDescription is the message Electron surfaces
+                    // ("Canceled by user.", "Biometry is locked out.", …).
+                    // A nil error with success=NO is not a real combination,
+                    // but don't unwrap on it — fall back to the JS original's
+                    // own generic string.
+                    let msg = unsafe { err.as_ref() }
+                        .map(|e| e.localizedDescription().to_string())
+                        .unwrap_or_else(|| "Touch ID failed.".to_string());
+                    Err(msg)
+                };
+                // If the receiver hung up (caller dropped the future — e.g.
+                // the app is quitting), dropping the send is the right move:
+                // the prompt outcome no longer has anyone to report to.
+                let _ = tx.send(result);
+            });
         unsafe {
             ctx.evaluatePolicy_localizedReason_reply(
                 LAPolicy::DeviceOwnerAuthenticationWithBiometrics,

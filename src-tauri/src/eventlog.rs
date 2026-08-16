@@ -66,7 +66,11 @@ impl EventRecord {
 /// `None` to default to the current instant, formatted the way
 /// `Date.prototype.toISOString()` does (`YYYY-MM-DDTHH:mm:ss.sssZ`, always
 /// UTC).
-pub fn make_event<K: Into<String>>(kind: &str, fields: Vec<(K, Value)>, ts: Option<String>) -> EventRecord {
+pub fn make_event<K: Into<String>>(
+    kind: &str,
+    fields: Vec<(K, Value)>,
+    ts: Option<String>,
+) -> EventRecord {
     EventRecord {
         ts: ts.unwrap_or_else(now_iso8601),
         kind: kind.to_string(),
@@ -201,7 +205,10 @@ mod tests {
             EventRecord {
                 ts: "2026-08-09T10:00:00.000Z".to_string(),
                 kind: "airgap:unlock".to_string(),
-                fields: vec![("paneId".to_string(), json!("pty-3")), ("minutes".to_string(), json!(15))],
+                fields: vec![
+                    ("paneId".to_string(), json!("pty-3")),
+                    ("minutes".to_string(), json!(15))
+                ],
             }
         );
     }
@@ -210,7 +217,11 @@ mod tests {
     fn make_event_defaults_ts_to_an_iso_string_when_not_injected() {
         let rec = make_event("airgap:relock", vec![("paneId", json!("pty-1"))], None);
         assert_eq!(rec.kind, "airgap:relock");
-        assert!(looks_like_iso8601(&rec.ts), "ts {:?} is not ISO8601-shaped", rec.ts);
+        assert!(
+            looks_like_iso8601(&rec.ts),
+            "ts {:?} is not ISO8601-shaped",
+            rec.ts
+        );
     }
 
     fn looks_like_iso8601(s: &str) -> bool {
@@ -319,7 +330,11 @@ mod tests {
         );
         lines = append_event(
             &lines,
-            &make_event("airgap:relock", vec![("paneId", json!("pty-1"))], Some("t2".to_string())),
+            &make_event(
+                "airgap:relock",
+                vec![("paneId", json!("pty-1"))],
+                Some("t2".to_string()),
+            ),
         );
         let text = lines.join("\n") + "\n";
         assert_eq!(
@@ -334,7 +349,10 @@ mod tests {
     #[test]
     fn parse_events_skips_a_truncated_final_line() {
         let text = "{\"ts\":\"t1\",\"kind\":\"airgap:unlock\",\"paneId\":\"pty-3\"}\n{\"ts\":\"t2\",\"kind\":\"airgap:unl";
-        assert_eq!(parse_events(text), vec![json!({"ts":"t1","kind":"airgap:unlock","paneId":"pty-3"})]);
+        assert_eq!(
+            parse_events(text),
+            vec![json!({"ts":"t1","kind":"airgap:unlock","paneId":"pty-3"})]
+        );
     }
 
     #[test]
@@ -353,7 +371,10 @@ mod tests {
         let text = format!("{rec}\r\n{rec}");
         let out = parse_events(&text);
         assert_eq!(out.len(), 2);
-        assert_eq!(out[0], json!({"ts":"t1","kind":"airgap:relock","paneId":"pty-1"}));
+        assert_eq!(
+            out[0],
+            json!({"ts":"t1","kind":"airgap:relock","paneId":"pty-1"})
+        );
         for v in out[0].as_object().unwrap().values() {
             assert!(!v.as_str().unwrap_or_default().contains('\r'));
         }

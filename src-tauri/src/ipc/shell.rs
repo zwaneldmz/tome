@@ -62,7 +62,10 @@ pub async fn shell_open_path(
                 .folders_synced
                 .read()
                 .expect("shell_open_path: AppState.folders_synced lock poisoned");
-            return Ok(serde_json::json!(confinement_error("shell:openPath", synced)));
+            return Ok(serde_json::json!(confinement_error(
+                "shell:openPath",
+                synced
+            )));
         }
     };
     let result = match app.opener().open_path(real.to_string_lossy(), None::<&str>) {

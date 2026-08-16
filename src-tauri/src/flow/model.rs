@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::agent_spawn::{AGENT_MODELS, AGENTS};
+use crate::agent_spawn::{AGENTS, AGENT_MODELS};
 
 // ---- document shape (deserialized straight from a `<name>.flow.json`) ----
 
@@ -109,7 +109,8 @@ pub fn safe_segment(s: &str) -> bool {
     if s.starts_with('-') {
         return false;
     }
-    !s.chars().any(|c| matches!(c, '\\' | '/' | ':') || c.is_control())
+    !s.chars()
+        .any(|c| matches!(c, '\\' | '/' | ':') || c.is_control())
 }
 
 pub fn safe_segment_opt(s: Option<&str>) -> bool {
@@ -143,8 +144,11 @@ pub fn validate_flow(flow: &FlowDoc) -> ValidateResult {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
 
-    if flow.version != Value::from(1) {
-        warnings.push(format!("unknown flow version \"{}\" (expected 1)", flow.version));
+    if flow.version != 1 {
+        warnings.push(format!(
+            "unknown flow version \"{}\" (expected 1)",
+            flow.version
+        ));
     }
 
     if unsafe_folder_name(&flow.name) {
@@ -168,22 +172,35 @@ pub fn validate_flow(flow: &FlowDoc) -> ValidateResult {
         for input in &node.inputs {
             let name = input.name.as_deref();
             if !safe_segment_opt(name) {
-                errors.push(unsafe_segment_error(&format!("node \"{}\" input name", node.id), name));
+                errors.push(unsafe_segment_error(
+                    &format!("node \"{}\" input name", node.id),
+                    name,
+                ));
             }
         }
         for output in &node.outputs {
             let name = output.name.as_deref();
             if !safe_segment_opt(name) {
-                errors.push(unsafe_segment_error(&format!("node \"{}\" output name", node.id), name));
+                errors.push(unsafe_segment_error(
+                    &format!("node \"{}\" output name", node.id),
+                    name,
+                ));
             }
         }
 
         if node.kind != "terminal" && !AGENTS.contains(&node.kind.as_str()) {
-            warnings.push(format!("node \"{}\" has unknown kind \"{}\"", node.id, node.kind));
+            warnings.push(format!(
+                "node \"{}\" has unknown kind \"{}\"",
+                node.id, node.kind
+            ));
         }
 
         if let Some(model) = node.model.as_deref().filter(|m| !m.is_empty()) {
-            let allowed = AGENT_MODELS.iter().find(|(k, _)| *k == node.kind).map(|(_, m)| *m).unwrap_or(&[]);
+            let allowed = AGENT_MODELS
+                .iter()
+                .find(|(k, _)| *k == node.kind)
+                .map(|(_, m)| *m)
+                .unwrap_or(&[]);
             if !allowed.contains(&model) {
                 warnings.push(format!(
                     "node \"{}\" has unknown model \"{}\" for kind \"{}\"",
@@ -204,10 +221,16 @@ pub fn validate_flow(flow: &FlowDoc) -> ValidateResult {
         let from_node = node_by_id.get(edge.from.as_str());
         let to_node = node_by_id.get(edge.to.as_str());
         if from_node.is_none() {
-            errors.push(format!("edge \"{edge_label}\" references a missing node \"{}\"", edge.from));
+            errors.push(format!(
+                "edge \"{edge_label}\" references a missing node \"{}\"",
+                edge.from
+            ));
         }
         if to_node.is_none() {
-            errors.push(format!("edge \"{edge_label}\" references a missing node \"{}\"", edge.to));
+            errors.push(format!(
+                "edge \"{edge_label}\" references a missing node \"{}\"",
+                edge.to
+            ));
         }
 
         for (field, value) in [
@@ -217,12 +240,19 @@ pub fn validate_flow(flow: &FlowDoc) -> ValidateResult {
             ("toInput", edge.to_input.as_deref()),
         ] {
             if !safe_segment_opt(value) {
-                errors.push(unsafe_segment_error(&format!("edge \"{edge_label}\" {field}"), value));
+                errors.push(unsafe_segment_error(
+                    &format!("edge \"{edge_label}\" {field}"),
+                    value,
+                ));
             }
         }
 
         if let Some(from_node) = from_node {
-            if !from_node.outputs.iter().any(|o| o.name.as_deref() == edge.from_output.as_deref()) {
+            if !from_node
+                .outputs
+                .iter()
+                .any(|o| o.name.as_deref() == edge.from_output.as_deref())
+            {
                 warnings.push(format!(
                     "edge \"{edge_label}\": \"{}\" is not an output of node \"{}\"",
                     edge.from_output.as_deref().unwrap_or("undefined"),
@@ -231,7 +261,11 @@ pub fn validate_flow(flow: &FlowDoc) -> ValidateResult {
             }
         }
         if let Some(to_node) = to_node {
-            if !to_node.inputs.iter().any(|i| i.name.as_deref() == edge.to_input.as_deref()) {
+            if !to_node
+                .inputs
+                .iter()
+                .any(|i| i.name.as_deref() == edge.to_input.as_deref())
+            {
                 warnings.push(format!(
                     "edge \"{edge_label}\": \"{}\" is not an input of node \"{}\"",
                     edge.to_input.as_deref().unwrap_or("undefined"),
@@ -272,23 +306,49 @@ fn handoff_path(flow_name: &str, node_id: &str, output_name: &str) -> String {
 /// (`flow-model.js`'s header: "the runs pane and this file share one
 /// definition of the brief").
 pub fn compose_bootstrap_prompt(flow: &FlowDoc, node: &FlowNode) -> String {
-    let node_by_id: HashMap<&str, &FlowNode> = flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let node_by_id: HashMap<&str, &FlowNode> =
+        flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
     let incoming: Vec<&FlowEdge> = flow.edges.iter().filter(|e| e.to == node.id).collect();
 
     let mut lines = Vec::new();
-    lines.push(format!("You are \"{}\" in a Tome flow \"{}\".", node.display_name(), flow.name));
+    lines.push(format!(
+        "You are \"{}\" in a Tome flow \"{}\".",
+        node.display_name(),
+        flow.name
+    ));
     lines.push(String::new());
     lines.push(format!(
         "Instructions: {}",
-        node.instructions.as_deref().filter(|s| !s.is_empty()).unwrap_or("(none given)")
+        node.instructions
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("(none given)")
     ));
     lines.push(String::new());
     lines.push("You receive:".to_string());
-    lines.push(node.expects.as_deref().filter(|s| !s.is_empty()).unwrap_or("(nothing declared)").to_string());
+    lines.push(
+        node.expects
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("(nothing declared)")
+            .to_string(),
+    );
     for edge in &incoming {
-        let upstream_name = node_by_id.get(edge.from.as_str()).map(|n| n.display_name()).unwrap_or(edge.from.as_str());
-        let path = handoff_path(&flow.name, &edge.from, edge.from_output.as_deref().unwrap_or(""));
-        let described = edge.label.as_deref().filter(|s| !s.is_empty()).map(|l| format!(": {l}")).unwrap_or_default();
+        let upstream_name = node_by_id
+            .get(edge.from.as_str())
+            .map(|n| n.display_name())
+            .unwrap_or(edge.from.as_str());
+        let path = handoff_path(
+            &flow.name,
+            &edge.from,
+            edge.from_output.as_deref().unwrap_or(""),
+        );
+        let described = edge
+            .label
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(|l| format!(": {l}"))
+            .unwrap_or_default();
         lines.push(format!(
             "- \"{}\" from {upstream_name}{described} (read from {path})",
             edge.from_output.as_deref().unwrap_or("")
@@ -296,7 +356,13 @@ pub fn compose_bootstrap_prompt(flow: &FlowDoc, node: &FlowNode) -> String {
     }
     lines.push(String::new());
     lines.push("You must produce:".to_string());
-    lines.push(node.produces.as_deref().filter(|s| !s.is_empty()).unwrap_or("(nothing declared)").to_string());
+    lines.push(
+        node.produces
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("(nothing declared)")
+            .to_string(),
+    );
     for output in &node.outputs {
         lines.push(format!("- {}", output.name.as_deref().unwrap_or("")));
     }
@@ -310,7 +376,9 @@ pub fn compose_bootstrap_prompt(flow: &FlowDoc, node: &FlowNode) -> String {
         for output in &node.outputs {
             let name = output.name.as_deref().unwrap_or("");
             let path = handoff_path(&flow.name, &node.id, name);
-            lines.push(format!("Hand off \"{name}\" by writing it to {path}, then tell the user when you're done."));
+            lines.push(format!(
+                "Hand off \"{name}\" by writing it to {path}, then tell the user when you're done."
+            ));
         }
     }
 
@@ -336,7 +404,12 @@ mod tests {
     }
 
     fn doc(name: &str, nodes: Vec<FlowNode>, edges: Vec<FlowEdge>) -> FlowDoc {
-        FlowDoc { version: Value::from(1), name: name.to_string(), nodes, edges }
+        FlowDoc {
+            version: Value::from(1),
+            name: name.to_string(),
+            nodes,
+            edges,
+        }
     }
 
     // ---- safeSegment (test/flow-confine.test.js's own suite; ported here
@@ -394,7 +467,10 @@ mod tests {
 
     #[test]
     fn flow_root_walks_back_to_the_nearest_dot_tome() {
-        assert_eq!(flow_root("/work/proj/.tome/flows/pipeline.flow.json"), "/work/proj");
+        assert_eq!(
+            flow_root("/work/proj/.tome/flows/pipeline.flow.json"),
+            "/work/proj"
+        );
     }
 
     #[test]
@@ -417,14 +493,24 @@ mod tests {
     fn validate_flow_errors_on_an_unsafe_flow_name() {
         let f = doc("../escape", vec![node("n1", "claude")], vec![]);
         let result = validate_flow(&f);
-        assert!(result.errors.iter().any(|e| e.contains("can't be used as a folder name")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.contains("can't be used as a folder name")));
     }
 
     #[test]
     fn validate_flow_errors_on_duplicate_node_ids() {
-        let f = doc("x", vec![node("n1", "claude"), node("n1", "claude")], vec![]);
+        let f = doc(
+            "x",
+            vec![node("n1", "claude"), node("n1", "claude")],
+            vec![],
+        );
         let result = validate_flow(&f);
-        assert!(result.errors.iter().any(|e| e.contains("duplicate node id")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.contains("duplicate node id")));
     }
 
     #[test]
@@ -446,7 +532,10 @@ mod tests {
     fn validate_flow_errors_on_a_traversal_shaped_node_id() {
         let f = doc("x", vec![node("../../../escaped", "claude")], vec![]);
         let result = validate_flow(&f);
-        assert!(result.errors.iter().any(|e| e.contains("can't be used in a handoff path")));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| e.contains("can't be used in a handoff path")));
     }
 
     // ---- validateFlow — warnings only, never block ----
@@ -456,7 +545,10 @@ mod tests {
         let f = doc("x", vec![node("n1", "mystery-cli")], vec![]);
         let result = validate_flow(&f);
         assert!(result.errors.is_empty());
-        assert!(result.warnings.iter().any(|w| w.contains("unknown kind \"mystery-cli\"")));
+        assert!(result
+            .warnings
+            .iter()
+            .any(|w| w.contains("unknown kind \"mystery-cli\"")));
     }
 
     #[test]
@@ -471,7 +563,9 @@ mod tests {
     #[test]
     fn compose_bootstrap_prompt_includes_the_identity_line_and_handoff_path() {
         let mut n1 = node("n1", "claude");
-        n1.outputs = vec![FlowPort { name: Some("out".to_string()) }];
+        n1.outputs = vec![FlowPort {
+            name: Some("out".to_string()),
+        }];
         let f = doc("shape", vec![n1.clone()], vec![]);
         let brief = compose_bootstrap_prompt(&f, &n1);
         assert!(brief.contains("You are \"n1\" in a Tome flow \"shape\"."));
@@ -482,9 +576,13 @@ mod tests {
     fn compose_bootstrap_prompt_lists_incoming_handoffs_by_upstream_name() {
         let mut upstream = node("n1", "claude");
         upstream.name = Some("Researcher".to_string());
-        upstream.outputs = vec![FlowPort { name: Some("notes".to_string()) }];
+        upstream.outputs = vec![FlowPort {
+            name: Some("notes".to_string()),
+        }];
         let mut downstream = node("n2", "claude");
-        downstream.inputs = vec![FlowPort { name: Some("notes".to_string()) }];
+        downstream.inputs = vec![FlowPort {
+            name: Some("notes".to_string()),
+        }];
         let edge = FlowEdge {
             id: Some("e1".to_string()),
             from: "n1".to_string(),
@@ -506,6 +604,8 @@ mod tests {
         let brief = compose_bootstrap_prompt(&f, &n1);
         assert!(brief.contains("(none given)"));
         assert!(brief.contains("(nothing declared)"));
-        assert!(brief.contains("Hand off by writing each output to .tome/flows/x/n1-<output name>.md"));
+        assert!(
+            brief.contains("Hand off by writing each output to .tome/flows/x/n1-<output name>.md")
+        );
     }
 }

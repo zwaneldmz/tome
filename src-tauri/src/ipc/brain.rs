@@ -22,7 +22,11 @@ use crate::{brain, lock_gate, state::AppState};
 
 /// `brain:open` (`{ ws }`) -> `{ root, index }`.
 #[tauri::command]
-pub async fn brain_open(app: AppHandle, state: State<'_, AppState>, ws: String) -> Result<Value, String> {
+pub async fn brain_open(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ws: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "brain:open")?;
     tokio::task::spawn_blocking(move || {
         let (root, index) = brain::open(&app, &ws)?;
@@ -44,14 +48,20 @@ pub async fn brain_open(app: AppHandle, state: State<'_, AppState>, ws: String) 
 #[tauri::command]
 pub async fn brain_close(state: State<'_, AppState>, ws: String) -> Result<Value, String> {
     lock_gate::guard(&state, "brain:close")?;
-    tokio::task::spawn_blocking(move || brain::close(&ws)).await.map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || brain::close(&ws))
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(Value::Null)
 }
 
 /// `brain:index` (`{ ws }`) -> the `Index` object directly (`{ root, notes,
 /// backlinks }`).
 #[tauri::command]
-pub async fn brain_index(app: AppHandle, state: State<'_, AppState>, ws: String) -> Result<Value, String> {
+pub async fn brain_index(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    ws: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "brain:index")?;
     let index = tokio::task::spawn_blocking(move || brain::get_index(&app, &ws))
         .await
@@ -61,7 +71,11 @@ pub async fn brain_index(app: AppHandle, state: State<'_, AppState>, ws: String)
 
 /// `brain:read` (`{ ws, rel }`) -> the note's raw text content.
 #[tauri::command]
-pub async fn brain_read(state: State<'_, AppState>, ws: String, rel: String) -> Result<Value, String> {
+pub async fn brain_read(
+    state: State<'_, AppState>,
+    ws: String,
+    rel: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "brain:read")?;
     let content = tokio::task::spawn_blocking(move || brain::read_note(&ws, &rel))
         .await
@@ -85,9 +99,10 @@ pub async fn brain_write(
 ) -> Result<Value, String> {
     lock_gate::guard(&state, "brain:write")?;
     let exclusive = exclusive.unwrap_or(false);
-    let outcome = tokio::task::spawn_blocking(move || brain::write_note(&ws, &rel, &content, exclusive))
-        .await
-        .map_err(|e| e.to_string())??;
+    let outcome =
+        tokio::task::spawn_blocking(move || brain::write_note(&ws, &rel, &content, exclusive))
+            .await
+            .map_err(|e| e.to_string())??;
     Ok(match outcome {
         brain::WriteOutcome::Ok => json!({"ok": true}),
         brain::WriteOutcome::Exists => json!({"exists": true}),
@@ -97,7 +112,11 @@ pub async fn brain_write(
 /// `brain:delete` (`{ ws, rel }`) -> `{ ok: true }` (or an `Err` for a
 /// vault-escaping path / the protected `AGENTS.md`).
 #[tauri::command]
-pub async fn brain_delete(state: State<'_, AppState>, ws: String, rel: String) -> Result<Value, String> {
+pub async fn brain_delete(
+    state: State<'_, AppState>,
+    ws: String,
+    rel: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "brain:delete")?;
     tokio::task::spawn_blocking(move || brain::delete_note(&ws, &rel))
         .await
@@ -145,7 +164,14 @@ pub async fn brain_promote(
     let outcome = tokio::task::spawn_blocking(move || {
         let core_vault = crate::store::get(&dir, "core-vault", locked);
         let core_root = core_vault.as_str().map(|s| s.to_string());
-        brain::promote(core_root.as_deref(), &ws, &rel, folder.as_deref(), overwrite, rename)
+        brain::promote(
+            core_root.as_deref(),
+            &ws,
+            &rel,
+            folder.as_deref(),
+            overwrite,
+            rename,
+        )
     })
     .await
     .map_err(|e| e.to_string())??;

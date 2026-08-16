@@ -141,7 +141,8 @@ const AUTH_FILE_NAME: &str = "airgap-auth.json";
 /// bare "sandbox unavailable": THE DESIGN is explicit that this path must
 /// never silently degrade to open egress, so the user needs to know
 /// exactly what to do next.
-pub const INSTALL_BUBBLEWRAP_HINT: &str = "Linux sandbox unavailable: bubblewrap (bwrap) is not installed, and this \
+pub const INSTALL_BUBBLEWRAP_HINT: &str =
+    "Linux sandbox unavailable: bubblewrap (bwrap) is not installed, and this \
 system does not allow unprivileged user namespaces as a fallback, so Tome \
 cannot enforce the air gap for a gapped pane. Install bubblewrap — e.g. \
 `sudo apt install bubblewrap` (Debian/Ubuntu) or `sudo dnf install bubblewrap` \
@@ -415,7 +416,9 @@ pub fn decide_sandbox_strategy(bwrap_present: bool, userns_allowed: bool) -> San
     } else if userns_allowed {
         SandboxStrategy::SelfUnshare
     } else {
-        SandboxStrategy::Refuse { reason: INSTALL_BUBBLEWRAP_HINT.to_string() }
+        SandboxStrategy::Refuse {
+            reason: INSTALL_BUBBLEWRAP_HINT.to_string(),
+        }
     }
 }
 
@@ -432,7 +435,9 @@ pub fn decide_sandbox_strategy(bwrap_present: bool, userns_allowed: bool) -> San
 /// tests below, on this host (macOS), not deferred to a Linux-only,
 /// untested probe.
 pub fn find_executable_on_path(path_var: &str, name: &str) -> Option<PathBuf> {
-    std::env::split_paths(path_var).map(|dir| dir.join(name)).find(|candidate| is_executable_file(candidate))
+    std::env::split_paths(path_var)
+        .map(|dir| dir.join(name))
+        .find(|candidate| is_executable_file(candidate))
 }
 
 fn is_executable_file(path: &Path) -> bool {
@@ -520,7 +525,10 @@ pub fn parse_max_user_namespaces(contents: &str) -> Option<bool> {
 /// non-sysctl-based unprivileged-userns restriction (Ubuntu 23.10+), which
 /// can still deny the actual `unshare()` call even when this function
 /// returns `true`.
-pub fn resolve_userns_allowed(unprivileged_userns_clone: Option<&str>, max_user_namespaces: Option<&str>) -> bool {
+pub fn resolve_userns_allowed(
+    unprivileged_userns_clone: Option<&str>,
+    max_user_namespaces: Option<&str>,
+) -> bool {
     if let Some(v) = unprivileged_userns_clone.and_then(parse_unprivileged_userns_clone) {
         return v;
     }
@@ -570,7 +578,11 @@ pub fn probe_sandbox_strategy() -> SandboxStrategy {
 /// costs nothing and rules out an entire path-traversal class outright
 /// rather than trusting every future caller to have generated a safe id.
 fn is_safe_pane_id_component(pane_id: &str) -> bool {
-    !pane_id.is_empty() && !pane_id.contains('/') && !pane_id.contains('\\') && pane_id != "." && pane_id != ".."
+    !pane_id.is_empty()
+        && !pane_id.contains('/')
+        && !pane_id.contains('\\')
+        && pane_id != "."
+        && pane_id != ".."
 }
 
 /// Pure construction of a pane's loopback-bridge unix socket path:
@@ -590,7 +602,11 @@ fn is_safe_pane_id_component(pane_id: &str) -> bool {
 /// is not expected to bite in practice; a future caller with unusually
 /// long inputs would see a bind() failure at the mechanism layer rather
 /// than a rejection here.
-pub fn pane_socket_path(xdg_runtime_dir: Option<&str>, fallback_dir: &Path, pane_id: &str) -> Option<PathBuf> {
+pub fn pane_socket_path(
+    xdg_runtime_dir: Option<&str>,
+    fallback_dir: &Path,
+    pane_id: &str,
+) -> Option<PathBuf> {
     if !is_safe_pane_id_component(pane_id) {
         return None;
     }
@@ -598,7 +614,10 @@ pub fn pane_socket_path(xdg_runtime_dir: Option<&str>, fallback_dir: &Path, pane
         Some(dir) if !dir.is_empty() => PathBuf::from(dir),
         _ => fallback_dir.to_path_buf(),
     };
-    Some(base.join(PANE_SOCKET_DIR_NAME).join(format!("pane-{pane_id}.sock")))
+    Some(
+        base.join(PANE_SOCKET_DIR_NAME)
+            .join(format!("pane-{pane_id}.sock")),
+    )
 }
 
 /// Real-environment convenience over [`pane_socket_path`]: reads
@@ -770,7 +789,10 @@ mod tests {
         let dev_bind = argv.iter().position(|a| a == "--dev-bind").unwrap();
         let bind = argv.iter().position(|a| a == "--bind").unwrap();
         let tmpfs = argv.iter().position(|a| a == "--tmpfs").unwrap();
-        assert!(dev_bind < bind, "--dev-bind / / must precede the narrower --bind");
+        assert!(
+            dev_bind < bind,
+            "--dev-bind / / must precede the narrower --bind"
+        );
         assert!(dev_bind < tmpfs, "--dev-bind / / must precede --tmpfs");
     }
 
@@ -780,7 +802,12 @@ mod tests {
         // ending tome-shim's own flags — everything after the second is
         // the caller's inner_argv, untouched.
         let argv = build_bwrap_argv(&sample_spec());
-        let dashes: Vec<usize> = argv.iter().enumerate().filter(|(_, a)| *a == "--").map(|(i, _)| i).collect();
+        let dashes: Vec<usize> = argv
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| *a == "--")
+            .map(|(i, _)| i)
+            .collect();
         assert_eq!(dashes.len(), 2);
         assert_eq!(&argv[dashes[0] + 1], "/opt/tome/bin/tome-shim");
         assert_eq!(&argv[dashes[1] + 1..], ["zsh", "-l", "-c", "claude"]);
@@ -791,7 +818,11 @@ mod tests {
         let mut spec = sample_spec();
         spec.inner_argv = Vec::new();
         let argv = build_bwrap_argv(&spec);
-        assert_eq!(argv.last().unwrap(), "--", "an empty inner_argv still ends in the trailing separator");
+        assert_eq!(
+            argv.last().unwrap(),
+            "--",
+            "an empty inner_argv still ends in the trailing separator"
+        );
 
         let mut spec2 = sample_spec();
         spec2.inner_argv = s(&["one", "two", "three"]);
@@ -826,7 +857,8 @@ mod tests {
         // pane_id, run through pane_socket_path, produces the exact source
         // path build_bwrap_argv's --bind uses.
         let pane_id = "flow-node-7";
-        let sock = pane_socket_path(Some("/run/user/1000"), &PathBuf::from("/tmp"), pane_id).unwrap();
+        let sock =
+            pane_socket_path(Some("/run/user/1000"), &PathBuf::from("/tmp"), pane_id).unwrap();
         let mut spec = sample_spec();
         spec.pane_id = pane_id.to_string();
         spec.host_socket_path = sock.clone();
@@ -900,7 +932,10 @@ mod tests {
         let spec = sample_spec();
         let argv = build_self_unshare_argv(&spec);
         let deny_read_idx = argv.iter().position(|a| a == "--deny-read").unwrap();
-        assert_eq!(argv[deny_read_idx + 1], auth_file_path(&spec.app_config_dir).display().to_string());
+        assert_eq!(
+            argv[deny_read_idx + 1],
+            auth_file_path(&spec.app_config_dir).display().to_string()
+        );
     }
 
     #[test]
@@ -944,14 +979,17 @@ mod tests {
     fn tome_shim_args_parses_the_real_build_self_unshare_argv_output() {
         let spec = sample_spec();
         let argv = build_self_unshare_argv(&spec);
-        let (shim_path, rest) = argv.split_first().expect("build_self_unshare_argv never returns an empty argv");
+        let (shim_path, rest) = argv
+            .split_first()
+            .expect("build_self_unshare_argv never returns an empty argv");
         assert_eq!(shim_path, &spec.shim_path.display().to_string());
 
         // parse_args's own contract: `args` excludes argv[0] (see that
         // function's doc comment) — `rest` here already skips the shim
         // path for exactly that reason.
-        let parsed = tome_shim::args::parse_args(rest.iter().cloned())
-            .expect("tome-shim's own parser must accept the exact argv airgap::linux builds for it");
+        let parsed = tome_shim::args::parse_args(rest.iter().cloned()).expect(
+            "tome-shim's own parser must accept the exact argv airgap::linux builds for it",
+        );
         assert!(parsed.self_unshare);
         assert!(!parsed.new_session); // sample_spec()'s headless is false
         assert_eq!(parsed.port, spec.proxy_port);
@@ -987,8 +1025,17 @@ mod tests {
         // --deny-read at all — see the assertions below).
         let spec = sample_spec();
         let argv = build_bwrap_argv(&spec);
-        let dashes: Vec<usize> = argv.iter().enumerate().filter(|(_, a)| *a == "--").map(|(i, _)| i).collect();
-        assert_eq!(dashes.len(), 2, "expected exactly two `--` separators in build_bwrap_argv's output");
+        let dashes: Vec<usize> = argv
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| *a == "--")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(
+            dashes.len(),
+            2,
+            "expected exactly two `--` separators in build_bwrap_argv's output"
+        );
         let shim_path_idx = dashes[0] + 1;
         assert_eq!(argv[shim_path_idx], spec.shim_path.display().to_string());
         let rest: Vec<String> = argv[shim_path_idx + 1..].to_vec(); // skip the shim path itself (argv[0])
@@ -1014,7 +1061,10 @@ mod tests {
 
     #[test]
     fn decide_sandbox_strategy_falls_back_to_self_unshare_without_bwrap_when_userns_is_allowed() {
-        assert_eq!(decide_sandbox_strategy(false, true), SandboxStrategy::SelfUnshare);
+        assert_eq!(
+            decide_sandbox_strategy(false, true),
+            SandboxStrategy::SelfUnshare
+        );
     }
 
     #[test]
@@ -1033,7 +1083,9 @@ mod tests {
             panic!("expected Refuse");
         };
         assert!(reason.contains("bubblewrap"));
-        assert!(reason.contains("apt install bubblewrap") || reason.contains("dnf install bubblewrap"));
+        assert!(
+            reason.contains("apt install bubblewrap") || reason.contains("dnf install bubblewrap")
+        );
     }
 
     #[test]
@@ -1045,7 +1097,9 @@ mod tests {
         // exhaustive match below) if a future edit ever adds a fourth.
         for (bwrap, userns) in [(true, true), (true, false), (false, true), (false, false)] {
             match decide_sandbox_strategy(bwrap, userns) {
-                SandboxStrategy::Bwrap | SandboxStrategy::SelfUnshare | SandboxStrategy::Refuse { .. } => {}
+                SandboxStrategy::Bwrap
+                | SandboxStrategy::SelfUnshare
+                | SandboxStrategy::Refuse { .. } => {}
             }
         }
     }
@@ -1068,7 +1122,10 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             write_file(&dir.path().join("bwrap"), true);
             let path_var = dir.path().to_string_lossy().to_string();
-            assert_eq!(find_executable_on_path(&path_var, "bwrap"), Some(dir.path().join("bwrap")));
+            assert_eq!(
+                find_executable_on_path(&path_var, "bwrap"),
+                Some(dir.path().join("bwrap"))
+            );
         }
 
         #[test]
@@ -1217,23 +1274,39 @@ mod tests {
     #[test]
     fn pane_socket_path_falls_back_to_the_given_dir_when_xdg_runtime_dir_is_none_or_empty() {
         let via_none = pane_socket_path(None, &PathBuf::from("/tmp/fallback"), "pty-1").unwrap();
-        assert_eq!(via_none, PathBuf::from("/tmp/fallback/tome/pane-pty-1.sock"));
+        assert_eq!(
+            via_none,
+            PathBuf::from("/tmp/fallback/tome/pane-pty-1.sock")
+        );
 
-        let via_empty = pane_socket_path(Some(""), &PathBuf::from("/tmp/fallback"), "pty-1").unwrap();
-        assert_eq!(via_empty, PathBuf::from("/tmp/fallback/tome/pane-pty-1.sock"));
+        let via_empty =
+            pane_socket_path(Some(""), &PathBuf::from("/tmp/fallback"), "pty-1").unwrap();
+        assert_eq!(
+            via_empty,
+            PathBuf::from("/tmp/fallback/tome/pane-pty-1.sock")
+        );
     }
 
     #[test]
     fn pane_socket_path_rejects_unsafe_pane_ids() {
         let base = PathBuf::from("/tmp/fallback");
         for bad in ["", ".", "..", "a/b", "../../etc/passwd", "a\\b"] {
-            assert_eq!(pane_socket_path(Some("/run/user/1000"), &base, bad), None, "pane_id={bad:?} must be rejected");
+            assert_eq!(
+                pane_socket_path(Some("/run/user/1000"), &base, bad),
+                None,
+                "pane_id={bad:?} must be rejected"
+            );
         }
     }
 
     #[test]
     fn pane_socket_path_accepts_a_realistic_generated_id() {
-        assert!(pane_socket_path(Some("/run/user/1000"), &PathBuf::from("/tmp"), "a1b2c3d4-e5f6-7890").is_some());
+        assert!(pane_socket_path(
+            Some("/run/user/1000"),
+            &PathBuf::from("/tmp"),
+            "a1b2c3d4-e5f6-7890"
+        )
+        .is_some());
     }
 
     // ==== ensure_pane_socket_dir / secure_pane_socket_permissions (real filesystem) ====

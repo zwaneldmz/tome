@@ -269,9 +269,15 @@ fn confined_write_path_core(
     if !is_confined(open_folders, folders_synced, path) {
         return Err(confinement_reason(folders_synced));
     }
-    let parent = path.parent().ok_or_else(|| confinement_reason(folders_synced))?;
-    let name = path.file_name().filter(|n| !n.is_empty()).ok_or_else(|| confinement_reason(folders_synced))?;
-    let real_parent = std::fs::canonicalize(parent).map_err(|_| confinement_reason(folders_synced))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| confinement_reason(folders_synced))?;
+    let name = path
+        .file_name()
+        .filter(|n| !n.is_empty())
+        .ok_or_else(|| confinement_reason(folders_synced))?;
+    let real_parent =
+        std::fs::canonicalize(parent).map_err(|_| confinement_reason(folders_synced))?;
     if !is_confined(open_folders, folders_synced, &real_parent) {
         return Err(confinement_reason(folders_synced));
     }
@@ -538,7 +544,8 @@ mod tests {
         fs::create_dir_all(&inside).unwrap();
 
         let folders = vec![inside];
-        let result = confined_write_path_core(&folders, false, &base.join("workspace").join("new.txt"));
+        let result =
+            confined_write_path_core(&folders, false, &base.join("workspace").join("new.txt"));
         assert_eq!(result, Err(confinement_reason(false)));
     }
 }

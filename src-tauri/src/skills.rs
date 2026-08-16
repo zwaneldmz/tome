@@ -215,7 +215,11 @@ fn parse_frontmatter(content: &str, dir_rel: &str) -> Skill {
         }
     }
 
-    Skill { name, description, rel: dir_rel.to_string() }
+    Skill {
+        name,
+        description,
+        rel: dir_rel.to_string(),
+    }
 }
 
 /// The body a `read` should return: the post-fence body when the document has
@@ -231,8 +235,8 @@ fn body_of(content: &str) -> String {
 /// trailing whitespace, so the body reads clean (`"hello world"` rather than
 /// `"\nhello world\n"`).
 fn trim_body(body: &str) -> &str {
-    body.trim_start_matches(|c: char| c == '\n' || c == '\r')
-        .trim_end_matches(|c: char| c == '\n' || c == '\r' || c == ' ' || c == '\t')
+    body.trim_start_matches(['\n', '\r'])
+        .trim_end_matches(['\n', '\r', ' ', '\t'])
 }
 
 /// The last path segment of a skill's directory — `mattpocock/tdd` -> `tdd`,
@@ -296,8 +300,16 @@ mod tests {
     #[test]
     fn list_finds_and_sorts_skills() {
         let dir = tempdir().unwrap();
-        write_skill(dir.path(), "foo", "---\nname: alpha\ndescription: a\n---\nbody");
-        write_skill(dir.path(), "bar", "---\nname: beta\ndescription: b\n---\nbody");
+        write_skill(
+            dir.path(),
+            "foo",
+            "---\nname: alpha\ndescription: a\n---\nbody",
+        );
+        write_skill(
+            dir.path(),
+            "bar",
+            "---\nname: beta\ndescription: b\n---\nbody",
+        );
 
         let skills = list(dir.path());
         assert_eq!(skills.len(), 2);

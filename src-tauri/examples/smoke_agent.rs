@@ -17,7 +17,13 @@ use std::sync::{Arc, Mutex};
 use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 
 fn log(evidence: &Arc<Mutex<std::fs::File>>, msg: &str) {
-    let line = format!("[{:?}] {}\n", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap(), msg);
+    let line = format!(
+        "[{:?}] {}\n",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap(),
+        msg
+    );
     print!("{}", line);
     evidence.lock().unwrap().write_all(line.as_bytes()).unwrap();
     evidence.lock().unwrap().flush().unwrap();
@@ -25,7 +31,9 @@ fn log(evidence: &Arc<Mutex<std::fs::File>>, msg: &str) {
 
 #[tokio::main]
 async fn main() {
-    let evidence = Arc::new(Mutex::new(std::fs::File::create("/tmp/tome-smoke-evidence.log").unwrap()));
+    let evidence = Arc::new(Mutex::new(
+        std::fs::File::create("/tmp/tome-smoke-evidence.log").unwrap(),
+    ));
     log(&evidence, "=== live-agent smoke: start ===");
 
     // --- the same pieces pty_create assembles ---
@@ -37,7 +45,10 @@ async fn main() {
     let blocked: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let blocked2 = blocked.clone();
     let proxy = tome_lib::airgap::proxy::PaneProxy::spawn(
-        tome_lib::airgap::allowlist::DEFAULT_ALLOW.iter().map(|s| s.to_string()).collect(),
+        tome_lib::airgap::allowlist::DEFAULT_ALLOW
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
         None,
         move |ev| {
             blocked2.lock().unwrap().push(format!("{:?}", ev));
@@ -59,7 +70,12 @@ async fn main() {
     // 3. spawn a login zsh under sandbox-exec with the pane's proxy env.
     let pty_system = native_pty_system();
     let pair = pty_system
-        .openpty(PtySize { rows: 40, cols: 120, pixel_width: 0, pixel_height: 0 })
+        .openpty(PtySize {
+            rows: 40,
+            cols: 120,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
         .expect("openpty");
     let proxy_url = format!("http://127.0.0.1:{port}");
     let mut cmd = CommandBuilder::new("sandbox-exec");
@@ -73,7 +89,8 @@ async fn main() {
     cmd.env("TERM", "dumb");
     cmd.env("PATH", std::env::var("PATH").unwrap_or_default());
     cmd.cwd("/tmp/tome-live-smoke");
-    let mut child: Box<dyn Child + Send + Sync> = pair.slave.spawn_command(cmd).expect("spawn sandboxed zsh");
+    let mut child: Box<dyn Child + Send + Sync> =
+        pair.slave.spawn_command(cmd).expect("spawn sandboxed zsh");
     drop(pair.slave);
     log(&evidence, "sandboxed zsh spawned (seatbelt + proxy env)");
 
@@ -85,7 +102,10 @@ async fn main() {
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
-                Ok(n) => output2.lock().unwrap().push_str(&String::from_utf8_lossy(&buf[..n])),
+                Ok(n) => output2
+                    .lock()
+                    .unwrap()
+                    .push_str(&String::from_utf8_lossy(&buf[..n])),
                 Err(_) => break,
             }
         }
@@ -130,14 +150,22 @@ async fn main() {
         let end = format!("PROBE{n}-RESULT-END");
         let before_end = snap.split(&end).next().unwrap_or("");
         // last 400 chars before END, control sequences stripped
-        let window: String = before_end.chars().rev().take(400).collect::<String>().chars().rev().collect();
+        let window: String = before_end
+            .chars()
+            .rev()
+            .take(400)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
         let mut clean = String::new();
         let mut chars = window.chars().peekable();
         while let Some(c) = chars.next() {
             if c == '\u{1b}' {
                 // skip ESC [ ... final-byte
                 for c2 in chars.by_ref() {
-                    if c2.is_ascii_alphabetic() || c2 == 'm' || c2 == 'K' || c2 == 'J' || c2 == 'H' {
+                    if c2.is_ascii_alphabetic() || c2 == 'm' || c2 == 'K' || c2 == 'J' || c2 == 'H'
+                    {
                         break;
                     }
                 }
@@ -154,32 +182,83 @@ async fn main() {
     send(&mut writer, "{ echo PROBE1-RESULT-BEGIN; curl -sS --noproxy '*' --max-time 8 https://example.com -o /dev/null -w 'P1CODE:%{http_code}\\n' 2>&1 | tail -2; echo PROBE1-RESULT-END; }\n");
     let got = wait_for(&output, "PROBE1-RESULT-END", 20);
     let p1 = scrape(&output, 1);
-    log(&evidence, &format!("PROBE1 (direct egress to example.com, allowlisted=false) done={got}: {p1}"));
-    let p1_blocked = p1.contains("Could not resolve") || p1.contains("Failed to connect") || p1.contains("Operation not permitted") || p1.contains("P1CODE:000") || p1.contains("Operation timed out") || p1.contains("No route to host");
-    log(&evidence, &format!("PROBE1 verdict: {}", if p1_blocked { "PASS — direct egress blocked" } else { "FAIL — direct egress reached the host!" }));
+    log(
+        &evidence,
+        &format!("PROBE1 (direct egress to example.com, allowlisted=false) done={got}: {p1}"),
+    );
+    let p1_blocked = p1.contains("Could not resolve")
+        || p1.contains("Failed to connect")
+        || p1.contains("Operation not permitted")
+        || p1.contains("P1CODE:000")
+        || p1.contains("Operation timed out")
+        || p1.contains("No route to host");
+    log(
+        &evidence,
+        &format!(
+            "PROBE1 verdict: {}",
+            if p1_blocked {
+                "PASS — direct egress blocked"
+            } else {
+                "FAIL — direct egress reached the host!"
+            }
+        ),
+    );
 
     // --- probe 2: allowlisted host THROUGH the proxy must reach ---
     send(&mut writer, "{ echo PROBE2-RESULT-BEGIN; curl -sS --max-time 12 https://api.anthropic.com -o /dev/null -w 'P2CODE:%{http_code}\\n' 2>&1 | tail -3; echo PROBE2-RESULT-END; }\n");
     let got2 = wait_for(&output, "PROBE2-RESULT-END", 25);
     let p2 = scrape(&output, 2);
-    log(&evidence, &format!("PROBE2 (api.anthropic.com via proxy) done={got2}: {p2}"));
+    log(
+        &evidence,
+        &format!("PROBE2 (api.anthropic.com via proxy) done={got2}: {p2}"),
+    );
     let p2_reached = p2.contains("P2CODE:4") || p2.contains("P2CODE:2") || p2.contains("P2CODE:3");
-    log(&evidence, &format!("PROBE2 verdict: {}", if p2_reached { "PASS — allowlisted host reached through proxy" } else { "FAIL — allowlisted host NOT reached" }));
-    drop(tx); let _ = &mut rx;
+    log(
+        &evidence,
+        &format!(
+            "PROBE2 verdict: {}",
+            if p2_reached {
+                "PASS — allowlisted host reached through proxy"
+            } else {
+                "FAIL — allowlisted host NOT reached"
+            }
+        ),
+    );
+    drop(tx);
+    let _ = &mut rx;
 
     // --- probe 3: the real agent CLI is present and runs in the pane ---
     send(&mut writer, "{ echo PROBE3-RESULT-BEGIN; which claude; claude --version; echo P3-EXIT:$?; echo PROBE3-RESULT-END; }\n");
     let got3 = wait_for(&output, "P3-EXIT:", 45);
     let p3 = scrape(&output, 3);
-    log(&evidence, &format!("PROBE3 (claude CLI present + version) done={got3}: {p3}"));
+    log(
+        &evidence,
+        &format!("PROBE3 (claude CLI present + version) done={got3}: {p3}"),
+    );
 
     // Raw pty dump for diagnosis — the scrape markers above only show
     // what matched; this shows what the shell ACTUALLY printed.
     let raw = output.lock().unwrap().clone();
-    let tail: String = raw.chars().rev().take(3000).collect::<String>().chars().rev().collect();
-    log(&evidence, &format!("--- raw pty tail (last 3000 chars) ---\n{tail}\n--- end raw pty tail ---"));
+    let tail: String = raw
+        .chars()
+        .rev()
+        .take(3000)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    log(
+        &evidence,
+        &format!("--- raw pty tail (last 3000 chars) ---\n{tail}\n--- end raw pty tail ---"),
+    );
 
-    log(&evidence, &format!("blocked-event count from proxy: {}", blocked.lock().unwrap().len()));
+    log(
+        &evidence,
+        &format!(
+            "blocked-event count from proxy: {}",
+            blocked.lock().unwrap().len()
+        ),
+    );
     for b in blocked.lock().unwrap().iter().take(5) {
         log(&evidence, &format!("  blocked: {b}"));
     }

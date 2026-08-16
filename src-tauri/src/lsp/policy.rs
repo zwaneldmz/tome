@@ -94,7 +94,10 @@ fn resolve_lexically(path: &Path) -> PathBuf {
 /// itself documents that it must NOT feed the result, and a test can pin
 /// that varying it never changes the output.
 #[allow(unused_variables)] // root: signature-only, see doc comment above
-pub fn resolve_server_env(root: &Path, base_env: &HashMap<String, String>) -> HashMap<String, String> {
+pub fn resolve_server_env(
+    root: &Path,
+    base_env: &HashMap<String, String>,
+) -> HashMap<String, String> {
     base_env.clone()
 }
 
@@ -114,7 +117,10 @@ mod tests {
     #[test]
     fn confine_to_root_accepts_a_path_inside_the_open_folder_returning_that_folder_as_root() {
         let folders = vec![ws()];
-        assert_eq!(confine_to_root("/workspace/proj/src/index.ts", &folders), Some(ws()));
+        assert_eq!(
+            confine_to_root("/workspace/proj/src/index.ts", &folders),
+            Some(ws())
+        );
         assert_eq!(confine_to_root("/workspace/proj", &folders), Some(ws())); // the folder itself
     }
 
@@ -145,7 +151,10 @@ mod tests {
         let nested = ws().join("packages").join("sub");
         let file = nested.join("index.ts");
         let folders = vec![ws(), nested.clone()];
-        assert_eq!(confine_to_root(file.to_str().unwrap(), &folders), Some(nested));
+        assert_eq!(
+            confine_to_root(file.to_str().unwrap(), &folders),
+            Some(nested)
+        );
     }
 
     #[test]
@@ -153,13 +162,19 @@ mod tests {
         // "/workspace/proj-evil" must not pass for open folder "/workspace/proj".
         let sibling_file = PathBuf::from("/workspace/proj-evil/file.ts");
         let folders = vec![ws()];
-        assert_eq!(confine_to_root(sibling_file.to_str().unwrap(), &folders), None);
+        assert_eq!(
+            confine_to_root(sibling_file.to_str().unwrap(), &folders),
+            None
+        );
     }
 
     #[test]
     fn confine_to_root_ignores_folders_that_are_not_the_one_the_path_is_actually_under() {
         assert_eq!(confine_to_root("/workspace/proj/a.ts", &[other_ws()]), None);
-        assert_eq!(confine_to_root("/workspace/proj/a.ts", &[other_ws(), ws()]), Some(ws()));
+        assert_eq!(
+            confine_to_root("/workspace/proj/a.ts", &[other_ws(), ws()]),
+            Some(ws())
+        );
     }
 
     #[test]
@@ -185,7 +200,10 @@ mod tests {
     fn resolve_server_env_returns_the_base_environment_untouched() {
         let base = base_env();
         assert_eq!(resolve_server_env(&ws(), &base), base);
-        assert_eq!(resolve_server_env(&ws(), &base).get("PATH"), base.get("PATH"));
+        assert_eq!(
+            resolve_server_env(&ws(), &base).get("PATH"),
+            base.get("PATH")
+        );
     }
 
     #[test]
@@ -209,6 +227,7 @@ mod tests {
         let base = base_env();
         let mut env = resolve_server_env(&ws(), &base);
         env.insert("PATH".to_string(), "/mutated".to_string());
-        assert_eq!(base.get("PATH").map(String::as_str), Some("/usr/bin:/bin")); // original untouched
+        assert_eq!(base.get("PATH").map(String::as_str), Some("/usr/bin:/bin"));
+        // original untouched
     }
 }

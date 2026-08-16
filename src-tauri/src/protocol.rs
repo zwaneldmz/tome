@@ -157,7 +157,10 @@ fn percent_decode(s: &str) -> String {
                 out.push(b' ');
                 i += 1;
             }
-            b'%' => match s.get(i + 1..i + 3).and_then(|hex| u8::from_str_radix(hex, 16).ok()) {
+            b'%' => match s
+                .get(i + 1..i + 3)
+                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+            {
                 Some(byte) => {
                     out.push(byte);
                     i += 3;
@@ -354,21 +357,27 @@ mod tests {
         // same discipline lock_gate::tests applies to OPEN_ON/OPEN_CHANNELS.
         let expected: HashSet<&str> = [
             "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif", "pdf", "md",
-            "markdown", "txt", "json", "js", "mjs", "cjs", "ts", "tsx", "jsx", "css", "html",
-            "py", "rb", "go", "rs", "c", "h", "cpp", "java", "sh", "yml", "yaml", "toml", "xml",
-            "csv",
+            "markdown", "txt", "json", "js", "mjs", "cjs", "ts", "tsx", "jsx", "css", "html", "py",
+            "rb", "go", "rs", "c", "h", "cpp", "java", "sh", "yml", "yaml", "toml", "xml", "csv",
         ]
         .into_iter()
         .collect();
         let actual: HashSet<&str> = TOME_SERVE_EXT.iter().copied().collect();
         assert_eq!(actual, expected);
-        assert_eq!(TOME_SERVE_EXT.len(), expected.len(), "TOME_SERVE_EXT has a duplicate entry");
+        assert_eq!(
+            TOME_SERVE_EXT.len(),
+            expected.len(),
+            "TOME_SERVE_EXT has a duplicate entry"
+        );
     }
 
     #[test]
     fn a_disallowed_extension_is_rejected() {
         for ext in ["exe", "dll", "sh.bak", "docx", "xlsx", "zip", "dmg", ""] {
-            assert!(!TOME_SERVE_EXT.contains(&ext), "{ext} must not be servable via tome://");
+            assert!(
+                !TOME_SERVE_EXT.contains(&ext),
+                "{ext} must not be servable via tome://"
+            );
         }
     }
 
@@ -396,7 +405,10 @@ mod tests {
 
     #[test]
     fn percent_decode_decodes_percent_escapes() {
-        assert_eq!(percent_decode("%2FUsers%2Ffoo%2Fbar.png"), "/Users/foo/bar.png");
+        assert_eq!(
+            percent_decode("%2FUsers%2Ffoo%2Fbar.png"),
+            "/Users/foo/bar.png"
+        );
     }
 
     #[test]
@@ -444,7 +456,10 @@ mod tests {
     #[test]
     fn extract_path_param_defaults_to_empty_when_p_is_absent() {
         assert_eq!(extract_path_param(&"tome://local/".parse().unwrap()), "");
-        assert_eq!(extract_path_param(&"tome://local/?other=1".parse().unwrap()), "");
+        assert_eq!(
+            extract_path_param(&"tome://local/?other=1".parse().unwrap()),
+            ""
+        );
     }
 
     #[test]
@@ -466,7 +481,10 @@ mod tests {
     #[test]
     fn mime_for_ext_covers_every_allowlisted_extension_with_a_non_empty_type() {
         for ext in TOME_SERVE_EXT {
-            assert!(!mime_for_ext(ext).is_empty(), "{ext} has no mapped MIME type");
+            assert!(
+                !mime_for_ext(ext).is_empty(),
+                "{ext} has no mapped MIME type"
+            );
         }
     }
 
@@ -482,7 +500,10 @@ mod tests {
 
     #[test]
     fn mime_for_ext_falls_back_to_text_plain_for_source_and_config_files() {
-        for ext in ["txt", "rs", "py", "go", "toml", "yml", "yaml", "ts", "tsx", "jsx", "sh", "c", "h", "cpp", "java", "rb"] {
+        for ext in [
+            "txt", "rs", "py", "go", "toml", "yml", "yaml", "ts", "tsx", "jsx", "sh", "c", "h",
+            "cpp", "java", "rb",
+        ] {
             assert_eq!(mime_for_ext(ext), "text/plain; charset=utf-8", "{ext}");
         }
     }
@@ -513,7 +534,11 @@ mod tests {
     #[test]
     fn confinement_denies_an_absolute_path_outside_any_open_folder() {
         let folders = vec![PathBuf::from("/workspace/proj")];
-        assert!(!confine::is_confined(&folders, true, Path::new("/etc/passwd")));
+        assert!(!confine::is_confined(
+            &folders,
+            true,
+            Path::new("/etc/passwd")
+        ));
     }
 
     #[test]
@@ -529,7 +554,11 @@ mod tests {
     #[test]
     fn confinement_denies_everything_until_folders_synced() {
         let folders = vec![PathBuf::from("/workspace/proj")];
-        assert!(!confine::is_confined(&folders, false, Path::new("/workspace/proj/f.png")));
+        assert!(!confine::is_confined(
+            &folders,
+            false,
+            Path::new("/workspace/proj/f.png")
+        ));
     }
 
     // ---- confinement_error ----

@@ -81,7 +81,8 @@ pub struct RunnerEnv {
     /// Rust-only addition to the JS shape — see this module's doc comment
     /// on why the Linux wrap needs it up front, unlike JS's macOS-only
     /// `{cmd,args}` prefix shape.
-    pub build_agent_env: Arc<dyn Fn(String, bool, Vec<String>) -> BoxFuture<Result<BuiltEnv, String>> + Send + Sync>,
+    pub build_agent_env:
+        Arc<dyn Fn(String, bool, Vec<String>) -> BoxFuture<Result<BuiltEnv, String>> + Send + Sync>,
     /// Tears a node's pane-scoped proxy down — mirrors `airgap.closePane`.
     pub close_agent_env: Arc<dyn Fn(&str) + Send + Sync>,
     /// The same air-gap default a freshly spawned pane would read.
@@ -118,7 +119,11 @@ pub struct RunnerEnv {
 /// far less than widening a file this task's brief says not to touch.
 fn lexical_resolve(p: &Path) -> PathBuf {
     use std::path::Component;
-    let abs = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().unwrap_or_default().join(p) };
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(p)
+    };
     let mut root = PathBuf::new();
     let mut stack: Vec<&std::ffi::OsStr> = Vec::new();
     for comp in abs.components() {
@@ -138,12 +143,18 @@ fn lexical_resolve(p: &Path) -> PathBuf {
 /// Production `can_open_file` — mirrors `index.js`'s `isConfinedPath`
 /// (lexical half only, matching `canOpenFile`'s own contract).
 fn can_open_flow(state: &AppState, p: &Path) -> bool {
-    let folders_synced = *state.folders_synced.read().expect("AppState.folders_synced lock poisoned");
+    let folders_synced = *state
+        .folders_synced
+        .read()
+        .expect("AppState.folders_synced lock poisoned");
     if !folders_synced || p.as_os_str().is_empty() {
         return false;
     }
     let abs = lexical_resolve(p);
-    let open_folders = state.open_folders.read().expect("AppState.open_folders lock poisoned");
+    let open_folders = state
+        .open_folders
+        .read()
+        .expect("AppState.open_folders lock poisoned");
     open_folders.iter().any(|f| abs.starts_with(f))
 }
 
@@ -152,16 +163,23 @@ fn can_open_flow(state: &AppState, p: &Path) -> bool {
 /// `lexical_resolve` above: that module is a different slice, not this
 /// one's to widen).
 fn resolve_shim_path() -> Result<PathBuf, String> {
-    let exe = tauri::utils::platform::current_exe()
-        .map_err(|e| format!("resolve tome-shim sidecar: could not determine this process's own binary path: {e}"))?;
-    let dir = exe
-        .parent()
-        .ok_or_else(|| "resolve tome-shim sidecar: this process's own binary path has no parent directory".to_string())?;
+    let exe = tauri::utils::platform::current_exe().map_err(|e| {
+        format!(
+            "resolve tome-shim sidecar: could not determine this process's own binary path: {e}"
+        )
+    })?;
+    let dir = exe.parent().ok_or_else(|| {
+        "resolve tome-shim sidecar: this process's own binary path has no parent directory"
+            .to_string()
+    })?;
     if tauri::is_dev() {
         Ok(shim_path_in(dir, None))
     } else {
-        let triple = tauri::utils::platform::target_triple()
-            .map_err(|e| format!("resolve tome-shim sidecar: could not determine this platform's target triple: {e}"))?;
+        let triple = tauri::utils::platform::target_triple().map_err(|e| {
+            format!(
+                "resolve tome-shim sidecar: could not determine this platform's target triple: {e}"
+            )
+        })?;
         Ok(shim_path_in(dir, Some(&triple)))
     }
 }
@@ -184,7 +202,9 @@ fn current_linux_sandbox_strategy() -> crate::airgap::linux::SandboxStrategy {
 }
 #[cfg(not(target_os = "linux"))]
 fn current_linux_sandbox_strategy() -> crate::airgap::linux::SandboxStrategy {
-    crate::airgap::linux::SandboxStrategy::Refuse { reason: String::new() }
+    crate::airgap::linux::SandboxStrategy::Refuse {
+        reason: String::new(),
+    }
 }
 
 /// The real `buildAgentEnv` for a headless flow node — see this module's
@@ -202,11 +222,16 @@ async fn build_production_agent_env(
     let login = crate::login_env::login_env().await;
     let mut process_env: std::collections::HashMap<String, String> = std::env::vars().collect();
     process_env.insert("PATH".to_string(), login.path.clone());
-    let mut extras =
-        crate::agent_env::AgentEnvExtras { is_agent: true, secrets: login.secrets.clone(), ..Default::default() };
+    let mut extras = crate::agent_env::AgentEnvExtras {
+        is_agent: true,
+        secrets: login.secrets.clone(),
+        ..Default::default()
+    };
 
     if !gapped {
-        let env = crate::agent_env::compose_agent_env(&process_env, &extras).into_iter().collect();
+        let env = crate::agent_env::compose_agent_env(&process_env, &extras)
+            .into_iter()
+            .collect();
         return Ok(BuiltEnv { env, sandbox: None });
     }
 
@@ -214,14 +239,20 @@ async fn build_production_agent_env(
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
 
     if cfg!(target_os = "macos") {
-        let proxy =
-            crate::ipc::airgap::create_gapped_pane_proxy(app, state.inner(), pane_id, None).await.map_err(|e| e.to_string())?;
+        let proxy = crate::ipc::airgap::create_gapped_pane_proxy(app, state.inner(), pane_id, None)
+            .await
+            .map_err(|e| e.to_string())?;
         extras.proxy_port = Some(proxy.port());
-        let env = crate::agent_env::compose_agent_env(&process_env, &extras).into_iter().collect();
+        let env = crate::agent_env::compose_agent_env(&process_env, &extras)
+            .into_iter()
+            .collect();
         let profile = crate::airgap::seatbelt::seatbelt_profile(&dir);
         return Ok(BuiltEnv {
             env,
-            sandbox: Some(SandboxWrap::Prefix { cmd: "/usr/bin/sandbox-exec".to_string(), args: vec!["-p".to_string(), profile] }),
+            sandbox: Some(SandboxWrap::Prefix {
+                cmd: "/usr/bin/sandbox-exec".to_string(),
+                args: vec!["-p".to_string(), profile],
+            }),
         });
     }
 
@@ -238,11 +269,18 @@ async fn build_production_agent_env(
             crate::airgap::linux::ensure_pane_socket_dir(parent).map_err(|e| e.to_string())?;
         }
         let shim_path = resolve_shim_path()?;
-        let proxy = crate::ipc::airgap::create_gapped_pane_proxy(app, state.inner(), pane_id, Some(sock_path.clone()))
-            .await
-            .map_err(|e| e.to_string())?;
+        let proxy = crate::ipc::airgap::create_gapped_pane_proxy(
+            app,
+            state.inner(),
+            pane_id,
+            Some(sock_path.clone()),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         extras.proxy_port = Some(proxy.port());
-        let env = crate::agent_env::compose_agent_env(&process_env, &extras).into_iter().collect();
+        let env = crate::agent_env::compose_agent_env(&process_env, &extras)
+            .into_iter()
+            .collect();
 
         let spec = crate::airgap::linux::GappedSpawnSpec {
             pane_id: pane_id.to_string(),
@@ -256,11 +294,20 @@ async fn build_production_agent_env(
             headless: true,
         };
         let argv = match &strategy {
-            crate::airgap::linux::SandboxStrategy::Bwrap => crate::airgap::linux::build_bwrap_argv(&spec),
-            crate::airgap::linux::SandboxStrategy::SelfUnshare => crate::airgap::linux::build_self_unshare_argv(&spec),
-            crate::airgap::linux::SandboxStrategy::Refuse { .. } => unreachable!("Refuse handled above"),
+            crate::airgap::linux::SandboxStrategy::Bwrap => {
+                crate::airgap::linux::build_bwrap_argv(&spec)
+            }
+            crate::airgap::linux::SandboxStrategy::SelfUnshare => {
+                crate::airgap::linux::build_self_unshare_argv(&spec)
+            }
+            crate::airgap::linux::SandboxStrategy::Refuse { .. } => {
+                unreachable!("Refuse handled above")
+            }
         };
-        return Ok(BuiltEnv { env, sandbox: Some(SandboxWrap::Full { argv }) });
+        return Ok(BuiltEnv {
+            env,
+            sandbox: Some(SandboxWrap::Full { argv }),
+        });
     }
 
     // Any OS other than macOS/Linux — refuse rather than spawn a gapped
@@ -301,11 +348,14 @@ pub fn production_env(app: AppHandle) -> RunnerEnv {
         },
         build_agent_env: {
             let app = app.clone();
-            Arc::new(move |pane_id: String, gapped: bool, inner_argv: Vec<String>| {
-                let app = app.clone();
-                Box::pin(async move { build_production_agent_env(&app, &pane_id, gapped, inner_argv).await })
-                    as BoxFuture<Result<BuiltEnv, String>>
-            })
+            Arc::new(
+                move |pane_id: String, gapped: bool, inner_argv: Vec<String>| {
+                    let app = app.clone();
+                    Box::pin(async move {
+                        build_production_agent_env(&app, &pane_id, gapped, inner_argv).await
+                    }) as BoxFuture<Result<BuiltEnv, String>>
+                },
+            )
         },
         close_agent_env: {
             let app = app.clone();
@@ -319,11 +369,19 @@ pub fn production_env(app: AppHandle) -> RunnerEnv {
             Arc::new(move || {
                 let app = app.clone();
                 Box::pin(async move {
-                    let locked = *app.state::<AppState>().locked.read().expect("AppState.locked lock poisoned");
-                    let Ok(dir) = app.path().app_data_dir() else { return true };
-                    let value = tokio::task::spawn_blocking(move || crate::store::get(&dir, "airgap-default", locked))
-                        .await
-                        .unwrap_or(Value::Bool(true));
+                    let locked = *app
+                        .state::<AppState>()
+                        .locked
+                        .read()
+                        .expect("AppState.locked lock poisoned");
+                    let Ok(dir) = app.path().app_data_dir() else {
+                        return true;
+                    };
+                    let value = tokio::task::spawn_blocking(move || {
+                        crate::store::get(&dir, "airgap-default", locked)
+                    })
+                    .await
+                    .unwrap_or(Value::Bool(true));
                     // `!== false` in the JS original: absent or anything but
                     // the literal `false` means "gap by default".
                     value != Value::Bool(false)
@@ -353,7 +411,10 @@ mod tests {
 
     #[test]
     fn lexical_resolve_normalizes_dot_and_dotdot_without_touching_disk() {
-        assert_eq!(lexical_resolve(Path::new("/a/b/../c")), PathBuf::from("/a/c"));
+        assert_eq!(
+            lexical_resolve(Path::new("/a/b/../c")),
+            PathBuf::from("/a/c")
+        );
         assert_eq!(lexical_resolve(Path::new("/a/./b")), PathBuf::from("/a/b"));
     }
 
@@ -369,7 +430,10 @@ mod tests {
         let state = AppState::new();
         *state.open_folders.write().unwrap() = vec![PathBuf::from("/work/proj")];
         *state.folders_synced.write().unwrap() = true;
-        assert!(can_open_flow(&state, Path::new("/work/proj/.tome/flows/x.flow.json")));
+        assert!(can_open_flow(
+            &state,
+            Path::new("/work/proj/.tome/flows/x.flow.json")
+        ));
         assert!(!can_open_flow(&state, Path::new("/elsewhere/x.flow.json")));
     }
 
@@ -384,7 +448,10 @@ mod tests {
 
     #[test]
     fn shim_path_in_appends_the_target_triple_only_when_given() {
-        assert_eq!(shim_path_in(Path::new("/opt/tome"), None), PathBuf::from("/opt/tome/tome-shim"));
+        assert_eq!(
+            shim_path_in(Path::new("/opt/tome"), None),
+            PathBuf::from("/opt/tome/tome-shim")
+        );
         assert_eq!(
             shim_path_in(Path::new("/opt/tome"), Some("x86_64-unknown-linux-gnu")),
             PathBuf::from("/opt/tome/tome-shim-x86_64-unknown-linux-gnu")

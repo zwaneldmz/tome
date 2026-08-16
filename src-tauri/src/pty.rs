@@ -427,7 +427,8 @@ impl Registry {
                 )
             }
         });
-        let batcher_task = tokio::spawn(batcher_loop(rx, id.clone(), channel, tap, batcher_done_tx));
+        let batcher_task =
+            tokio::spawn(batcher_loop(rx, id.clone(), channel, tap, batcher_done_tx));
 
         {
             let mut entries = self.entries();
@@ -440,7 +441,12 @@ impl Registry {
                 // one's kill, and the old pane's own `reader_loop` (still
                 // running since ITS spawn) reaps it independently once it
                 // observes EOF, same as any other kill.
-                let PaneHandle { master, writer, killer, .. } = old;
+                let PaneHandle {
+                    master,
+                    writer,
+                    killer,
+                    ..
+                } = old;
                 tokio::task::spawn_blocking(move || {
                     let mut killer = killer;
                     let _ = killer.kill();
@@ -969,9 +975,17 @@ mod tests {
     /// real `AppHandle`, which these tests have no way to construct).
     /// `FnOnce` fires exactly once, so a `oneshot` channel is the natural
     /// receiver.
-    fn recording_exit() -> (impl FnOnce(i64) + Send + 'static, tokio::sync::oneshot::Receiver<i64>) {
+    fn recording_exit() -> (
+        impl FnOnce(i64) + Send + 'static,
+        tokio::sync::oneshot::Receiver<i64>,
+    ) {
         let (tx, rx) = tokio::sync::oneshot::channel::<i64>();
-        (move |code| { let _ = tx.send(code); }, rx)
+        (
+            move |code| {
+                let _ = tx.send(code);
+            },
+            rx,
+        )
     }
 
     async fn recv_exit(rx: tokio::sync::oneshot::Receiver<i64>, secs: u64) -> i64 {
@@ -1064,7 +1078,11 @@ mod tests {
         let data_msg = recv_within(&mut rx, 5).await;
         assert_eq!(data_msg["data"], "hi");
         let _ = recv_exit(exit_rx, 5).await;
-        assert_eq!(*seen.lock().unwrap(), "hi", "tap must observe the same bytes the channel did");
+        assert_eq!(
+            *seen.lock().unwrap(),
+            "hi",
+            "tap must observe the same bytes the channel did"
+        );
     }
 
     #[tokio::test]
@@ -1072,9 +1090,16 @@ mod tests {
         let reg = Registry::new();
         let (channel, _rx) = recording_channel();
         let (on_exit, exit_rx) = recording_exit();
-        reg.spawn_raw("t2".to_string(), sh_command("exit 7"), size80x24(), channel, None, on_exit)
-            .await
-            .expect("spawn_raw failed");
+        reg.spawn_raw(
+            "t2".to_string(),
+            sh_command("exit 7"),
+            size80x24(),
+            channel,
+            None,
+            on_exit,
+        )
+        .await
+        .expect("spawn_raw failed");
 
         let exit_code = recv_exit(exit_rx, 5).await;
         assert_eq!(exit_code, 7);

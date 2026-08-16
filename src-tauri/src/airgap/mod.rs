@@ -327,7 +327,9 @@ impl AirgapState {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
-        self.inner.lock().expect("airgap::AirgapState mutex poisoned")
+        self.inner
+            .lock()
+            .expect("airgap::AirgapState mutex poisoned")
     }
 
     // ---- pane lifecycle ----
@@ -512,7 +514,12 @@ impl AirgapState {
     /// HashMap-iteration order (unspecified) — callers only ever fold this
     /// into a hostname allow SET, where order is not observable.
     pub fn effective_repo_hosts(&self) -> Vec<String> {
-        self.lock().applied_repos.values().flatten().cloned().collect()
+        self.lock()
+            .applied_repos
+            .values()
+            .flatten()
+            .cloned()
+            .collect()
     }
 
     /// `readRepoAllowlist(root)` — reports what main WOULD apply for
@@ -594,7 +601,13 @@ impl AirgapState {
         resolve: impl Fn(&Path) -> Option<PathBuf>,
     ) -> ConsentOutcome {
         let report = self.read_repo_allowlist(root, &resolve);
-        let RepoAllowlistReport::Present { hash, hosts, rejected, .. } = report else {
+        let RepoAllowlistReport::Present {
+            hash,
+            hosts,
+            rejected,
+            ..
+        } = report
+        else {
             return ConsentOutcome::Err("file changed".to_string());
         };
         if hash != presented_hash {
@@ -698,7 +711,8 @@ impl AirgapState {
         let Ok(text) = std::fs::read_to_string(path) else {
             return;
         };
-        let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&text) else {
+        let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&text)
+        else {
             return;
         };
         for (root, v) in map {
@@ -709,7 +723,9 @@ impl AirgapState {
                     .collect::<Vec<_>>()
             });
             if let (Some(hash), Some(hosts)) = (hash, hosts) {
-                inner.repo_consents.insert(root, RepoConsent { hash, hosts });
+                inner
+                    .repo_consents
+                    .insert(root, RepoConsent { hash, hosts });
             }
         }
     }
@@ -811,12 +827,17 @@ pub fn parse_repo_allowlist(text: &str) -> Option<Vec<serde_json::Value>> {
 /// Vec<RejectedPattern>)` shape, where THIS module's [`RejectedPattern`]
 /// derives `Serialize` for exactly that reason (`ipc::airgap`'s handlers
 /// serialize it directly — see that type's own doc comment).
-pub fn validate_repo_allowlist(patterns: &[serde_json::Value]) -> (Vec<String>, Vec<RejectedPattern>) {
+pub fn validate_repo_allowlist(
+    patterns: &[serde_json::Value],
+) -> (Vec<String>, Vec<RejectedPattern>) {
     let result = allowlist::validate_repo_allowlist(patterns);
     let rejected = result
         .rejected
         .into_iter()
-        .map(|r| RejectedPattern { pattern: r.pattern, reason: r.reason })
+        .map(|r| RejectedPattern {
+            pattern: r.pattern,
+            reason: r.reason,
+        })
         .collect();
     (result.ok, rejected)
 }
@@ -934,11 +955,17 @@ mod tests {
             );
 
             // Not yet — deadline is exclusive.
-            assert_eq!(state.sweep_expired(expected_deadline - 1), Vec::<String>::new());
+            assert_eq!(
+                state.sweep_expired(expected_deadline - 1),
+                Vec::<String>::new()
+            );
             assert_eq!(state.pane_mode("pty-1"), Some(PaneMode::Open));
 
             // Relocked itself, exactly at the deadline.
-            assert_eq!(state.sweep_expired(expected_deadline), vec!["pty-1".to_string()]);
+            assert_eq!(
+                state.sweep_expired(expected_deadline),
+                vec!["pty-1".to_string()]
+            );
             assert_eq!(state.pane_state("pty-1"), Some((PaneMode::Providers, None)));
         }
     }
@@ -989,7 +1016,10 @@ mod tests {
         state.unlock_pane("pty-1", 15, 1_000);
         let value = serde_json::to_value(state.state_snapshot()).unwrap();
         assert_eq!(value["panes"]["pty-1"]["mode"], json!("open"));
-        assert_eq!(value["panes"]["pty-1"]["expiresAt"], json!(1_000 + 15 * 60_000));
+        assert_eq!(
+            value["panes"]["pty-1"]["expiresAt"],
+            json!(1_000 + 15 * 60_000)
+        );
         assert_eq!(value["defaultMinutes"], json!(15));
         assert_eq!(value["repo"], json!([]));
     }
@@ -1009,7 +1039,10 @@ mod tests {
     fn sha1_hex_matches_known_answer_vectors() {
         // Cross-checked against Node's `createHash('sha1')` for the same
         // inputs — see this slice's task report for the exact command.
-        assert_eq!(sha1_hex("hello world"), "2aae6c35c94fcfb415dbe95f408b9ce91ee846ed");
+        assert_eq!(
+            sha1_hex("hello world"),
+            "2aae6c35c94fcfb415dbe95f408b9ce91ee846ed"
+        );
         assert_eq!(sha1_hex(""), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
         assert_eq!(
             sha1_hex(r#"{"allow":["api.example.com"]}"#),
@@ -1068,8 +1101,15 @@ mod tests {
 
     #[test]
     fn keeps_valid_entries_when_mixed_with_invalid_ones() {
-        let (ok, rejected) = validate_repo_allowlist(&[json!("api.example.com"), json!("*"), json!("*.example.com")]);
-        assert_eq!(ok, vec!["api.example.com".to_string(), "*.example.com".to_string()]);
+        let (ok, rejected) = validate_repo_allowlist(&[
+            json!("api.example.com"),
+            json!("*"),
+            json!("*.example.com"),
+        ]);
+        assert_eq!(
+            ok,
+            vec!["api.example.com".to_string(), "*.example.com".to_string()]
+        );
         assert_eq!(rejected.len(), 1);
         assert_eq!(rejected[0].pattern, json!("*"));
     }
@@ -1096,7 +1136,13 @@ mod tests {
 
     #[test]
     fn rejects_non_strings() {
-        let patterns = [json!(42), json!(null), json!(null), json!({}), json!(["x.com"])];
+        let patterns = [
+            json!(42),
+            json!(null),
+            json!(null),
+            json!({}),
+            json!(["x.com"]),
+        ];
         let (ok, rejected) = validate_repo_allowlist(&patterns);
         assert_eq!(ok, Vec::<String>::new());
         assert_eq!(rejected.len(), 5);
@@ -1121,7 +1167,12 @@ mod tests {
 
     #[test]
     fn every_rejection_carries_a_human_reason() {
-        let (_, rejected) = validate_repo_allowlist(&[json!("*"), json!("localhost"), json!(42), json!("https://x.com")]);
+        let (_, rejected) = validate_repo_allowlist(&[
+            json!("*"),
+            json!("localhost"),
+            json!(42),
+            json!("https://x.com"),
+        ]);
         assert_eq!(rejected.len(), 4);
         for r in &rejected {
             assert!(!r.reason.is_empty());
@@ -1132,7 +1183,10 @@ mod tests {
 
     #[test]
     fn accepts_interior_double_wildcard() {
-        assert_eq!(ok_of(&[json!("*.*.example.com")]), vec!["*.*.example.com".to_string()]);
+        assert_eq!(
+            ok_of(&[json!("*.*.example.com")]),
+            vec!["*.*.example.com".to_string()]
+        );
     }
 
     #[test]
@@ -1152,7 +1206,10 @@ mod tests {
         // Only the ACCEPT half is ported — the matching-is-case-insensitive
         // half of the original test exercises `compileAllowlist`, out of
         // this module's scope (see the top doc comment).
-        assert_eq!(ok_of(&[json!("*.EXAMPLE.COM")]), vec!["*.EXAMPLE.COM".to_string()]);
+        assert_eq!(
+            ok_of(&[json!("*.EXAMPLE.COM")]),
+            vec!["*.EXAMPLE.COM".to_string()]
+        );
     }
 
     // ==== repo consent flow: read / consent / revoke / reapply ====
@@ -1168,7 +1225,10 @@ mod tests {
     #[test]
     fn read_repo_allowlist_reports_absent_for_an_empty_root() {
         let state = AirgapState::new();
-        assert_eq!(state.read_repo_allowlist("", |_| None), RepoAllowlistReport::Absent);
+        assert_eq!(
+            state.read_repo_allowlist("", |_| None),
+            RepoAllowlistReport::Absent
+        );
     }
 
     #[test]
@@ -1203,7 +1263,12 @@ mod tests {
         let root = dir.path().to_str().unwrap();
         let report = state.read_repo_allowlist(root, |_| Some(file.clone()));
         match report {
-            RepoAllowlistReport::Present { hash, hosts, rejected, consented } => {
+            RepoAllowlistReport::Present {
+                hash,
+                hosts,
+                rejected,
+                consented,
+            } => {
                 assert_eq!(hash, sha1_hex(text));
                 assert_eq!(hosts, vec!["api.example.com".to_string()]);
                 assert_eq!(rejected.len(), 1);
@@ -1221,20 +1286,25 @@ mod tests {
         let root = dir.path().to_str().unwrap();
         let resolve = |_p: &Path| Some(file.clone());
 
-        let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve) else {
+        let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve)
+        else {
             panic!("expected Present")
         };
         let outcome = state.consent_repo_allowlist(root, &hash, resolve);
         assert!(matches!(outcome, ConsentOutcome::Ok { .. }));
 
-        let RepoAllowlistReport::Present { consented, .. } = state.read_repo_allowlist(root, resolve) else {
+        let RepoAllowlistReport::Present { consented, .. } =
+            state.read_repo_allowlist(root, resolve)
+        else {
             panic!("expected Present")
         };
         assert!(consented);
 
         // TOCTOU: the file changes underneath the stored consent.
         fs::write(&file, r#"{"allow":["other.example.com"]}"#).unwrap();
-        let RepoAllowlistReport::Present { consented, .. } = state.read_repo_allowlist(root, resolve) else {
+        let RepoAllowlistReport::Present { consented, .. } =
+            state.read_repo_allowlist(root, resolve)
+        else {
             panic!("expected Present")
         };
         assert!(!consented);
@@ -1246,7 +1316,8 @@ mod tests {
         let file = write_repo_allowlist(dir.path(), r#"{"allow":["api.example.com"]}"#);
         let state = AirgapState::new();
         let root = dir.path().to_str().unwrap();
-        let outcome = state.consent_repo_allowlist(root, "not-the-real-hash", |_p| Some(file.clone()));
+        let outcome =
+            state.consent_repo_allowlist(root, "not-the-real-hash", |_p| Some(file.clone()));
         assert_eq!(outcome, ConsentOutcome::Err("file changed".to_string()));
     }
 
@@ -1257,15 +1328,23 @@ mod tests {
         let state = AirgapState::new();
         let root = dir.path().to_str().unwrap();
         let resolve = |_p: &Path| Some(file.clone());
-        let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve) else {
+        let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve)
+        else {
             panic!()
         };
-        let ConsentOutcome::Ok { applied, .. } = state.consent_repo_allowlist(root, &hash, resolve) else {
+        let ConsentOutcome::Ok { applied, .. } = state.consent_repo_allowlist(root, &hash, resolve)
+        else {
             panic!()
         };
         assert_eq!(applied, vec!["api.example.com".to_string()]);
         let snap = state.state_snapshot();
-        assert_eq!(snap.repo, vec![RepoStateEntry { root: root.to_string(), hosts: 1 }]);
+        assert_eq!(
+            snap.repo,
+            vec![RepoStateEntry {
+                root: root.to_string(),
+                hosts: 1
+            }]
+        );
     }
 
     // ---- effective_repo_hosts (Task A4 addition — proxy allow-set wiring) ----
@@ -1280,7 +1359,10 @@ mod tests {
     fn effective_repo_hosts_flattens_every_applied_repos_hosts() {
         let dir_a = tempdir().unwrap();
         let dir_b = tempdir().unwrap();
-        let file_a = write_repo_allowlist(dir_a.path(), r#"{"allow":["a.example.com","b.example.com"]}"#);
+        let file_a = write_repo_allowlist(
+            dir_a.path(),
+            r#"{"allow":["a.example.com","b.example.com"]}"#,
+        );
         let file_b = write_repo_allowlist(dir_b.path(), r#"{"allow":["c.example.com"]}"#);
         let root_a = dir_a.path().to_str().unwrap().to_string();
         let root_b = dir_b.path().to_str().unwrap().to_string();
@@ -1292,10 +1374,14 @@ mod tests {
                 Some(file_b.clone())
             }
         };
-        let RepoAllowlistReport::Present { hash: hash_a, .. } = state.read_repo_allowlist(&root_a, resolve) else {
+        let RepoAllowlistReport::Present { hash: hash_a, .. } =
+            state.read_repo_allowlist(&root_a, resolve)
+        else {
             panic!()
         };
-        let RepoAllowlistReport::Present { hash: hash_b, .. } = state.read_repo_allowlist(&root_b, resolve) else {
+        let RepoAllowlistReport::Present { hash: hash_b, .. } =
+            state.read_repo_allowlist(&root_b, resolve)
+        else {
             panic!()
         };
         state.consent_repo_allowlist(&root_a, &hash_a, resolve);
@@ -1305,7 +1391,11 @@ mod tests {
         hosts.sort();
         assert_eq!(
             hosts,
-            vec!["a.example.com".to_string(), "b.example.com".to_string(), "c.example.com".to_string()]
+            vec![
+                "a.example.com".to_string(),
+                "b.example.com".to_string(),
+                "c.example.com".to_string()
+            ]
         );
     }
 
@@ -1316,11 +1406,15 @@ mod tests {
         let root = dir.path().to_str().unwrap();
         let resolve = |_p: &Path| Some(file.clone());
         let state = AirgapState::new();
-        let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve) else {
+        let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve)
+        else {
             panic!()
         };
         state.consent_repo_allowlist(root, &hash, resolve);
-        assert_eq!(state.effective_repo_hosts(), vec!["api.example.com".to_string()]);
+        assert_eq!(
+            state.effective_repo_hosts(),
+            vec!["api.example.com".to_string()]
+        );
         state.revoke_repo_allowlist(root);
         assert_eq!(state.effective_repo_hosts(), Vec::<String>::new());
     }
@@ -1332,7 +1426,8 @@ mod tests {
         let state = AirgapState::new();
         let root = dir.path().to_str().unwrap();
         let resolve = |_p: &Path| Some(file.clone());
-        let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve) else {
+        let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve)
+        else {
             panic!()
         };
         state.consent_repo_allowlist(root, &hash, resolve);
@@ -1340,7 +1435,9 @@ mod tests {
 
         state.revoke_repo_allowlist(root);
         assert_eq!(state.state_snapshot().repo.len(), 0);
-        let RepoAllowlistReport::Present { consented, .. } = state.read_repo_allowlist(root, resolve) else {
+        let RepoAllowlistReport::Present { consented, .. } =
+            state.read_repo_allowlist(root, resolve)
+        else {
             panic!()
         };
         assert!(!consented);
@@ -1374,10 +1471,14 @@ mod tests {
                 Some(file_b.clone())
             }
         };
-        let RepoAllowlistReport::Present { hash: hash_a, .. } = state.read_repo_allowlist(&root_a, resolve) else {
+        let RepoAllowlistReport::Present { hash: hash_a, .. } =
+            state.read_repo_allowlist(&root_a, resolve)
+        else {
             panic!()
         };
-        let RepoAllowlistReport::Present { hash: hash_b, .. } = state.read_repo_allowlist(&root_b, resolve) else {
+        let RepoAllowlistReport::Present { hash: hash_b, .. } =
+            state.read_repo_allowlist(&root_b, resolve)
+        else {
             panic!()
         };
         state.consent_repo_allowlist(&root_a, &hash_a, resolve);
@@ -1413,16 +1514,22 @@ mod tests {
 
         let state = AirgapState::new();
         state.load_repo_consents(&consents_path); // no file yet — starts empty, records the path
-        let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve) else {
+        let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve)
+        else {
             panic!()
         };
         state.consent_repo_allowlist(root, &hash, resolve);
-        assert!(consents_path.exists(), "consent_repo_allowlist must persist on success");
+        assert!(
+            consents_path.exists(),
+            "consent_repo_allowlist must persist on success"
+        );
 
         // A fresh AirgapState loading the same file sees the same consent.
         let reloaded = AirgapState::new();
         reloaded.load_repo_consents(&consents_path);
-        let RepoAllowlistReport::Present { consented, .. } = reloaded.read_repo_allowlist(root, resolve) else {
+        let RepoAllowlistReport::Present { consented, .. } =
+            reloaded.read_repo_allowlist(root, resolve)
+        else {
             panic!()
         };
         assert!(consented);
@@ -1436,7 +1543,8 @@ mod tests {
     }
 
     #[test]
-    fn load_repo_consents_on_a_missing_file_leaves_state_empty_but_still_records_the_path_for_future_saves() {
+    fn load_repo_consents_on_a_missing_file_leaves_state_empty_but_still_records_the_path_for_future_saves(
+    ) {
         let scratch = tempdir().unwrap();
         let consents_path = scratch.path().join("does-not-exist.json");
         let state = AirgapState::new();
@@ -1448,7 +1556,8 @@ mod tests {
         let file = write_repo_allowlist(repo_dir.path(), r#"{"allow":["api.example.com"]}"#);
         let root = repo_dir.path().to_str().unwrap();
         let resolve = |_p: &Path| Some(file.clone());
-        let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve) else {
+        let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve)
+        else {
             panic!()
         };
         state.consent_repo_allowlist(root, &hash, resolve);
@@ -1465,7 +1574,8 @@ mod tests {
         let root = repo_dir.path().to_str().unwrap();
         let resolve = |_p: &Path| Some(file.clone());
         let state = AirgapState::new(); // load_repo_consents never called
-        let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve) else {
+        let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve)
+        else {
             panic!()
         };
         let outcome = state.consent_repo_allowlist(root, &hash, resolve);

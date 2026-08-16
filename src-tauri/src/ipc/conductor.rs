@@ -40,7 +40,11 @@ pub async fn conductor_allow_run(state: State<'_, AppState>, allow: bool) -> Res
 /// read access to a pane it didn't name, and this carries no scrollback
 /// content, only the grant itself.
 #[tauri::command]
-pub async fn conductor_allow_read(state: State<'_, AppState>, pane_id: String, allowed: bool) -> Result<Value, String> {
+pub async fn conductor_allow_read(
+    state: State<'_, AppState>,
+    pane_id: String,
+    allowed: bool,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "conductor:allowRead")?;
     state.conductor.set_read_consent(&pane_id, allowed);
     Ok(json!({}))

@@ -158,16 +158,23 @@ fn resolve_tome_shim_bin() -> PathBuf {
 /// exits — these are short-lived `#[ignore]`d integration tests, not a
 /// long-running service).
 async fn spawn_fixed_response_upstream(body: &'static str) -> u16 {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind test upstream");
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind test upstream");
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
         loop {
-            let Ok((mut sock, _)) = listener.accept().await else { break };
+            let Ok((mut sock, _)) = listener.accept().await else {
+                break;
+            };
             tokio::spawn(async move {
                 use tokio::io::AsyncReadExt;
                 let mut buf = vec![0u8; 4096];
                 let _ = sock.read(&mut buf).await; // request not parsed — fixed response regardless
-                let resp = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
                 let _ = sock.write_all(resp.as_bytes()).await;
             });
         }
@@ -182,11 +189,15 @@ async fn spawn_fixed_response_upstream(body: &'static str) -> u16 {
 /// concurrently-issued `relock()` has a real, non-instantaneous transfer
 /// to sever, rather than racing a transfer that may have already finished.
 async fn spawn_drip_upstream(max_chunks: u32) -> u16 {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind drip upstream");
+    let listener = TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .expect("bind drip upstream");
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
         loop {
-            let Ok((mut sock, _)) = listener.accept().await else { break };
+            let Ok((mut sock, _)) = listener.accept().await else {
+                break;
+            };
             tokio::spawn(async move {
                 use tokio::io::AsyncReadExt;
                 let mut buf = vec![0u8; 4096];
@@ -230,7 +241,11 @@ struct SandboxFixture {
 /// the same "same address, different presented name" trick `proxy.rs`'s
 /// own unit tests use to distinguish allowed vs. blocked without needing a
 /// second real upstream).
-async fn build_fixture(pane_id: &str, initial_allowed: Vec<String>, inner_argv: Vec<String>) -> SandboxFixture {
+async fn build_fixture(
+    pane_id: &str,
+    initial_allowed: Vec<String>,
+    inner_argv: Vec<String>,
+) -> SandboxFixture {
     require_bwrap();
     let runtime_dir = tempfile::tempdir().expect("runtime tempdir");
     let config_dir = tempfile::tempdir().expect("config tempdir");
@@ -257,7 +272,13 @@ async fn build_fixture(pane_id: &str, initial_allowed: Vec<String>, inner_argv: 
     };
     let argv = build_bwrap_argv(&spec);
 
-    SandboxFixture { proxy, argv, config_dir, runtime_dir, blocked }
+    SandboxFixture {
+        proxy,
+        argv,
+        config_dir,
+        runtime_dir,
+        blocked,
+    }
 }
 
 impl SandboxFixture {
@@ -336,7 +357,12 @@ async fn run_to_completion(child: Child, timeout: Duration) -> Output {
             timed_out: false,
         },
         Ok(Err(e)) => panic!("waiting on sandboxed process failed: {e}"),
-        Err(_) => Output { code: None, stdout: String::new(), stderr: String::new(), timed_out: true },
+        Err(_) => Output {
+            code: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            timed_out: true,
+        },
     }
 }
 
@@ -391,8 +417,16 @@ async fn direct_curl_to_a_non_allowlisted_address_has_no_route() {
     let child = fixture.spawn(&[]);
     let out = run_to_completion(child, TEST_TIMEOUT).await;
 
-    assert!(!out.timed_out, "direct curl should fail immediately (no route), not hang");
-    assert_ne!(out.code, Some(0), "direct egress must fail — stderr: {}", out.stderr);
+    assert!(
+        !out.timed_out,
+        "direct curl should fail immediately (no route), not hang"
+    );
+    assert_ne!(
+        out.code,
+        Some(0),
+        "direct egress must fail — stderr: {}",
+        out.stderr
+    );
 }
 
 // ==== 2. proxy -> allowlisted host succeeds (CONNECT tunnel leg) ====
@@ -417,9 +451,22 @@ async fn curl_via_proxy_to_an_allowlisted_host_succeeds() {
     let child = fixture.spawn(&[]);
     let out = run_to_completion(child, TEST_TIMEOUT).await;
 
-    assert!(!out.timed_out, "proxied curl to an allowlisted host should not hang");
-    assert_eq!(out.code, Some(0), "curl itself must succeed — stderr: {}", out.stderr);
-    assert_eq!(out.stdout.trim(), "200", "expected HTTP 200 from the allowlisted upstream, stderr: {}", out.stderr);
+    assert!(
+        !out.timed_out,
+        "proxied curl to an allowlisted host should not hang"
+    );
+    assert_eq!(
+        out.code,
+        Some(0),
+        "curl itself must succeed — stderr: {}",
+        out.stderr
+    );
+    assert_eq!(
+        out.stdout.trim(),
+        "200",
+        "expected HTTP 200 from the allowlisted upstream, stderr: {}",
+        out.stderr
+    );
 }
 
 // ==== 3. proxy -> non-allowlisted host is blocked (plain-HTTP leg + on_blocked) ====
@@ -446,15 +493,25 @@ async fn curl_via_proxy_to_a_non_allowlisted_host_is_blocked() {
     let child = fixture.spawn(&[]);
     let out = run_to_completion(child, TEST_TIMEOUT).await;
 
-    assert!(!out.timed_out, "a blocked request should get a fast 403, not hang");
-    assert_eq!(out.stdout.trim(), "403", "expected HTTP 403 for a non-allowlisted host, stderr: {}", out.stderr);
+    assert!(
+        !out.timed_out,
+        "a blocked request should get a fast 403, not hang"
+    );
+    assert_eq!(
+        out.stdout.trim(),
+        "403",
+        "expected HTTP 403 for a non-allowlisted host, stderr: {}",
+        out.stderr
+    );
 
     // The host-side PaneProxy's on_blocked callback — the exact mechanism
     // `ipc::airgap::create_gapped_pane_proxy` wires to `events::append`
     // (kind `airgap:blocked`) in production — must have actually fired.
     let blocked = fixture.blocked.lock().unwrap();
     assert!(
-        blocked.iter().any(|e| matches!(e, BlockedEvent::Attempt { host } if host == "localhost")),
+        blocked
+            .iter()
+            .any(|e| matches!(e, BlockedEvent::Attempt { host } if host == "localhost")),
         "expected a BlockedEvent::Attempt for host \"localhost\", got {blocked:?}"
     );
 }
@@ -479,7 +536,8 @@ async fn grandchild_process_is_equally_contained() {
         vec![
             "/bin/sh".to_string(),
             "-c".to_string(),
-            "sh -c 'curl -sS --noproxy \"*\" --max-time 5 -o /dev/null http://203.0.113.1/'".to_string(),
+            "sh -c 'curl -sS --noproxy \"*\" --max-time 5 -o /dev/null http://203.0.113.1/'"
+                .to_string(),
         ],
     )
     .await;
@@ -487,8 +545,16 @@ async fn grandchild_process_is_equally_contained() {
     let child = fixture.spawn(&[]);
     let out = run_to_completion(child, TEST_TIMEOUT).await;
 
-    assert!(!out.timed_out, "a contained grandchild's direct egress should fail fast, not hang");
-    assert_ne!(out.code, Some(0), "grandchild direct egress must fail — stderr: {}", out.stderr);
+    assert!(
+        !out.timed_out,
+        "a contained grandchild's direct egress should fail fast, not hang"
+    );
+    assert_ne!(
+        out.code,
+        Some(0),
+        "grandchild direct egress must fail — stderr: {}",
+        out.stderr
+    );
 }
 
 // ==== 5. app config dir is hidden by bwrap's --tmpfs ====
@@ -499,7 +565,12 @@ async fn app_config_dir_is_hidden_by_the_bwrap_tmpfs() {
     let fixture = build_fixture(
         "tmpfs-hide",
         vec!["127.0.0.1".to_string()],
-        vec!["/bin/sh".to_string(), "-c".to_string(), "test -e \"$0\" && echo PRESENT || echo ABSENT".to_string(), "__unused_argv0_placeholder__".to_string()],
+        vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "test -e \"$0\" && echo PRESENT || echo ABSENT".to_string(),
+            "__unused_argv0_placeholder__".to_string(),
+        ],
     )
     .await;
 
@@ -508,8 +579,12 @@ async fn app_config_dir_is_hidden_by_the_bwrap_tmpfs() {
     // fixture's argv) targets, present on the HOST, must still exist on
     // disk right up until the sandboxed process actually checks for it.
     let marker = fixture.config_dir.path().join("airgap-auth.json");
-    std::fs::write(&marker, r#"{"salt":"deadbeef","hash":"deadbeef"}"#).expect("write marker file on host");
-    assert!(marker.exists(), "test precondition: the marker file must exist on the HOST");
+    std::fs::write(&marker, r#"{"salt":"deadbeef","hash":"deadbeef"}"#)
+        .expect("write marker file on host");
+    assert!(
+        marker.exists(),
+        "test precondition: the marker file must exist on the HOST"
+    );
 
     // Rebuild the inner command now that we know the real marker path
     // (tempdir paths aren't known until build_fixture runs) — a second,
@@ -524,7 +599,10 @@ async fn app_config_dir_is_hidden_by_the_bwrap_tmpfs() {
         inner_argv: vec![
             "/bin/sh".to_string(),
             "-c".to_string(),
-            format!("test -e {} && echo PRESENT || echo ABSENT", marker.display()),
+            format!(
+                "test -e {} && echo PRESENT || echo ABSENT",
+                marker.display()
+            ),
         ],
         headless: true,
     };
@@ -593,7 +671,11 @@ async fn relock_severs_a_live_tunnel_mid_transfer() {
     // proving there is a genuinely LIVE transfer in flight, not racing a
     // connection that hasn't started yet.
     tokio::time::sleep(Duration::from_millis(800)).await;
-    assert_eq!(fixture.proxy.live_tunnel_count(), 1, "expected exactly one live tunnel right before relock");
+    assert_eq!(
+        fixture.proxy.live_tunnel_count(),
+        1,
+        "expected exactly one live tunnel right before relock"
+    );
 
     fixture.proxy.relock();
     // relock() now has real work to do: mode flips back to Providers, and
@@ -632,7 +714,11 @@ async fn relock_severs_a_live_tunnel_mid_transfer() {
         out.stdout,
         out.stderr
     );
-    assert_eq!(fixture.proxy.live_tunnel_count(), 0, "relock must leave no live tunnels behind");
+    assert_eq!(
+        fixture.proxy.live_tunnel_count(),
+        0,
+        "relock must leave no live tunnels behind"
+    );
 }
 
 // ==== 7. killing the wrap leaves no orphan process ====
@@ -652,7 +738,11 @@ async fn killing_the_wrap_leaves_no_orphan_process() {
     let fixture = build_fixture(
         "orphan-check",
         vec!["127.0.0.1".to_string()],
-        vec!["/bin/bash".to_string(), "-c".to_string(), format!("exec -a {MARKER} sleep 300")],
+        vec![
+            "/bin/bash".to_string(),
+            "-c".to_string(),
+            format!("exec -a {MARKER} sleep 300"),
+        ],
     )
     .await;
 
@@ -666,7 +756,10 @@ async fn killing_the_wrap_leaves_no_orphan_process() {
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    assert!(pgrep_matches(MARKER), "test precondition: the sandboxed sleep never showed up under pgrep");
+    assert!(
+        pgrep_matches(MARKER),
+        "test precondition: the sandboxed sleep never showed up under pgrep"
+    );
 
     // Kill the TOP-LEVEL process the test itself spawned (bwrap) — the
     // exact same thing `crate::pty::Registry::kill` does to whatever
@@ -686,7 +779,10 @@ async fn killing_the_wrap_leaves_no_orphan_process() {
         tokio::time::sleep(Duration::from_millis(200)).await;
         still_present = pgrep_matches(MARKER);
     }
-    assert!(!still_present, "no process matching {MARKER:?} may survive the wrap being killed — orphan detected");
+    assert!(
+        !still_present,
+        "no process matching {MARKER:?} may survive the wrap being killed — orphan detected"
+    );
 }
 
 fn pgrep_matches(pattern: &str) -> bool {

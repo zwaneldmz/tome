@@ -59,14 +59,18 @@ pub(crate) fn effective_allow_patterns(state: &AppState) -> Vec<String> {
 /// `airgap::proxy`'s doc comment on that split).
 pub(crate) fn recompile_all_proxies(state: &AppState) {
     let patterns = effective_allow_patterns(state);
-    let proxies = state.proxies.lock().expect("AppState.proxies lock poisoned");
+    let proxies = state
+        .proxies
+        .lock()
+        .expect("AppState.proxies lock poisoned");
     for proxy in proxies.values() {
         proxy.set_allowed(patterns.clone());
     }
 }
 
 fn state_snapshot_json(state: &AppState) -> Value {
-    serde_json::to_value(state.airgap.state_snapshot()).expect("AirgapStateSnapshot always serializes")
+    serde_json::to_value(state.airgap.state_snapshot())
+        .expect("AirgapStateSnapshot always serializes")
 }
 
 /// Seam over the two kinds of push [`schedule_unlock`]/[`relock_now`]/
@@ -172,19 +176,28 @@ pub(crate) async fn create_gapped_pane_proxy<E: AirgapEnv>(
     let blocked_pane_id = pane_id.to_string();
     let on_blocked = move |event: crate::airgap::proxy::BlockedEvent| match event {
         crate::airgap::proxy::BlockedEvent::Attempt { host } => {
-            blocked_env.emit_json("airgap:blocked", json!({"paneId": blocked_pane_id, "host": host}));
+            blocked_env.emit_json(
+                "airgap:blocked",
+                json!({"paneId": blocked_pane_id, "host": host}),
+            );
         }
         crate::airgap::proxy::BlockedEvent::Coalesced { host, count } => {
             let fields: Vec<(&'static str, Value)> = if count <= 1 {
                 vec![("paneId", json!(blocked_pane_id)), ("host", json!(host))]
             } else {
-                vec![("paneId", json!(blocked_pane_id)), ("host", json!(host)), ("count", json!(count))]
+                vec![
+                    ("paneId", json!(blocked_pane_id)),
+                    ("host", json!(host)),
+                    ("count", json!(count)),
+                ]
             };
             blocked_env.log("airgap:blocked", fields);
         }
     };
 
-    let proxy = crate::airgap::proxy::PaneProxy::spawn(initial_allowed, unix_socket_path, on_blocked).await?;
+    let proxy =
+        crate::airgap::proxy::PaneProxy::spawn(initial_allowed, unix_socket_path, on_blocked)
+            .await?;
     // `#[cfg(unix)]`, not `target_os = "linux"` — matches
     // `secure_pane_socket_permissions`'s own gate (unix permission bits are
     // a unix-wide concept). Only ever non-`None` when the caller passed a
@@ -195,7 +208,11 @@ pub(crate) async fn create_gapped_pane_proxy<E: AirgapEnv>(
         crate::airgap::linux::secure_pane_socket_permissions(path)?;
     }
     let proxy = std::sync::Arc::new(proxy);
-    state.proxies.lock().expect("AppState.proxies lock poisoned").insert(pane_id.to_string(), proxy.clone());
+    state
+        .proxies
+        .lock()
+        .expect("AppState.proxies lock poisoned")
+        .insert(pane_id.to_string(), proxy.clone());
     state.airgap.register_pane(pane_id);
     push_state_event(env, state);
     Ok(proxy)
@@ -215,12 +232,20 @@ pub(crate) async fn create_gapped_pane_proxy<E: AirgapEnv>(
 /// block: `airgap.closePane(id); throw err`), and on every ordinary
 /// `pty:kill`/pane-exit teardown, gapped or not.
 pub(crate) fn close_pane_and_proxy<E: AirgapEnv>(env: &E, state: &AppState, pane_id: &str) {
-    if let Some((_, timer)) =
-        state.relock_timers.lock().expect("AppState.relock_timers lock poisoned").remove(pane_id)
+    if let Some((_, timer)) = state
+        .relock_timers
+        .lock()
+        .expect("AppState.relock_timers lock poisoned")
+        .remove(pane_id)
     {
         timer.abort();
     }
-    if let Some(proxy) = state.proxies.lock().expect("AppState.proxies lock poisoned").remove(pane_id) {
+    if let Some(proxy) = state
+        .proxies
+        .lock()
+        .expect("AppState.proxies lock poisoned")
+        .remove(pane_id)
+    {
         proxy.shutdown();
     }
     if state.airgap.close_pane(pane_id) {
@@ -237,13 +262,24 @@ pub(crate) fn close_pane_and_proxy<E: AirgapEnv>(env: &E, state: &AppState, pane
 /// known pane (TOME-019: no state change of ANY kind, pure or live, on a
 /// forged/invalid request). `pub(crate)` so `airgap_unlock` below can stay
 /// a thin command wrapper around it.
-pub(crate) fn schedule_unlock<E: AirgapEnv>(env: &E, state: &AppState, pane_id: &str, minutes: i64) {
+pub(crate) fn schedule_unlock<E: AirgapEnv>(
+    env: &E,
+    state: &AppState,
+    pane_id: &str,
+    minutes: i64,
+) {
     let now = totp::now_ms() as i64;
     let Some(deadline_ms) = state.airgap.unlock_pane(pane_id, minutes, now) else {
         return;
     };
 
-    if let Some(proxy) = state.proxies.lock().expect("AppState.proxies lock poisoned").get(pane_id).cloned() {
+    if let Some(proxy) = state
+        .proxies
+        .lock()
+        .expect("AppState.proxies lock poisoned")
+        .get(pane_id)
+        .cloned()
+    {
         proxy.unlock();
     }
 
@@ -268,7 +304,11 @@ pub(crate) fn schedule_unlock<E: AirgapEnv>(env: &E, state: &AppState, pane_id: 
     // being_claimed` test.
     let generation = state.relock_timer_generation.fetch_add(1, Ordering::SeqCst) + 1;
 
-    if let Some((_, old)) = state.relock_timers.lock().expect("AppState.relock_timers lock poisoned").remove(pane_id)
+    if let Some((_, old)) = state
+        .relock_timers
+        .lock()
+        .expect("AppState.relock_timers lock poisoned")
+        .remove(pane_id)
     {
         old.abort(); // best-effort; the generation check above is the actual guarantee
     }
@@ -289,9 +329,15 @@ pub(crate) fn schedule_unlock<E: AirgapEnv>(env: &E, state: &AppState, pane_id: 
         .relock_timers
         .lock()
         .expect("AppState.relock_timers lock poisoned")
-        .insert(pane_id.to_string(), (generation, join.inner().abort_handle()));
+        .insert(
+            pane_id.to_string(),
+            (generation, join.inner().abort_handle()),
+        );
 
-    env.log("airgap:unlock", vec![("paneId", json!(pane_id)), ("minutes", json!(minutes))]);
+    env.log(
+        "airgap:unlock",
+        vec![("paneId", json!(pane_id)), ("minutes", json!(minutes))],
+    );
     push_state_event(env, state);
 }
 
@@ -306,7 +352,10 @@ pub(crate) fn schedule_unlock<E: AirgapEnv>(env: &E, state: &AppState, pane_id: 
 /// entry present (if any) belongs to a NEWER timer, which must not be
 /// disturbed by a stale one losing this check.
 fn claim_timer_if_current(state: &AppState, pane_id: &str, generation: u64) -> bool {
-    let mut timers = state.relock_timers.lock().expect("AppState.relock_timers lock poisoned");
+    let mut timers = state
+        .relock_timers
+        .lock()
+        .expect("AppState.relock_timers lock poisoned");
     let is_current = matches!(timers.get(pane_id), Some((g, _)) if *g == generation);
     if is_current {
         timers.remove(pane_id);
@@ -327,7 +376,13 @@ fn relock_now<E: AirgapEnv>(env: &E, state: &AppState, pane_id: &str) {
     if !state.airgap.relock_pane(pane_id) {
         return;
     }
-    if let Some(proxy) = state.proxies.lock().expect("AppState.proxies lock poisoned").get(pane_id).cloned() {
+    if let Some(proxy) = state
+        .proxies
+        .lock()
+        .expect("AppState.proxies lock poisoned")
+        .get(pane_id)
+        .cloned()
+    {
         proxy.relock();
     }
     env.log("airgap:relock", vec![("paneId", json!(pane_id))]);
@@ -346,7 +401,10 @@ pub async fn airgap_state(state: State<'_, AppState>) -> Result<Value, String> {
     let mut snapshot = state_snapshot_json(&state);
     let (configured, totp) = {
         let guard = state.auth.lock().expect("AppState.auth lock poisoned");
-        guard.as_ref().map(|a| (a.status().configured, a.status().totp)).unwrap_or((false, false))
+        guard
+            .as_ref()
+            .map(|a| (a.status().configured, a.status().totp))
+            .unwrap_or((false, false))
     };
     snapshot["auth"] = json!({"configured": configured, "totp": totp});
     Ok(snapshot)
@@ -377,7 +435,9 @@ pub async fn airgap_unlock(
 
     {
         let mut guard = state.auth.lock().expect("AppState.auth lock poisoned");
-        let auth = guard.as_mut().ok_or_else(|| "auth: not initialized".to_string())?;
+        let auth = guard
+            .as_mut()
+            .ok_or_else(|| "auth: not initialized".to_string())?;
         let wait = auth.throttle_retry_in("airgap:unlock");
         if wait > 0 {
             return Ok(json!({
@@ -389,11 +449,17 @@ pub async fn airgap_unlock(
         let verified = if totp_active {
             code.as_deref().is_some_and(|c| auth.verify_totp(c))
         } else {
-            passphrase.as_deref().is_some_and(|p| auth.verify_passphrase(p))
+            passphrase
+                .as_deref()
+                .is_some_and(|p| auth.verify_passphrase(p))
         };
         if !verified {
             auth.record_failure("airgap:unlock");
-            let error = if totp_active { "Wrong 2FA code." } else { "Wrong passphrase." };
+            let error = if totp_active {
+                "Wrong 2FA code."
+            } else {
+                "Wrong passphrase."
+            };
             return Ok(json!({"ok": false, "error": error}));
         }
         auth.record_success("airgap:unlock");
@@ -410,10 +476,17 @@ pub async fn airgap_unlock(
 /// it is) — mirrors `relockPane` being callable with no re-auth in the JS
 /// original.
 #[tauri::command]
-pub async fn airgap_relock(app: AppHandle, state: State<'_, AppState>, pane_id: String) -> Result<Value, String> {
+pub async fn airgap_relock(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pane_id: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "airgap:relock")?;
-    if let Some((_, timer)) =
-        state.relock_timers.lock().expect("AppState.relock_timers lock poisoned").remove(&pane_id)
+    if let Some((_, timer)) = state
+        .relock_timers
+        .lock()
+        .expect("AppState.relock_timers lock poisoned")
+        .remove(&pane_id)
     {
         timer.abort();
     }
@@ -435,7 +508,9 @@ pub async fn airgap_setup(state: State<'_, AppState>, passphrase: String) -> Res
     lock_gate::guard(&state, "airgap:setup")?;
     {
         let mut guard = state.auth.lock().expect("AppState.auth lock poisoned");
-        let auth = guard.as_mut().ok_or_else(|| "auth: not initialized".to_string())?;
+        let auth = guard
+            .as_mut()
+            .ok_or_else(|| "auth: not initialized".to_string())?;
         if auth.status().configured {
             return Ok(json!({"ok": false, "error": "Already configured."}));
         }
@@ -456,7 +531,9 @@ pub async fn airgap_setup(state: State<'_, AppState>, passphrase: String) -> Res
 pub async fn airgap_enroll_totp(state: State<'_, AppState>) -> Result<Value, String> {
     lock_gate::guard(&state, "airgap:enrollTotp")?;
     let mut guard = state.auth.lock().expect("AppState.auth lock poisoned");
-    let auth = guard.as_mut().ok_or_else(|| "auth: not initialized".to_string())?;
+    let auth = guard
+        .as_mut()
+        .ok_or_else(|| "auth: not initialized".to_string())?;
     auth.enroll_totp()
         .map(|e| serde_json::to_value(e).expect("TotpEnrollment always serializes"))
         .map_err(|e| e.to_string())
@@ -468,11 +545,18 @@ pub async fn airgap_enroll_totp(state: State<'_, AppState>) -> Result<Value, Str
 /// `if (await tome.airgap.confirmTotp(code.value))` reads it as one), and
 /// only `Err`s on an actual save failure.
 #[tauri::command]
-pub async fn airgap_confirm_totp(state: State<'_, AppState>, code: String) -> Result<Value, String> {
+pub async fn airgap_confirm_totp(
+    state: State<'_, AppState>,
+    code: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "airgap:confirmTotp")?;
     let mut guard = state.auth.lock().expect("AppState.auth lock poisoned");
-    let auth = guard.as_mut().ok_or_else(|| "auth: not initialized".to_string())?;
-    auth.confirm_totp(&code).map(|ok| json!(ok)).map_err(|e| e.to_string())
+    let auth = guard
+        .as_mut()
+        .ok_or_else(|| "auth: not initialized".to_string())?;
+    auth.confirm_totp(&code)
+        .map(|ok| json!(ok))
+        .map_err(|e| e.to_string())
 }
 
 /// `airgap:readRepoAllowlist` (`{ root }`). Main is the sole authority: it
@@ -481,9 +565,14 @@ pub async fn airgap_confirm_totp(state: State<'_, AppState>, code: String) -> Re
 /// reads/hashes/validates `.tome/airgap.json` itself — the renderer never
 /// supplies hosts, only a root to check.
 #[tauri::command]
-pub async fn airgap_read_repo_allowlist(state: State<'_, AppState>, root: String) -> Result<Value, String> {
+pub async fn airgap_read_repo_allowlist(
+    state: State<'_, AppState>,
+    root: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "airgap:readRepoAllowlist")?;
-    let report = state.airgap.read_repo_allowlist(&root, |p| confine::confined_real_path(&state, p).ok());
+    let report = state
+        .airgap
+        .read_repo_allowlist(&root, |p| confine::confined_real_path(&state, p).ok());
     Ok(serde_json::to_value(report).expect("RepoAllowlistReport always serializes"))
 }
 
@@ -501,7 +590,9 @@ pub async fn airgap_consent_repo_allowlist(
     hash: String,
 ) -> Result<Value, String> {
     lock_gate::guard(&state, "airgap:consentRepoAllowlist")?;
-    let outcome = state.airgap.consent_repo_allowlist(&root, &hash, |p| confine::confined_real_path(&state, p).ok());
+    let outcome = state.airgap.consent_repo_allowlist(&root, &hash, |p| {
+        confine::confined_real_path(&state, p).ok()
+    });
     match outcome {
         ConsentOutcome::Ok { applied, rejected } => {
             recompile_all_proxies(&state);
@@ -518,7 +609,10 @@ pub async fn airgap_consent_repo_allowlist(
 /// `recompile()` unconditionally too, a harmless no-op when nothing
 /// actually changed.
 #[tauri::command]
-pub async fn airgap_revoke_repo_allowlist(state: State<'_, AppState>, root: String) -> Result<Value, String> {
+pub async fn airgap_revoke_repo_allowlist(
+    state: State<'_, AppState>,
+    root: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "airgap:revokeRepoAllowlist")?;
     state.airgap.revoke_repo_allowlist(&root);
     recompile_all_proxies(&state);
@@ -546,7 +640,10 @@ mod tests {
 
     impl TestEnv {
         fn new() -> Self {
-            Self { state: Arc::new(AppState::new()), pushes: Arc::new(StdMutex::new(Vec::new())) }
+            Self {
+                state: Arc::new(AppState::new()),
+                pushes: Arc::new(StdMutex::new(Vec::new())),
+            }
         }
     }
 
@@ -555,11 +652,20 @@ mod tests {
             &self.state
         }
         fn emit_json(&self, event: &str, payload: Value) {
-            self.pushes.lock().unwrap().push((event.to_string(), payload));
+            self.pushes
+                .lock()
+                .unwrap()
+                .push((event.to_string(), payload));
         }
         fn log(&self, kind: &str, fields: Vec<(&'static str, Value)>) {
-            let obj: serde_json::Map<String, Value> = fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
-            self.pushes.lock().unwrap().push((kind.to_string(), Value::Object(obj)));
+            let obj: serde_json::Map<String, Value> = fields
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect();
+            self.pushes
+                .lock()
+                .unwrap()
+                .push((kind.to_string(), Value::Object(obj)));
         }
     }
 
@@ -572,16 +678,37 @@ mod tests {
     async fn schedule_unlock_widens_both_airgap_state_and_the_live_proxy() {
         let env = TestEnv::new();
         env.state.airgap.register_pane("pty-1");
-        let proxy = Arc::new(crate::airgap::proxy::PaneProxy::spawn(vec![], None, |_| {}).await.unwrap());
-        env.state.proxies.lock().unwrap().insert("pty-1".to_string(), proxy.clone());
+        let proxy = Arc::new(
+            crate::airgap::proxy::PaneProxy::spawn(vec![], None, |_| {})
+                .await
+                .unwrap(),
+        );
+        env.state
+            .proxies
+            .lock()
+            .unwrap()
+            .insert("pty-1".to_string(), proxy.clone());
         assert_eq!(proxy.mode(), crate::airgap::proxy::Mode::Providers);
 
         schedule_unlock(&env, &env.state, "pty-1", 15);
 
-        assert_eq!(env.state.airgap.pane_mode("pty-1"), Some(crate::airgap::PaneMode::Open));
+        assert_eq!(
+            env.state.airgap.pane_mode("pty-1"),
+            Some(crate::airgap::PaneMode::Open)
+        );
         assert_eq!(proxy.mode(), crate::airgap::proxy::Mode::Open);
-        assert!(env.pushes.lock().unwrap().iter().any(|(k, _)| k == "airgap:unlock"));
-        assert!(env.state.relock_timers.lock().unwrap().contains_key("pty-1"));
+        assert!(env
+            .pushes
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(k, _)| k == "airgap:unlock"));
+        assert!(env
+            .state
+            .relock_timers
+            .lock()
+            .unwrap()
+            .contains_key("pty-1"));
     }
 
     #[tokio::test]
@@ -598,28 +725,59 @@ mod tests {
     async fn relock_now_narrows_both_airgap_state_and_the_live_proxy() {
         let env = TestEnv::new();
         env.state.airgap.register_pane("pty-1");
-        let proxy = Arc::new(crate::airgap::proxy::PaneProxy::spawn(vec![], None, |_| {}).await.unwrap());
-        env.state.proxies.lock().unwrap().insert("pty-1".to_string(), proxy.clone());
+        let proxy = Arc::new(
+            crate::airgap::proxy::PaneProxy::spawn(vec![], None, |_| {})
+                .await
+                .unwrap(),
+        );
+        env.state
+            .proxies
+            .lock()
+            .unwrap()
+            .insert("pty-1".to_string(), proxy.clone());
         schedule_unlock(&env, &env.state, "pty-1", 15);
         assert_eq!(proxy.mode(), crate::airgap::proxy::Mode::Open);
 
         relock_now(&env, &env.state, "pty-1");
 
-        assert_eq!(env.state.airgap.pane_mode("pty-1"), Some(crate::airgap::PaneMode::Providers));
+        assert_eq!(
+            env.state.airgap.pane_mode("pty-1"),
+            Some(crate::airgap::PaneMode::Providers)
+        );
         assert_eq!(proxy.mode(), crate::airgap::proxy::Mode::Providers);
-        assert!(env.pushes.lock().unwrap().iter().any(|(k, _)| k == "airgap:relock"));
+        assert!(env
+            .pushes
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(k, _)| k == "airgap:relock"));
     }
 
     #[tokio::test]
     async fn create_gapped_pane_proxy_registers_a_live_proxy_reachable_on_its_reported_port() {
         let env = TestEnv::new();
-        let proxy = create_gapped_pane_proxy(&env, &env.state, "pty-1", None).await.unwrap();
+        let proxy = create_gapped_pane_proxy(&env, &env.state, "pty-1", None)
+            .await
+            .unwrap();
 
-        assert_eq!(env.state.airgap.pane_mode("pty-1"), Some(crate::airgap::PaneMode::Providers));
+        assert_eq!(
+            env.state.airgap.pane_mode("pty-1"),
+            Some(crate::airgap::PaneMode::Providers)
+        );
         assert!(env.state.proxies.lock().unwrap().contains_key("pty-1"));
-        assert!(tokio::net::TcpStream::connect(("127.0.0.1", proxy.port())).await.is_ok());
-        assert!(env.pushes.lock().unwrap().iter().any(|(k, _)| k == "airgap:state"));
-        assert!(proxy.unix_path().is_none(), "no unix path was requested — none should be bound");
+        assert!(tokio::net::TcpStream::connect(("127.0.0.1", proxy.port()))
+            .await
+            .is_ok());
+        assert!(env
+            .pushes
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(k, _)| k == "airgap:state"));
+        assert!(
+            proxy.unix_path().is_none(),
+            "no unix path was requested — none should be bound"
+        );
     }
 
     // Phase 4/slice L3: the Linux loopback-bridge seam — `unix_socket_path`
@@ -634,18 +792,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let sock_path = dir.path().join("pane-pty-1.sock");
 
-        let proxy = create_gapped_pane_proxy(&env, &env.state, "pty-1", Some(sock_path.clone())).await.unwrap();
+        let proxy = create_gapped_pane_proxy(&env, &env.state, "pty-1", Some(sock_path.clone()))
+            .await
+            .unwrap();
 
         assert_eq!(proxy.unix_path(), Some(&sock_path));
         assert!(sock_path.exists());
         let mode = std::fs::metadata(&sock_path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "the loopback-bridge socket must be locked to 0600, got {mode:o}");
+        assert_eq!(
+            mode, 0o600,
+            "the loopback-bridge socket must be locked to 0600, got {mode:o}"
+        );
     }
 
     #[tokio::test]
     async fn close_pane_and_proxy_tears_down_the_live_proxy_and_cancels_its_timer() {
         let env = TestEnv::new();
-        let proxy = create_gapped_pane_proxy(&env, &env.state, "pty-1", None).await.unwrap();
+        let proxy = create_gapped_pane_proxy(&env, &env.state, "pty-1", None)
+            .await
+            .unwrap();
         let port = proxy.port();
         drop(proxy); // this fn's own Arc, not AppState.proxies' — the map below still holds one
         schedule_unlock(&env, &env.state, "pty-1", 15); // arms a (long) real timer
@@ -653,7 +818,13 @@ mod tests {
         close_pane_and_proxy(&env, &env.state, "pty-1");
 
         assert!(env.state.proxies.lock().unwrap().get("pty-1").is_none());
-        assert!(env.state.relock_timers.lock().unwrap().get("pty-1").is_none());
+        assert!(env
+            .state
+            .relock_timers
+            .lock()
+            .unwrap()
+            .get("pty-1")
+            .is_none());
         assert_eq!(env.state.airgap.pane_state("pty-1"), None);
         // The real listener must actually be down, not just forgotten about.
         // `proxy.shutdown()` signals the listener's accept loop rather than
@@ -669,7 +840,10 @@ mod tests {
             if connect.is_err() {
                 break;
             }
-            assert!(std::time::Instant::now() < deadline, "listener on port {port} never went down");
+            assert!(
+                std::time::Instant::now() < deadline,
+                "listener on port {port} never went down"
+            );
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
     }
@@ -693,20 +867,43 @@ mod tests {
         env.state.airgap.register_pane("pty-1");
 
         schedule_unlock(&env, &env.state, "pty-1", 15);
-        let stale_generation = env.state.relock_timers.lock().unwrap().get("pty-1").unwrap().0;
+        let stale_generation = env
+            .state
+            .relock_timers
+            .lock()
+            .unwrap()
+            .get("pty-1")
+            .unwrap()
+            .0;
 
         // The user re-authenticates and unlocks again before the first
         // timer's deadline — this must supersede it with a fresh
         // generation.
         schedule_unlock(&env, &env.state, "pty-1", 30);
-        let current_generation = env.state.relock_timers.lock().unwrap().get("pty-1").unwrap().0;
+        let current_generation = env
+            .state
+            .relock_timers
+            .lock()
+            .unwrap()
+            .get("pty-1")
+            .unwrap()
+            .0;
         assert_ne!(stale_generation, current_generation);
 
         // What the STALE timer's own post-sleep continuation checks,
         // simulated directly: it must find itself superseded and must NOT
         // remove the current (newer) entry.
-        assert!(!claim_timer_if_current(&env.state, "pty-1", stale_generation));
-        assert!(env.state.relock_timers.lock().unwrap().contains_key("pty-1"));
+        assert!(!claim_timer_if_current(
+            &env.state,
+            "pty-1",
+            stale_generation
+        ));
+        assert!(env
+            .state
+            .relock_timers
+            .lock()
+            .unwrap()
+            .contains_key("pty-1"));
         assert_eq!(
             env.state.airgap.pane_mode("pty-1"),
             Some(crate::airgap::PaneMode::Open),
@@ -715,8 +912,18 @@ mod tests {
 
         // The CURRENT (real) timer's generation remains claimable exactly
         // once — proving a NON-superseded timer still works normally.
-        assert!(claim_timer_if_current(&env.state, "pty-1", current_generation));
-        assert!(env.state.relock_timers.lock().unwrap().get("pty-1").is_none());
+        assert!(claim_timer_if_current(
+            &env.state,
+            "pty-1",
+            current_generation
+        ));
+        assert!(env
+            .state
+            .relock_timers
+            .lock()
+            .unwrap()
+            .get("pty-1")
+            .is_none());
     }
 
     // ---- effective_allow_patterns — the integration seam mod.rs's own doc
@@ -754,7 +961,10 @@ mod tests {
         let patterns = effective_allow_patterns(&state);
         assert!(patterns.contains(&"extra.example.com".to_string()));
         for p in DEFAULT_ALLOW {
-            assert!(patterns.contains(&p.to_string()), "missing default pattern {p}");
+            assert!(
+                patterns.contains(&p.to_string()),
+                "missing default pattern {p}"
+            );
         }
     }
 
@@ -778,6 +988,9 @@ mod tests {
         close_pane_and_proxy(&env, &env.state, "never-existed");
         assert!(env.state.relock_timers.lock().unwrap().is_empty());
         assert!(env.state.proxies.lock().unwrap().is_empty());
-        assert!(env.pushes.lock().unwrap().is_empty(), "an unregistered pane's close must push nothing");
+        assert!(
+            env.pushes.lock().unwrap().is_empty(),
+            "an unregistered pane's close must push nothing"
+        );
     }
 }

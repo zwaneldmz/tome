@@ -29,20 +29,31 @@ pub struct Mentor {
 
 impl Mentor {
     pub fn new() -> Self {
-        Self { pending: Mutex::new(HashMap::new()), seq: AtomicU64::new(0) }
+        Self {
+            pending: Mutex::new(HashMap::new()),
+            seq: AtomicU64::new(0),
+        }
     }
 
     /// Mint a fresh gate id and register a waiter, returning (id, receiver).
     pub fn register(&self) -> (String, oneshot::Receiver<Value>) {
         let id = format!("gate-{}", self.seq.fetch_add(1, Ordering::SeqCst));
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().expect("Mentor.pending poisoned").insert(id.clone(), tx);
+        self.pending
+            .lock()
+            .expect("Mentor.pending poisoned")
+            .insert(id.clone(), tx);
         (id, rx)
     }
 
     /// Complete a gate with the answer value. Returns true if a waiter existed.
     pub fn answer(&self, id: &str, value: Value) -> bool {
-        match self.pending.lock().expect("Mentor.pending poisoned").remove(id) {
+        match self
+            .pending
+            .lock()
+            .expect("Mentor.pending poisoned")
+            .remove(id)
+        {
             Some(tx) => tx.send(value).is_ok(),
             None => false,
         }

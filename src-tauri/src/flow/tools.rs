@@ -47,13 +47,18 @@ enum PickedRoot<'a> {
 /// prefix-matched, the same discipline `agent_spawn`'s allowlist uses.
 fn pick_root<'a>(roots: &'a [String], wanted: Option<&str>) -> PickedRoot<'a> {
     if roots.is_empty() {
-        return PickedRoot::Error("No workspace folder is open yet — open a folder first.".to_string());
+        return PickedRoot::Error(
+            "No workspace folder is open yet — open a folder first.".to_string(),
+        );
     }
     match wanted {
         None => PickedRoot::Root(&roots[0]),
         Some(w) => match roots.iter().find(|r| r.as_str() == w) {
             Some(r) => PickedRoot::Root(r),
-            None => PickedRoot::Error(format!("Unknown root. Open workspace folders: {}", roots.join(", "))),
+            None => PickedRoot::Error(format!(
+                "Unknown root. Open workspace folders: {}",
+                roots.join(", ")
+            )),
         },
     }
 }
@@ -65,7 +70,9 @@ fn bad_name(name: &str) -> Option<String> {
         return Some("Flow name must be a non-empty string.".to_string());
     }
     if unsafe_folder_name(name) {
-        return Some(format!("Flow name \"{name}\" can't contain \"/\", \"\\\", or be \"..\"."));
+        return Some(format!(
+            "Flow name \"{name}\" can't contain \"/\", \"\\\", or be \"..\"."
+        ));
     }
     None
 }
@@ -95,7 +102,11 @@ pub fn read_flow_tool(roots: &[String], root_arg: Option<&str>, name: Option<&st
 
     let Some(name) = name else {
         let mut names = Vec::new();
-        let search_roots: Vec<&str> = if root_arg.is_some() { vec![picked_root] } else { roots.iter().map(String::as_str).collect() };
+        let search_roots: Vec<&str> = if root_arg.is_some() {
+            vec![picked_root]
+        } else {
+            roots.iter().map(String::as_str).collect()
+        };
         for root in search_roots {
             let Ok(entries) = std::fs::read_dir(flows_dir(Path::new(root))) else {
                 continue; // no .tome/flows yet — an empty workspace, not an error
@@ -103,17 +114,31 @@ pub fn read_flow_tool(roots: &[String], root_arg: Option<&str>, name: Option<&st
             for entry in entries.flatten() {
                 let file_name = entry.file_name();
                 let file_name = file_name.to_string_lossy();
-                let Some(stem) = file_name.strip_suffix(SUFFIX) else { continue };
-                names.push(if roots.len() > 1 { format!("{stem} (in {root})") } else { stem.to_string() });
+                let Some(stem) = file_name.strip_suffix(SUFFIX) else {
+                    continue;
+                };
+                names.push(if roots.len() > 1 {
+                    format!("{stem} (in {root})")
+                } else {
+                    stem.to_string()
+                });
             }
         }
-        return if names.is_empty() { "No flows exist yet.".to_string() } else { names.join("\n") };
+        return if names.is_empty() {
+            "No flows exist yet.".to_string()
+        } else {
+            names.join("\n")
+        };
     };
 
     if let Some(bad) = bad_name(name) {
         return bad;
     }
-    let search_roots: Vec<&str> = if root_arg.is_some() { vec![picked_root] } else { roots.iter().map(String::as_str).collect() };
+    let search_roots: Vec<&str> = if root_arg.is_some() {
+        vec![picked_root]
+    } else {
+        roots.iter().map(String::as_str).collect()
+    };
     for root in search_roots {
         let root_path = Path::new(root);
         if let Some(abs) = flow_path(root_path, name) {
@@ -139,20 +164,42 @@ pub struct DraftResult {
 /// passes), which simply stops improving on a cycle instead of looping
 /// forever.
 fn auto_layout(flow: &mut Map<String, Value>) {
-    let nodes = flow.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
+    let nodes = flow
+        .get("nodes")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     let has_coords = nodes.iter().all(|n| {
-        n.get("x").and_then(Value::as_f64).is_some_and(f64::is_finite)
-            && n.get("y").and_then(Value::as_f64).is_some_and(f64::is_finite)
+        n.get("x")
+            .and_then(Value::as_f64)
+            .is_some_and(f64::is_finite)
+            && n.get("y")
+                .and_then(Value::as_f64)
+                .is_some_and(f64::is_finite)
     });
     if has_coords {
         return;
     }
-    let ids: Vec<String> = nodes.iter().filter_map(|n| n.get("id").and_then(Value::as_str)).map(str::to_string).collect();
-    let edges = flow.get("edges").and_then(Value::as_array).cloned().unwrap_or_default();
-    let mut depth: std::collections::HashMap<String, i64> = ids.iter().map(|id| (id.clone(), 0)).collect();
+    let ids: Vec<String> = nodes
+        .iter()
+        .filter_map(|n| n.get("id").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect();
+    let edges = flow
+        .get("edges")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut depth: std::collections::HashMap<String, i64> =
+        ids.iter().map(|id| (id.clone(), 0)).collect();
     for _ in 0..nodes.len().max(1) {
         for edge in &edges {
-            let (Some(from), Some(to)) = (edge.get("from").and_then(Value::as_str), edge.get("to").and_then(Value::as_str)) else { continue };
+            let (Some(from), Some(to)) = (
+                edge.get("from").and_then(Value::as_str),
+                edge.get("to").and_then(Value::as_str),
+            ) else {
+                continue;
+            };
             if let (Some(&d_from), true) = (depth.get(from), depth.contains_key(to)) {
                 let candidate = d_from + 1;
                 if candidate > depth[to] {
@@ -162,14 +209,26 @@ fn auto_layout(flow: &mut Map<String, Value>) {
         }
     }
     let mut rows: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
-    let Some(node_array) = flow.get_mut("nodes").and_then(Value::as_array_mut) else { return };
+    let Some(node_array) = flow.get_mut("nodes").and_then(Value::as_array_mut) else {
+        return;
+    };
     for node in node_array.iter_mut() {
-        let has_xy = node.get("x").and_then(Value::as_f64).is_some_and(f64::is_finite)
-            && node.get("y").and_then(Value::as_f64).is_some_and(f64::is_finite);
+        let has_xy = node
+            .get("x")
+            .and_then(Value::as_f64)
+            .is_some_and(f64::is_finite)
+            && node
+                .get("y")
+                .and_then(Value::as_f64)
+                .is_some_and(f64::is_finite);
         if has_xy {
             continue;
         }
-        let id = node.get("id").and_then(Value::as_str).unwrap_or_default().to_string();
+        let id = node
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
         let d = *depth.get(&id).unwrap_or(&0);
         let row = *rows.get(&d).unwrap_or(&0);
         rows.insert(d, row + 1);
@@ -184,15 +243,31 @@ fn auto_layout(flow: &mut Map<String, Value>) {
 /// the conductor can ask the renderer to open a pane for it exactly once;
 /// every later overwrite reaches the already-open pane through the disk
 /// watcher instead.
-pub fn draft_flow_tool(roots: &[String], root_arg: Option<&str>, name: Option<&str>, flow: Option<Value>) -> DraftResult {
+pub fn draft_flow_tool(
+    roots: &[String],
+    root_arg: Option<&str>,
+    name: Option<&str>,
+    flow: Option<Value>,
+) -> DraftResult {
     let Some(name) = name else {
-        return DraftResult { text: "Flow name must be a non-empty string.".to_string(), open_path: None };
+        return DraftResult {
+            text: "Flow name must be a non-empty string.".to_string(),
+            open_path: None,
+        };
     };
     if let Some(bad) = bad_name(name) {
-        return DraftResult { text: bad, open_path: None };
+        return DraftResult {
+            text: bad,
+            open_path: None,
+        };
     }
     let picked_root = match pick_root(roots, root_arg) {
-        PickedRoot::Error(e) => return DraftResult { text: e, open_path: None },
+        PickedRoot::Error(e) => {
+            return DraftResult {
+                text: e,
+                open_path: None,
+            }
+        }
         PickedRoot::Root(r) => r,
     };
 
@@ -209,7 +284,10 @@ pub fn draft_flow_tool(roots: &[String], root_arg: Option<&str>, name: Option<&s
         flow_obj.insert("edges".to_string(), json!([]));
     }
     if !flow_obj["nodes"].is_array() || !flow_obj["edges"].is_array() {
-        return DraftResult { text: "flow.nodes and flow.edges must be arrays.".to_string(), open_path: None };
+        return DraftResult {
+            text: "flow.nodes and flow.edges must be arrays.".to_string(),
+            open_path: None,
+        };
     }
     if !flow_obj.contains_key("version") || flow_obj["version"].is_null() {
         flow_obj.insert("version".to_string(), json!(1));
@@ -220,12 +298,20 @@ pub fn draft_flow_tool(roots: &[String], root_arg: Option<&str>, name: Option<&s
 
     let doc: super::model::FlowDoc = match serde_json::from_value(Value::Object(flow_obj.clone())) {
         Ok(d) => d,
-        Err(e) => return DraftResult { text: format!("Refused — structural errors (nothing written):\n- {e}"), open_path: None },
+        Err(e) => {
+            return DraftResult {
+                text: format!("Refused — structural errors (nothing written):\n- {e}"),
+                open_path: None,
+            }
+        }
     };
     let validated = super::model::validate_flow(&doc);
     if !validated.errors.is_empty() {
         return DraftResult {
-            text: format!("Refused — structural errors (nothing written):\n- {}", validated.errors.join("\n- ")),
+            text: format!(
+                "Refused — structural errors (nothing written):\n- {}",
+                validated.errors.join("\n- ")
+            ),
             open_path: None,
         };
     }
@@ -233,30 +319,57 @@ pub fn draft_flow_tool(roots: &[String], root_arg: Option<&str>, name: Option<&s
 
     let root_path = Path::new(picked_root);
     let Some(abs) = flow_path(root_path, name) else {
-        return DraftResult { text: format!("Flow name \"{name}\" does not resolve inside .tome/flows."), open_path: None };
+        return DraftResult {
+            text: format!("Flow name \"{name}\" does not resolve inside .tome/flows."),
+            open_path: None,
+        };
     };
     if confine_real_abs_sync(root_path, &abs, false).is_none() {
-        return DraftResult { text: format!("Flow name \"{name}\" escapes the workspace folder."), open_path: None };
+        return DraftResult {
+            text: format!("Flow name \"{name}\" escapes the workspace folder."),
+            open_path: None,
+        };
     }
     let created = !abs.exists();
     if std::fs::create_dir_all(flows_dir(root_path)).is_err() {
-        return DraftResult { text: format!("could not create .tome/flows for \"{name}\"."), open_path: None };
+        return DraftResult {
+            text: format!("could not create .tome/flows for \"{name}\"."),
+            open_path: None,
+        };
     }
     // Same serialization as FlowPanel.save() — the pane's onDiskChanged
     // compares text to spot its own writes.
-    let node_count = flow_obj.get("nodes").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
-    let edge_count = flow_obj.get("edges").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
-    let text_to_write = serde_json::to_string_pretty(&Value::Object(flow_obj)).unwrap_or_default() + "\n";
+    let node_count = flow_obj
+        .get("nodes")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    let edge_count = flow_obj
+        .get("edges")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    let text_to_write =
+        serde_json::to_string_pretty(&Value::Object(flow_obj)).unwrap_or_default() + "\n";
     if std::fs::write(&abs, &text_to_write).is_err() {
-        return DraftResult { text: format!("could not write \"{name}\"."), open_path: None };
+        return DraftResult {
+            text: format!("could not write \"{name}\"."),
+            open_path: None,
+        };
     }
 
-    let mut text = format!("{} \"{name}\" ({node_count} nodes, {edge_count} edges).", if created { "Created" } else { "Updated" });
+    let mut text = format!(
+        "{} \"{name}\" ({node_count} nodes, {edge_count} edges).",
+        if created { "Created" } else { "Updated" }
+    );
     if !validated.warnings.is_empty() {
         text.push_str("\nContract warnings to raise with the user:\n- ");
         text.push_str(&validated.warnings.join("\n- "));
     }
-    DraftResult { text, open_path: if created { Some(abs) } else { None } }
+    DraftResult {
+        text,
+        open_path: if created { Some(abs) } else { None },
+    }
 }
 
 #[cfg(test)]
@@ -264,7 +377,11 @@ mod tests {
     use super::*;
 
     fn tmp() -> PathBuf {
-        tempfile::Builder::new().prefix("tome-flow-tools-").tempdir().unwrap().keep()
+        tempfile::Builder::new()
+            .prefix("tome-flow-tools-")
+            .tempdir()
+            .unwrap()
+            .keep()
     }
 
     fn flows_dir_of(root: &Path) -> PathBuf {
@@ -297,7 +414,11 @@ mod tests {
         let roots = vec![root.to_string_lossy().into_owned()];
         for name in ["../escape", "a/b", "a\\b", "..", "", "   "] {
             let result = draft_flow_tool(&roots, None, Some(name), Some(valid_flow()));
-            assert!(result.text.to_lowercase().contains("name"), "name={name} text={}", result.text);
+            assert!(
+                result.text.to_lowercase().contains("name"),
+                "name={name} text={}",
+                result.text
+            );
             assert!(result.open_path.is_none());
         }
         assert!(!flows_dir_of(&root).exists());
@@ -344,7 +465,13 @@ mod tests {
         let root = tmp();
         let roots = vec![root.to_string_lossy().into_owned()];
         let first = draft_flow_tool(&roots, None, Some("pipeline"), Some(valid_flow()));
-        assert!(first.text.starts_with("Created \"pipeline\" (2 nodes, 1 edges)"), "{}", first.text);
+        assert!(
+            first
+                .text
+                .starts_with("Created \"pipeline\" (2 nodes, 1 edges)"),
+            "{}",
+            first.text
+        );
         let expected_path = flows_dir_of(&root).join("pipeline.flow.json");
         assert_eq!(first.open_path, Some(expected_path.clone()));
 
@@ -367,7 +494,10 @@ mod tests {
         flow["nodes"][0]["kind"] = json!("mystery-cli");
         let result = draft_flow_tool(&roots, None, Some("warned"), Some(flow));
         assert!(result.text.starts_with("Created"));
-        assert!(result.text.to_lowercase().contains("warnings to raise with the user"));
+        assert!(result
+            .text
+            .to_lowercase()
+            .contains("warnings to raise with the user"));
         assert!(result.text.contains("unknown kind \"mystery-cli\""));
         assert!(flows_dir_of(&root).join("warned.flow.json").exists());
     }
@@ -380,7 +510,10 @@ mod tests {
         flow.as_object_mut().unwrap().remove("version");
         let result = draft_flow_tool(&roots, None, Some("laid-out"), Some(flow));
         assert!(result.text.starts_with("Created"));
-        let doc: Value = serde_json::from_str(&std::fs::read_to_string(flows_dir_of(&root).join("laid-out.flow.json")).unwrap()).unwrap();
+        let doc: Value = serde_json::from_str(
+            &std::fs::read_to_string(flows_dir_of(&root).join("laid-out.flow.json")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(doc["version"], json!(1));
         let a = &doc["nodes"][0];
         let b = &doc["nodes"][1];
@@ -397,7 +530,10 @@ mod tests {
         flow["nodes"][0]["x"] = json!(7);
         flow["nodes"][0]["y"] = json!(9);
         draft_flow_tool(&roots, None, Some("mixed"), Some(flow));
-        let doc: Value = serde_json::from_str(&std::fs::read_to_string(flows_dir_of(&root).join("mixed.flow.json")).unwrap()).unwrap();
+        let doc: Value = serde_json::from_str(
+            &std::fs::read_to_string(flows_dir_of(&root).join("mixed.flow.json")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(doc["nodes"][0]["x"], json!(7));
         assert_eq!(doc["nodes"][0]["y"], json!(9));
         assert!(doc["nodes"][1]["x"].is_number());
@@ -407,7 +543,9 @@ mod tests {
 
     #[test]
     fn read_refuses_until_a_workspace_folder_is_open() {
-        assert!(read_flow_tool(&[], None, None).to_lowercase().contains("workspace folder"));
+        assert!(read_flow_tool(&[], None, None)
+            .to_lowercase()
+            .contains("workspace folder"));
     }
 
     #[test]
@@ -436,7 +574,9 @@ mod tests {
 
     #[test]
     fn read_applies_the_same_name_guard_as_draft() {
-        assert!(read_flow_tool(&["/tmp".to_string()], None, Some("../etc")).to_lowercase().contains("name"));
+        assert!(read_flow_tool(&["/tmp".to_string()], None, Some("../etc"))
+            .to_lowercase()
+            .contains("name"));
     }
 
     #[test]
@@ -469,7 +609,11 @@ mod tests {
         let root = tmp();
         let outside = tmp();
         let roots = vec![root.to_string_lossy().into_owned()];
-        std::fs::write(outside.join("planted.flow.json"), serde_json::to_string(&valid_flow()).unwrap()).unwrap();
+        std::fs::write(
+            outside.join("planted.flow.json"),
+            serde_json::to_string(&valid_flow()).unwrap(),
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join(".tome")).unwrap();
         std::os::unix::fs::symlink(&outside, flows_dir_of(&root)).unwrap();
         assert!(read_flow_tool(&roots, None, Some("planted")).contains("No flow named \"planted\""));

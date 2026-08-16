@@ -148,7 +148,14 @@ pub async fn chat_providers(app: AppHandle, state: State<'_, AppState>) -> Resul
 pub(crate) async fn resolve_chat(
     app: &AppHandle,
     state: &State<'_, AppState>,
-) -> Result<(providers::ResolvedProvider, Option<Vec<String>>, Option<String>), String> {
+) -> Result<
+    (
+        providers::ResolvedProvider,
+        Option<Vec<String>>,
+        Option<String>,
+    ),
+    String,
+> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let locked = *state.locked.read().expect("AppState.locked lock poisoned");
     let login = login_env::login_env().await;
@@ -257,7 +264,11 @@ pub async fn chat_send(
     // explicit here to mirror index.js's `let system = conductor.SYSTEM`
     // assignment site. `verbose: true` swaps in the mentor (teaching)
     // persona — `conductor.mentor_system_prompt(gate)` — instead.
-    let system = if verbose { state.conductor.mentor_system_prompt(gate) } else { state.conductor.system_prompt() };
+    let system = if verbose {
+        state.conductor.mentor_system_prompt(gate)
+    } else {
+        state.conductor.system_prompt()
+    };
     let conductor_env = conductor::env::production_env(app.clone(), provider, betas, fallbacks);
 
     // `run_chat` owns the whole multi-turn loop, including the abort race
@@ -266,7 +277,14 @@ pub async fn chat_send(
     // comment for the exact `Ok`/`Err` split. Only a genuine, non-abort
     // stream failure reaches here as `Err`, for the same 401/authy
     // classification the JS original's outer `catch` applies.
-    if let Err(err) = conductor::chat::run_chat(&state.conductor, &conductor_env, id.clone(), Some(system), messages).await
+    if let Err(err) = conductor::chat::run_chat(
+        &state.conductor,
+        &conductor_env,
+        id.clone(),
+        Some(system),
+        messages,
+    )
+    .await
     {
         let msg = err.message();
         let authy = err.status() == Some(401) || is_authy_message(&msg);

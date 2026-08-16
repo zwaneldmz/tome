@@ -121,7 +121,11 @@ async fn compute() -> LoginEnv {
     let path = merge_path(&base_path, &fallback_path_extras());
     let secrets = resolve_secrets(env_out.as_deref(), AGENT_SECRET_KEYS);
 
-    LoginEnv { shell, path, secrets }
+    LoginEnv {
+        shell,
+        path,
+        secrets,
+    }
 }
 
 /// Runs `<shell> -ilc <script>`, returning stdout (utf8, lossy-decoded) iff
@@ -427,7 +431,10 @@ mod tests {
 
     #[test]
     fn resolve_base_path_falls_back_when_harvest_failed() {
-        assert_eq!(resolve_base_path(None, "/inherited/path"), "/inherited/path");
+        assert_eq!(
+            resolve_base_path(None, "/inherited/path"),
+            "/inherited/path"
+        );
     }
 
     #[test]
@@ -578,7 +585,10 @@ mod tests {
             "ANTHROPIC_API_KEY".to_string(),
             "sk-ant-super-secret-value".to_string(),
         );
-        secrets.insert("OPENAI_API_KEY".to_string(), "sk-openai-also-secret".to_string());
+        secrets.insert(
+            "OPENAI_API_KEY".to_string(),
+            "sk-openai-also-secret".to_string(),
+        );
         let env = LoginEnv {
             shell: "/bin/zsh".to_string(),
             path: "/usr/bin:/bin".to_string(),

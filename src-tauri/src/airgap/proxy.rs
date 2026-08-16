@@ -94,7 +94,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{
+    AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader,
+};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
@@ -246,8 +248,11 @@ impl PaneProxy {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
         let port = listener.local_addr()?.port();
 
-        let state =
-            Arc::new(ProxyState::new(&initial_allowed, Box::new(on_blocked), BLOCKED_COALESCE));
+        let state = Arc::new(ProxyState::new(
+            &initial_allowed,
+            Box::new(on_blocked),
+            BLOCKED_COALESCE,
+        ));
 
         let mut accept_tasks = Vec::with_capacity(2);
         let tcp_state = state.clone();
@@ -271,7 +276,12 @@ impl PaneProxy {
             }
         }
 
-        Ok(Self { port, unix_path: bound_unix_path, state, accept_tasks })
+        Ok(Self {
+            port,
+            unix_path: bound_unix_path,
+            state,
+            accept_tasks,
+        })
     }
 
     pub fn port(&self) -> u16 {
@@ -327,7 +337,13 @@ impl PaneProxy {
     /// this accurate regardless of that ordering rather than relying on
     /// the self-removal race resolving in a particular direction.
     pub fn live_tunnel_count(&self) -> usize {
-        self.state.tunnels.lock().unwrap().values().filter(|e| !e.abort.is_finished()).count()
+        self.state
+            .tunnels
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|e| !e.abort.is_finished())
+            .count()
     }
 
     /// Stops accepting new connections and kills every live tunnel —
@@ -392,7 +408,10 @@ struct RequestHead {
 
 impl RequestHead {
     fn header(&self, name: &str) -> Option<&str> {
-        self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+        self.headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
     }
 }
 
@@ -443,7 +462,11 @@ async fn read_request_head<R: AsyncBufRead + Unpin>(reader: &mut R) -> Option<Re
         let (name, value) = hline.split_once(':')?;
         headers.push((name.trim().to_string(), value.trim().to_string()));
     }
-    Some(RequestHead { method, target, headers })
+    Some(RequestHead {
+        method,
+        target,
+        headers,
+    })
 }
 
 /// Generic over the accepted stream type so the SAME logic serves TCP and
@@ -479,7 +502,9 @@ fn host_allowed(state: &ProxyState, host: &str) -> bool {
 }
 
 fn note_blocked(state: &Arc<ProxyState>, host: &str) {
-    (state.on_blocked)(BlockedEvent::Attempt { host: host.to_string() });
+    (state.on_blocked)(BlockedEvent::Attempt {
+        host: host.to_string(),
+    });
     schedule_coalesced_log(state, host);
 }
 
@@ -510,10 +535,20 @@ fn schedule_coalesced_log(state: &Arc<ProxyState>, host: &str) {
         // — fall through and start a fresh window below.
     }
     let generation = state.next_block_generation.fetch_add(1, Ordering::Relaxed);
-    pending.insert(host.to_string(), PendingBlock { count: 1, first_at: now, generation });
+    pending.insert(
+        host.to_string(),
+        PendingBlock {
+            count: 1,
+            first_at: now,
+            generation,
+        },
+    );
     drop(pending);
 
-    (state.on_blocked)(BlockedEvent::Coalesced { host: host.to_string(), count: 1 });
+    (state.on_blocked)(BlockedEvent::Coalesced {
+        host: host.to_string(),
+        count: 1,
+    });
 
     let state = state.clone();
     let host = host.to_string();
@@ -585,8 +620,12 @@ async fn connect_upstream_rechecked(
     Some(upstream)
 }
 
-async fn handle_connect<S>(mut client: S, pending: Vec<u8>, head: &RequestHead, state: Arc<ProxyState>)
-where
+async fn handle_connect<S>(
+    mut client: S,
+    pending: Vec<u8>,
+    head: &RequestHead,
+    state: Arc<ProxyState>,
+) where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let (host, port) = parse_connect_target(&head.target);
@@ -594,7 +633,9 @@ where
     if !host_allowed(&state, &host) {
         note_blocked(&state, &host);
         let _ = client
-            .write_all(format!("HTTP/1.1 403 Forbidden\r\n\r\nairgap: {host} is blocked\r\n").as_bytes())
+            .write_all(
+                format!("HTTP/1.1 403 Forbidden\r\n\r\nairgap: {host} is blocked\r\n").as_bytes(),
+            )
             .await;
         let _ = client.shutdown().await;
         return;
@@ -668,7 +709,11 @@ where
         if handshake_delay > Duration::ZERO {
             tokio::time::sleep(handshake_delay).await;
         }
-        if client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n").await.is_err() {
+        if client
+            .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            .await
+            .is_err()
+        {
             task_state.tunnels.lock().unwrap().remove(&id);
             return;
         }
@@ -679,14 +724,28 @@ where
         let _ = tokio::io::copy_bidirectional(&mut client, &mut upstream).await;
         task_state.tunnels.lock().unwrap().remove(&id);
     });
-    state.tunnels.lock().unwrap().insert(id, TunnelEntry { host, abort: join.abort_handle() });
+    state.tunnels.lock().unwrap().insert(
+        id,
+        TunnelEntry {
+            host,
+            abort: join.abort_handle(),
+        },
+    );
     true
 }
 
 // ---- absolute-URI HTTP leg ----
 
-const HOP_BY_HOP: &[&str] =
-    &["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"];
+const HOP_BY_HOP: &[&str] = &[
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
+];
 
 fn is_hop_by_hop(name: &str) -> bool {
     HOP_BY_HOP.iter().any(|h| h.eq_ignore_ascii_case(name))
@@ -715,8 +774,12 @@ fn is_hop_by_hop(name: &str) -> bool {
 ///   already computes its own Content-Length, stripping them symmetrically
 ///   is strictly safer and avoids protocol confusion — a deliberate
 ///   improvement over a literal port, not a fidelity gap).
-async fn handle_plain<S>(mut client: S, pending: Vec<u8>, head: &RequestHead, state: Arc<ProxyState>)
-where
+async fn handle_plain<S>(
+    mut client: S,
+    pending: Vec<u8>,
+    head: &RequestHead,
+    state: Arc<ProxyState>,
+) where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let Some(url) = reqwest::Url::parse(&head.target).ok() else {
@@ -733,14 +796,19 @@ where
     if !host_allowed(&state, &host) {
         note_blocked(&state, &host);
         let body = format!("airgap: {host} is blocked (providers-only mode)\n");
-        let resp =
-            format!("HTTP/1.1 403 Forbidden\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+        let resp = format!(
+            "HTTP/1.1 403 Forbidden\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
         let _ = client.write_all(resp.as_bytes()).await;
         let _ = client.shutdown().await;
         return;
     }
 
-    let content_length: usize = head.header("content-length").and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+    let content_length: usize = head
+        .header("content-length")
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(0);
     let mut body = pending;
     if body.len() < content_length {
         let mut rest = vec![0u8; content_length - body.len()];
@@ -753,10 +821,14 @@ where
         body.truncate(content_length);
     }
 
-    let method = reqwest::Method::from_bytes(head.method.as_bytes()).unwrap_or(reqwest::Method::GET);
+    let method =
+        reqwest::Method::from_bytes(head.method.as_bytes()).unwrap_or(reqwest::Method::GET);
     let mut req = state.http_client.request(method, url);
     for (name, value) in &head.headers {
-        if is_hop_by_hop(name) || name.eq_ignore_ascii_case("content-length") || name.eq_ignore_ascii_case("host") {
+        if is_hop_by_hop(name)
+            || name.eq_ignore_ascii_case("content-length")
+            || name.eq_ignore_ascii_case("host")
+        {
             continue;
         }
         req = req.header(name.as_str(), value.as_str());
@@ -768,9 +840,15 @@ where
     match req.send().await {
         Ok(resp) => {
             let status = resp.status();
-            let mut out = format!("HTTP/1.1 {} {}\r\n", status.as_u16(), status.canonical_reason().unwrap_or(""));
+            let mut out = format!(
+                "HTTP/1.1 {} {}\r\n",
+                status.as_u16(),
+                status.canonical_reason().unwrap_or("")
+            );
             for (name, value) in resp.headers() {
-                if is_hop_by_hop(name.as_str()) || name.as_str().eq_ignore_ascii_case("content-length") {
+                if is_hop_by_hop(name.as_str())
+                    || name.as_str().eq_ignore_ascii_case("content-length")
+                {
                     continue;
                 }
                 if let Ok(v) = value.to_str() {
@@ -804,11 +882,15 @@ mod tests {
     /// round-tripping a payload. Mirrors `airgap-proxy-lifecycle.test.js`'s
     /// `echoServer` helper.
     async fn spawn_echo_server(addr: &str) -> (u16, AbortHandle) {
-        let listener = TcpListener::bind((addr, 0)).await.expect("bind echo server");
+        let listener = TcpListener::bind((addr, 0))
+            .await
+            .expect("bind echo server");
         let port = listener.local_addr().unwrap().port();
         let task = tokio::spawn(async move {
             loop {
-                let Ok((mut sock, _)) = listener.accept().await else { break };
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    break;
+                };
                 tokio::spawn(async move {
                     let mut buf = [0u8; 4096];
                     while let Ok(n) = sock.read(&mut buf).await {
@@ -826,11 +908,15 @@ mod tests {
     /// whatever the client sends (never parsed) and always answers a
     /// canned 200.
     async fn spawn_fake_http_upstream() -> (u16, AbortHandle) {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind fake http upstream");
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind fake http upstream");
         let port = listener.local_addr().unwrap().port();
         let task = tokio::spawn(async move {
             loop {
-                let Ok((mut sock, _)) = listener.accept().await else { break };
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    break;
+                };
                 tokio::spawn(async move {
                     let mut buf = vec![0u8; 4096];
                     let _ = sock.read(&mut buf).await;
@@ -851,27 +937,44 @@ mod tests {
     /// `openTunnel` helper, generalized to also observe the status of a
     /// refused CONNECT.
     async fn connect_via_proxy(proxy_port: u16, target: &str) -> (TcpStream, u16) {
-        let mut stream = TcpStream::connect(("127.0.0.1", proxy_port)).await.expect("connect to proxy");
+        let mut stream = TcpStream::connect(("127.0.0.1", proxy_port))
+            .await
+            .expect("connect to proxy");
         let req = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n\r\n");
-        stream.write_all(req.as_bytes()).await.expect("write CONNECT");
+        stream
+            .write_all(req.as_bytes())
+            .await
+            .expect("write CONNECT");
         let mut head = Vec::new();
         let mut byte = [0u8; 1];
         loop {
-            stream.read_exact(&mut byte).await.expect("read CONNECT response");
+            stream
+                .read_exact(&mut byte)
+                .await
+                .expect("read CONNECT response");
             head.push(byte[0]);
             if head.ends_with(b"\r\n\r\n") {
                 break;
             }
         }
         let text = String::from_utf8_lossy(&head);
-        let status = text.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+        let status = text
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
         (stream, status)
     }
 
-    fn collector() -> (Arc<StdMutex<Vec<BlockedEvent>>>, impl Fn(BlockedEvent) + Send + Sync + 'static) {
+    fn collector() -> (
+        Arc<StdMutex<Vec<BlockedEvent>>>,
+        impl Fn(BlockedEvent) + Send + Sync + 'static,
+    ) {
         let events = Arc::new(StdMutex::new(Vec::new()));
         let handle = events.clone();
-        (events, move |e: BlockedEvent| handle.lock().unwrap().push(e))
+        (events, move |e: BlockedEvent| {
+            handle.lock().unwrap().push(e)
+        })
     }
 
     async fn yield_a_few_times() {
@@ -898,9 +1001,12 @@ mod tests {
     async fn allowlisted_connect_tunnel_gets_200_and_echoes_bytes() {
         let (echo_port, _echo) = spawn_echo_server("127.0.0.1").await;
         let (events, cb) = collector();
-        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, cb).await.unwrap();
+        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, cb)
+            .await
+            .unwrap();
 
-        let (mut stream, status) = connect_via_proxy(proxy.port(), &format!("127.0.0.1:{echo_port}")).await;
+        let (mut stream, status) =
+            connect_via_proxy(proxy.port(), &format!("127.0.0.1:{echo_port}")).await;
         assert_eq!(status, 200);
 
         stream.write_all(b"hello").await.unwrap();
@@ -920,32 +1026,49 @@ mod tests {
         assert_eq!(status, 403);
 
         let logged = events.lock().unwrap();
-        assert!(logged.iter().any(|e| *e == BlockedEvent::Attempt { host: "example.com".to_string() }));
+        assert!(logged.iter().any(|e| *e
+            == BlockedEvent::Attempt {
+                host: "example.com".to_string()
+            }));
     }
 
     #[test]
     fn strip_control_chars_removes_a_bare_stray_cr_but_leaves_normal_text_alone() {
         assert_eq!(strip_control_chars("evil.com\rBAD"), "evil.comBAD");
-        assert_eq!(strip_control_chars("api.anthropic.com"), "api.anthropic.com");
+        assert_eq!(
+            strip_control_chars("api.anthropic.com"),
+            "api.anthropic.com"
+        );
     }
 
     #[tokio::test]
     async fn a_target_with_an_embedded_bare_cr_degrades_to_a_clean_403_not_a_garbled_response() {
         let proxy = PaneProxy::spawn(vec![], None, |_| {}).await.unwrap();
-        let mut stream = TcpStream::connect(("127.0.0.1", proxy.port())).await.unwrap();
+        let mut stream = TcpStream::connect(("127.0.0.1", proxy.port()))
+            .await
+            .unwrap();
         // A bare `\r` (no paired `\n`) mid-target: read_line's framing
         // can't strip it as line-trailing whitespace since it isn't at the
         // end of the line, so it must be handled at the token level (see
         // `strip_control_chars`).
-        stream.write_all(b"CONNECT evil.com\rBAD:443 HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+        stream
+            .write_all(b"CONNECT evil.com\rBAD:443 HTTP/1.1\r\nHost: x\r\n\r\n")
+            .await
+            .unwrap();
         let mut resp = Vec::new();
         stream.read_to_end(&mut resp).await.unwrap();
         let text = String::from_utf8_lossy(&resp);
-        assert!(text.starts_with("HTTP/1.1 403"), "unexpected response: {text}");
+        assert!(
+            text.starts_with("HTTP/1.1 403"),
+            "unexpected response: {text}"
+        );
         // The stray CR must not have survived into the body: a raw
         // mid-body \r would not inject a header (it lands after the blank
         // line), but it should still be gone at the source.
-        assert!(!text.contains("evil.com\rBAD"), "control character leaked into response: {text}");
+        assert!(
+            !text.contains("evil.com\rBAD"),
+            "control character leaked into response: {text}"
+        );
         assert!(text.contains("evil.comBAD"));
     }
 
@@ -959,7 +1082,8 @@ mod tests {
 
         proxy.set_allowed(vec!["127.0.0.1".to_string()]);
 
-        let (_s2, status2) = connect_via_proxy(proxy.port(), &format!("127.0.0.1:{echo_port}")).await;
+        let (_s2, status2) =
+            connect_via_proxy(proxy.port(), &format!("127.0.0.1:{echo_port}")).await;
         assert_eq!(status2, 200);
     }
 
@@ -968,16 +1092,20 @@ mod tests {
     #[tokio::test]
     async fn relock_kills_an_open_mode_only_tunnel_but_spares_an_allowlisted_one() {
         let (echo_port, _echo) = spawn_echo_server("127.0.0.1").await;
-        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {}).await.unwrap();
+        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {})
+            .await
+            .unwrap();
         proxy.unlock(); // mode Open: any host may tunnel right now
 
-        let (mut allowed_sock, s1) = connect_via_proxy(proxy.port(), &format!("127.0.0.1:{echo_port}")).await;
+        let (mut allowed_sock, s1) =
+            connect_via_proxy(proxy.port(), &format!("127.0.0.1:{echo_port}")).await;
         assert_eq!(s1, 200);
         // "localhost" resolves to the SAME loopback echo server but is not
         // itself a literal match for the "127.0.0.1" pattern — admitted
         // only because mode is currently Open, exactly the case relock
         // must sever.
-        let (mut open_only_sock, s2) = connect_via_proxy(proxy.port(), &format!("localhost:{echo_port}")).await;
+        let (mut open_only_sock, s2) =
+            connect_via_proxy(proxy.port(), &format!("localhost:{echo_port}")).await;
         assert_eq!(s2, 200);
 
         for sock in [&mut allowed_sock, &mut open_only_sock] {
@@ -1009,8 +1137,11 @@ mod tests {
     #[tokio::test]
     async fn shutdown_kills_live_tunnels_and_stops_accepting_new_connections() {
         let (echo_port, _echo) = spawn_echo_server("127.0.0.1").await;
-        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {}).await.unwrap();
-        let (mut sock, status) = connect_via_proxy(proxy.port(), &format!("127.0.0.1:{echo_port}")).await;
+        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {})
+            .await
+            .unwrap();
+        let (mut sock, status) =
+            connect_via_proxy(proxy.port(), &format!("127.0.0.1:{echo_port}")).await;
         assert_eq!(status, 200);
 
         let port = proxy.port();
@@ -1036,7 +1167,9 @@ mod tests {
     #[tokio::test]
     async fn tome_002_recheck_refuses_a_tunnel_deallowed_while_the_connect_was_in_flight() {
         let (echo_port, _echo) = spawn_echo_server("127.0.0.1").await;
-        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {}).await.unwrap();
+        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {})
+            .await
+            .unwrap();
 
         let result = connect_upstream_rechecked(&proxy.state, "127.0.0.1", echo_port, || {
             // Simulates the allow set changing during the connect's flight
@@ -1052,7 +1185,9 @@ mod tests {
     #[tokio::test]
     async fn tome_002_recheck_refuses_a_tunnel_whose_pane_closed_while_the_connect_was_in_flight() {
         let (echo_port, _echo) = spawn_echo_server("127.0.0.1").await;
-        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {}).await.unwrap();
+        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {})
+            .await
+            .unwrap();
 
         let result = connect_upstream_rechecked(&proxy.state, "127.0.0.1", echo_port, || {
             proxy.state.closed.store(true, Ordering::SeqCst);
@@ -1082,7 +1217,9 @@ mod tests {
 
         let client_listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let client_port = client_listener.local_addr().unwrap().port();
-        let client_leg = TcpStream::connect(("127.0.0.1", client_port)).await.unwrap();
+        let client_leg = TcpStream::connect(("127.0.0.1", client_port))
+            .await
+            .unwrap();
         let (mut observer, _) = client_listener.accept().await.unwrap();
         let upstream = TcpStream::connect(("127.0.0.1", echo_port)).await.unwrap();
 
@@ -1112,7 +1249,11 @@ mod tests {
         let read = tokio::time::timeout(Duration::from_millis(1000), observer.read(&mut buf))
             .await
             .expect("must not hang");
-        assert_eq!(read.unwrap_or(0), 0, "an aborted tunnel must never deliver the 200 response");
+        assert_eq!(
+            read.unwrap_or(0),
+            0,
+            "an aborted tunnel must never deliver the 200 response"
+        );
         assert_eq!(proxy.live_tunnel_count(), 0);
     }
 
@@ -1145,8 +1286,14 @@ mod tests {
         assert_eq!(
             coalesced,
             vec![
-                BlockedEvent::Coalesced { host: "evil.example.com".to_string(), count: 1 },
-                BlockedEvent::Coalesced { host: "evil.example.com".to_string(), count: 3 },
+                BlockedEvent::Coalesced {
+                    host: "evil.example.com".to_string(),
+                    count: 1
+                },
+                BlockedEvent::Coalesced {
+                    host: "evil.example.com".to_string(),
+                    count: 3
+                },
             ]
         );
     }
@@ -1160,9 +1307,20 @@ mod tests {
         tokio::time::sleep(PAST_WINDOW).await;
         yield_a_few_times().await;
 
-        let coalesced: Vec<_> =
-            events.lock().unwrap().iter().filter(|e| matches!(e, BlockedEvent::Coalesced { .. })).cloned().collect();
-        assert_eq!(coalesced, vec![BlockedEvent::Coalesced { host: "lonely.example.com".to_string(), count: 1 }]);
+        let coalesced: Vec<_> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e, BlockedEvent::Coalesced { .. }))
+            .cloned()
+            .collect();
+        assert_eq!(
+            coalesced,
+            vec![BlockedEvent::Coalesced {
+                host: "lonely.example.com".to_string(),
+                count: 1
+            }]
+        );
     }
 
     #[tokio::test]
@@ -1177,13 +1335,24 @@ mod tests {
         tokio::time::sleep(PAST_WINDOW).await;
         yield_a_few_times().await;
 
-        let coalesced: Vec<_> =
-            events.lock().unwrap().iter().filter(|e| matches!(e, BlockedEvent::Coalesced { .. })).cloned().collect();
+        let coalesced: Vec<_> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| matches!(e, BlockedEvent::Coalesced { .. }))
+            .cloned()
+            .collect();
         assert_eq!(
             coalesced,
             vec![
-                BlockedEvent::Coalesced { host: "host.example.com".to_string(), count: 1 },
-                BlockedEvent::Coalesced { host: "host.example.com".to_string(), count: 1 },
+                BlockedEvent::Coalesced {
+                    host: "host.example.com".to_string(),
+                    count: 1
+                },
+                BlockedEvent::Coalesced {
+                    host: "host.example.com".to_string(),
+                    count: 1
+                },
             ]
         );
     }
@@ -1193,16 +1362,24 @@ mod tests {
     #[tokio::test]
     async fn plain_http_leg_forwards_an_allowlisted_absolute_uri_request() {
         let (upstream_port, _up) = spawn_fake_http_upstream().await;
-        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {}).await.unwrap();
+        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {})
+            .await
+            .unwrap();
 
-        let mut stream = TcpStream::connect(("127.0.0.1", proxy.port())).await.unwrap();
-        let req = format!("GET http://127.0.0.1:{upstream_port}/ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        let mut stream = TcpStream::connect(("127.0.0.1", proxy.port()))
+            .await
+            .unwrap();
+        let req =
+            format!("GET http://127.0.0.1:{upstream_port}/ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
         stream.write_all(req.as_bytes()).await.unwrap();
 
         let mut resp = Vec::new();
         stream.read_to_end(&mut resp).await.unwrap();
         let text = String::from_utf8_lossy(&resp);
-        assert!(text.starts_with("HTTP/1.1 200"), "unexpected response: {text}");
+        assert!(
+            text.starts_with("HTTP/1.1 200"),
+            "unexpected response: {text}"
+        );
         assert!(text.ends_with("ok"), "unexpected response: {text}");
     }
 
@@ -1211,26 +1388,39 @@ mod tests {
         let (events, cb) = collector();
         let proxy = PaneProxy::spawn(vec![], None, cb).await.unwrap();
 
-        let mut stream = TcpStream::connect(("127.0.0.1", proxy.port())).await.unwrap();
+        let mut stream = TcpStream::connect(("127.0.0.1", proxy.port()))
+            .await
+            .unwrap();
         let req = "GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n";
         stream.write_all(req.as_bytes()).await.unwrap();
 
         let mut resp = Vec::new();
         stream.read_to_end(&mut resp).await.unwrap();
         let text = String::from_utf8_lossy(&resp);
-        assert!(text.starts_with("HTTP/1.1 403"), "unexpected response: {text}");
+        assert!(
+            text.starts_with("HTTP/1.1 403"),
+            "unexpected response: {text}"
+        );
 
-        assert!(events.lock().unwrap().iter().any(|e| *e == BlockedEvent::Attempt { host: "example.com".to_string() }));
+        assert!(events.lock().unwrap().iter().any(|e| *e
+            == BlockedEvent::Attempt {
+                host: "example.com".to_string()
+            }));
     }
 
     #[tokio::test]
     async fn plain_http_leg_rejects_a_malformed_target_with_400() {
         let proxy = PaneProxy::spawn(vec![], None, |_| {}).await.unwrap();
-        let mut stream = TcpStream::connect(("127.0.0.1", proxy.port())).await.unwrap();
+        let mut stream = TcpStream::connect(("127.0.0.1", proxy.port()))
+            .await
+            .unwrap();
         // Not an absolute URI (no scheme/host) — a plain-origin-form target
         // is only valid when a client is talking to an actual origin
         // server, never to a proxy.
-        stream.write_all(b"GET /just-a-path HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+        stream
+            .write_all(b"GET /just-a-path HTTP/1.1\r\nHost: x\r\n\r\n")
+            .await
+            .unwrap();
         let mut resp = Vec::new();
         stream.read_to_end(&mut resp).await.unwrap();
         assert!(String::from_utf8_lossy(&resp).starts_with("HTTP/1.1 400"));
@@ -1251,11 +1441,15 @@ mod tests {
         // the redirect internally and returned the evil host's body
         // verbatim: a full allowlist bypass for any allowlisted host with
         // (or tricked into serving) an open redirect.
-        let evil_listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind evil upstream");
+        let evil_listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind evil upstream");
         let evil_port = evil_listener.local_addr().unwrap().port();
         let evil_task = tokio::spawn(async move {
             loop {
-                let Ok((mut sock, _)) = evil_listener.accept().await else { break };
+                let Ok((mut sock, _)) = evil_listener.accept().await else {
+                    break;
+                };
                 tokio::spawn(async move {
                     let mut buf = vec![0u8; 4096];
                     let _ = sock.read(&mut buf).await;
@@ -1267,39 +1461,56 @@ mod tests {
             }
         });
 
-        let redirector_listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind redirector upstream");
+        let redirector_listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind redirector upstream");
         let redirector_port = redirector_listener.local_addr().unwrap().port();
         let redirector_task = tokio::spawn(async move {
             loop {
-                let Ok((mut sock, _)) = redirector_listener.accept().await else { break };
+                let Ok((mut sock, _)) = redirector_listener.accept().await else {
+                    break;
+                };
                 let location = format!("http://localhost:{evil_port}/");
                 tokio::spawn(async move {
                     let mut buf = vec![0u8; 4096];
                     let _ = sock.read(&mut buf).await;
-                    let resp = format!("HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\n\r\n");
+                    let resp = format!(
+                        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\n\r\n"
+                    );
                     let _ = sock.write_all(resp.as_bytes()).await;
                 });
             }
         });
 
         // Only "127.0.0.1" (the redirector's own hostname) is allowlisted.
-        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {}).await.unwrap();
+        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {})
+            .await
+            .unwrap();
 
-        let mut stream = TcpStream::connect(("127.0.0.1", proxy.port())).await.unwrap();
-        let req = format!("GET http://127.0.0.1:{redirector_port}/ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+        let mut stream = TcpStream::connect(("127.0.0.1", proxy.port()))
+            .await
+            .unwrap();
+        let req =
+            format!("GET http://127.0.0.1:{redirector_port}/ HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
         stream.write_all(req.as_bytes()).await.unwrap();
 
         let mut resp = Vec::new();
         stream.read_to_end(&mut resp).await.unwrap();
         let text = String::from_utf8_lossy(&resp);
 
-        assert!(text.starts_with("HTTP/1.1 302"), "redirect must be forwarded unfollowed, got: {text}");
+        assert!(
+            text.starts_with("HTTP/1.1 302"),
+            "redirect must be forwarded unfollowed, got: {text}"
+        );
         assert!(
             text.contains(&format!("location: http://localhost:{evil_port}/"))
                 || text.contains(&format!("Location: http://localhost:{evil_port}/")),
             "Location header must survive verbatim: {text}"
         );
-        assert!(!text.contains("EVIL_BODY_FROM_NON_ALLOWLISTED_HOST"), "the evil host must never be fetched: {text}");
+        assert!(
+            !text.contains("EVIL_BODY_FROM_NON_ALLOWLISTED_HOST"),
+            "the evil host must never be fetched: {text}"
+        );
 
         evil_task.abort();
         redirector_task.abort();
@@ -1313,8 +1524,13 @@ mod tests {
         let (echo_port, _echo) = spawn_echo_server("127.0.0.1").await;
         let dir = tempfile::tempdir().unwrap();
         let sock_path = dir.path().join("pane.sock");
-        let proxy =
-            PaneProxy::spawn(vec!["127.0.0.1".to_string()], Some(sock_path.clone()), |_| {}).await.unwrap();
+        let proxy = PaneProxy::spawn(
+            vec!["127.0.0.1".to_string()],
+            Some(sock_path.clone()),
+            |_| {},
+        )
+        .await
+        .unwrap();
         assert_eq!(proxy.unix_path(), Some(&sock_path));
 
         let mut stream = tokio::net::UnixStream::connect(&sock_path).await.unwrap();
@@ -1343,7 +1559,9 @@ mod tests {
     async fn shutdown_removes_the_unix_socket_file() {
         let dir = tempfile::tempdir().unwrap();
         let sock_path = dir.path().join("pane.sock");
-        let proxy = PaneProxy::spawn(vec![], Some(sock_path.clone()), |_| {}).await.unwrap();
+        let proxy = PaneProxy::spawn(vec![], Some(sock_path.clone()), |_| {})
+            .await
+            .unwrap();
         assert!(sock_path.exists());
         proxy.shutdown();
         assert!(!sock_path.exists());

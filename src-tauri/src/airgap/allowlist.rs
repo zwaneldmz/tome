@@ -56,7 +56,13 @@ pub struct HostMatcher {
 
 impl HostMatcher {
     pub fn new(pattern: &str) -> Self {
-        Self { labels: pattern.to_lowercase().split('.').map(str::to_string).collect() }
+        Self {
+            labels: pattern
+                .to_lowercase()
+                .split('.')
+                .map(str::to_string)
+                .collect(),
+        }
     }
 
     pub fn matches(&self, host: &str) -> bool {
@@ -65,10 +71,13 @@ impl HostMatcher {
         if got.len() != self.labels.len() {
             return false;
         }
-        self.labels
-            .iter()
-            .zip(got.iter())
-            .all(|(want, got)| if want == "*" { is_dns_label(got) } else { want == got })
+        self.labels.iter().zip(got.iter()).all(|(want, got)| {
+            if want == "*" {
+                is_dns_label(got)
+            } else {
+                want == got
+            }
+        })
     }
 }
 
@@ -94,7 +103,10 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    patterns.into_iter().map(|p| HostMatcher::new(p.as_ref())).collect()
+    patterns
+        .into_iter()
+        .map(|p| HostMatcher::new(p.as_ref()))
+        .collect()
 }
 
 /// `allowMatchers.some((re) => re.test(host))` — the actual per-request
@@ -206,7 +218,10 @@ pub fn validate_repo_allowlist(patterns: &[Value]) -> ValidationResult {
     for value in patterns {
         match validate_one(value) {
             Ok(pattern) => result.ok.push(pattern),
-            Err(reason) => result.rejected.push(RejectedPattern { pattern: value.clone(), reason }),
+            Err(reason) => result.rejected.push(RejectedPattern {
+                pattern: value.clone(),
+                reason,
+            }),
         }
     }
     result
@@ -245,13 +260,22 @@ mod tests {
 
     #[test]
     fn matches_a_real_regional_endpoint() {
-        assert!(matches_any(&[BEDROCK], "bedrock-runtime.us-east-1.amazonaws.com"));
-        assert!(matches_any(&[BEDROCK], "bedrock-runtime.eu-central-1.amazonaws.com"));
+        assert!(matches_any(
+            &[BEDROCK],
+            "bedrock-runtime.us-east-1.amazonaws.com"
+        ));
+        assert!(matches_any(
+            &[BEDROCK],
+            "bedrock-runtime.eu-central-1.amazonaws.com"
+        ));
     }
 
     #[test]
     fn rejects_suffix_bypass_hostnames() {
-        assert!(!matches_any(&[BEDROCK], "bedrock-runtime.us-east-1.amazonaws.com.evil.com"));
+        assert!(!matches_any(
+            &[BEDROCK],
+            "bedrock-runtime.us-east-1.amazonaws.com.evil.com"
+        ));
     }
 
     #[test]
@@ -262,12 +286,18 @@ mod tests {
 
     #[test]
     fn wildcard_does_not_span_multiple_labels() {
-        assert!(!matches_any(&[BEDROCK], "bedrock-runtime.a.b.amazonaws.com"));
+        assert!(!matches_any(
+            &[BEDROCK],
+            "bedrock-runtime.a.b.amazonaws.com"
+        ));
     }
 
     #[test]
     fn compiler_is_case_insensitive() {
-        assert!(matches_any(&[BEDROCK], "Bedrock-Runtime.US-East-1.AmazonAWS.com"));
+        assert!(matches_any(
+            &[BEDROCK],
+            "Bedrock-Runtime.US-East-1.AmazonAWS.com"
+        ));
     }
 
     // ---- exact hosts ----
@@ -299,7 +329,10 @@ mod tests {
     fn every_default_pattern_compiles_and_matches_its_own_literal_form() {
         for p in DEFAULT_ALLOW {
             let literal = p.replace('*', "x");
-            assert!(matches_any(&[p], &literal), "pattern {p} should match its own literal form {literal}");
+            assert!(
+                matches_any(&[p], &literal),
+                "pattern {p} should match its own literal form {literal}"
+            );
         }
     }
 
@@ -322,8 +355,15 @@ mod tests {
 
     #[test]
     fn keeps_valid_entries_when_mixed_with_invalid_ones() {
-        let r = validate_repo_allowlist(&[json!("api.example.com"), json!("*"), json!("*.example.com")]);
-        assert_eq!(r.ok, vec!["api.example.com".to_string(), "*.example.com".to_string()]);
+        let r = validate_repo_allowlist(&[
+            json!("api.example.com"),
+            json!("*"),
+            json!("*.example.com"),
+        ]);
+        assert_eq!(
+            r.ok,
+            vec!["api.example.com".to_string(), "*.example.com".to_string()]
+        );
         assert_eq!(r.rejected.len(), 1);
         assert_eq!(r.rejected[0].pattern, json!("*"));
     }
@@ -347,13 +387,23 @@ mod tests {
         ] {
             let r = validate_repo_allowlist(&[json!(p)]);
             assert!(r.ok.is_empty(), "expected {p:?} to be rejected");
-            assert_eq!(r.rejected.len(), 1, "expected exactly one rejection for {p:?}");
+            assert_eq!(
+                r.rejected.len(),
+                1,
+                "expected exactly one rejection for {p:?}"
+            );
         }
     }
 
     #[test]
     fn rejects_non_strings() {
-        let r = validate_repo_allowlist(&[json!(42), json!(null), json!(null), json!({}), json!(["x.com"])]);
+        let r = validate_repo_allowlist(&[
+            json!(42),
+            json!(null),
+            json!(null),
+            json!({}),
+            json!(["x.com"]),
+        ]);
         assert!(r.ok.is_empty());
         assert_eq!(r.rejected.len(), 5);
     }
@@ -369,13 +419,22 @@ mod tests {
 
     #[test]
     fn rejects_partial_wildcards_that_would_compile_to_a_prefix_match() {
-        assert!(validate_repo_allowlist(&[json!("*api.example.com")]).ok.is_empty());
-        assert!(validate_repo_allowlist(&[json!("api*.example.com")]).ok.is_empty());
+        assert!(validate_repo_allowlist(&[json!("*api.example.com")])
+            .ok
+            .is_empty());
+        assert!(validate_repo_allowlist(&[json!("api*.example.com")])
+            .ok
+            .is_empty());
     }
 
     #[test]
     fn every_rejection_carries_a_human_reason() {
-        let r = validate_repo_allowlist(&[json!("*"), json!("localhost"), json!(42), json!("https://x.com")]);
+        let r = validate_repo_allowlist(&[
+            json!("*"),
+            json!("localhost"),
+            json!(42),
+            json!("https://x.com"),
+        ]);
         for rej in r.rejected {
             assert!(!rej.reason.is_empty());
         }
@@ -383,8 +442,14 @@ mod tests {
 
     #[test]
     fn treats_a_non_array_input_as_empty_never_throws() {
-        assert_eq!(validate_repo_allowlist_value(&json!(null)), ValidationResult::default());
-        assert_eq!(validate_repo_allowlist_value(&json!("api.example.com")), ValidationResult::default());
+        assert_eq!(
+            validate_repo_allowlist_value(&json!(null)),
+            ValidationResult::default()
+        );
+        assert_eq!(
+            validate_repo_allowlist_value(&json!("api.example.com")),
+            ValidationResult::default()
+        );
     }
 
     // ---- breadth boundary (pinned as-designed) ----

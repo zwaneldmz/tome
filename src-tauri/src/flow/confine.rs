@@ -36,7 +36,8 @@ fn lexically_inside(root: &Path, full: &Path) -> bool {
     if root.as_os_str().is_empty() {
         return false;
     }
-    full.strip_prefix(root).is_ok_and(|rest| !rest.as_os_str().is_empty())
+    full.strip_prefix(root)
+        .is_ok_and(|rest| !rest.as_os_str().is_empty())
 }
 
 pub async fn confine_real_abs(root: &Path, full: &Path, must_exist: bool) -> Option<PathBuf> {
@@ -46,12 +47,20 @@ pub async fn confine_real_abs(root: &Path, full: &Path, must_exist: bool) -> Opt
     let real_root = tokio::fs::canonicalize(root).await.ok()?;
     if must_exist {
         let real = tokio::fs::canonicalize(full).await.ok()?;
-        return if real.starts_with(&real_root) { Some(full.to_path_buf()) } else { None };
+        return if real.starts_with(&real_root) {
+            Some(full.to_path_buf())
+        } else {
+            None
+        };
     }
     let mut dir = full.parent()?.to_path_buf();
     loop {
         if let Ok(real_dir) = tokio::fs::canonicalize(&dir).await {
-            return if real_dir == real_root || real_dir.starts_with(&real_root) { Some(full.to_path_buf()) } else { None };
+            return if real_dir == real_root || real_dir.starts_with(&real_root) {
+                Some(full.to_path_buf())
+            } else {
+                None
+            };
         }
         let parent = dir.parent()?.to_path_buf();
         if parent == dir {
@@ -75,12 +84,20 @@ pub fn confine_real_abs_sync(root: &Path, full: &Path, must_exist: bool) -> Opti
     let real_root = std::fs::canonicalize(root).ok()?;
     if must_exist {
         let real = std::fs::canonicalize(full).ok()?;
-        return if real.starts_with(&real_root) { Some(full.to_path_buf()) } else { None };
+        return if real.starts_with(&real_root) {
+            Some(full.to_path_buf())
+        } else {
+            None
+        };
     }
     let mut dir = full.parent()?.to_path_buf();
     loop {
         if let Ok(real_dir) = std::fs::canonicalize(&dir) {
-            return if real_dir == real_root || real_dir.starts_with(&real_root) { Some(full.to_path_buf()) } else { None };
+            return if real_dir == real_root || real_dir.starts_with(&real_root) {
+                Some(full.to_path_buf())
+            } else {
+                None
+            };
         }
         let parent = dir.parent()?.to_path_buf();
         if parent == dir {
@@ -96,7 +113,11 @@ mod tests {
     use std::os::unix::fs::symlink;
 
     fn tmp(prefix: &str) -> PathBuf {
-        let dir = tempfile::Builder::new().prefix(prefix).tempdir().unwrap().keep();
+        let dir = tempfile::Builder::new()
+            .prefix(prefix)
+            .tempdir()
+            .unwrap()
+            .keep();
         dir
     }
 
@@ -127,7 +148,10 @@ mod tests {
         let outside = tmp("tome-confine-outside-");
         std::fs::write(outside.join("x.flow.json"), "{}").unwrap();
         symlink(&outside, root.join("linked")).unwrap();
-        assert_eq!(confine_real_abs(&root, &root.join("linked").join("x.flow.json"), true).await, None);
+        assert_eq!(
+            confine_real_abs(&root, &root.join("linked").join("x.flow.json"), true).await,
+            None
+        );
     }
 
     #[tokio::test]
@@ -143,14 +167,20 @@ mod tests {
     async fn must_exist_false_accepts_a_not_yet_created_path_with_a_real_ancestor() {
         let root = tmp("tome-confine-root-");
         let not_yet_created = root.join("flows").join("myflow").join("runs").join("r1");
-        assert_eq!(confine_real_abs(&root, &not_yet_created, false).await, Some(not_yet_created));
+        assert_eq!(
+            confine_real_abs(&root, &not_yet_created, false).await,
+            Some(not_yet_created)
+        );
     }
 
     #[tokio::test]
     async fn rejects_a_path_not_even_lexically_inside_root_and_root_itself_does_not_count() {
         let root = tmp("tome-confine-root-");
         let outside = tmp("tome-confine-outside-");
-        assert_eq!(confine_real_abs(&root, &outside.join("x"), true).await, None);
+        assert_eq!(
+            confine_real_abs(&root, &outside.join("x"), true).await,
+            None
+        );
         assert_eq!(confine_real_abs(&root, &root, true).await, None);
     }
 
@@ -158,7 +188,10 @@ mod tests {
     async fn rejects_a_root_that_does_not_exist_at_all() {
         let root = tmp("tome-confine-root-");
         let ghost_root = root.join("never-created");
-        assert_eq!(confine_real_abs(&ghost_root, &ghost_root.join("x"), false).await, None);
+        assert_eq!(
+            confine_real_abs(&ghost_root, &ghost_root.join("x"), false).await,
+            None
+        );
     }
 
     // ---- confine_real_abs_sync — same contract, synchronous ----

@@ -96,7 +96,12 @@ pub struct Runner {
 
 impl Runner {
     pub fn new() -> Self {
-        Self { inner: std::sync::Mutex::new(RunnerInner { order: Vec::new(), runs: HashMap::new() }) }
+        Self {
+            inner: std::sync::Mutex::new(RunnerInner {
+                order: Vec::new(),
+                runs: HashMap::new(),
+            }),
+        }
     }
 }
 
@@ -148,7 +153,10 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 /// a directory name without escaping. The suffix loop covers two runs
 /// landing in the same millisecond.
 fn new_run_id(inner: &RunnerInner) -> String {
-    let millis = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
     let base = to_base36(millis);
     let mut id = base.clone();
     let mut n = 2;
@@ -178,8 +186,16 @@ fn to_base36(mut n: u128) -> String {
 /// means no separator survives; the leading index keeps two ids that
 /// sanitize to the same string from sharing a log.
 fn log_name(node_id: &str, i: usize) -> String {
-    let sanitized: String =
-        node_id.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '_' }).collect();
+    let sanitized: String = node_id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
     format!("{}-{sanitized}.log", i + 1)
 }
 
@@ -229,7 +245,12 @@ fn run_snapshot(r: &RunState) -> Value {
 /// descending by `started` (ISO stamps sort lexicographically), ties
 /// broken by insertion order (see [`RunnerInner::order`]'s doc comment).
 fn snapshot_all_locked(inner: &RunnerInner) -> Value {
-    let mut list: Vec<Value> = inner.order.iter().filter_map(|id| inner.runs.get(id)).map(run_snapshot).collect();
+    let mut list: Vec<Value> = inner
+        .order
+        .iter()
+        .filter_map(|id| inner.runs.get(id))
+        .map(run_snapshot)
+        .collect();
     list.sort_by(|a, b| {
         let sa = a["started"].as_str().unwrap_or("");
         let sb = b["started"].as_str().unwrap_or("");
@@ -277,10 +298,17 @@ fn push_only(runs: &Runner, env: &RunnerEnv) {
 /// disk in the order `persist` was CALLED (text captured synchronously
 /// under the same lock as the mutation it follows) rather than the order
 /// the underlying fs writes happen to finish.
-fn spawn_run_json_writer(root: PathBuf, file: PathBuf, mut rx: tokio::sync::mpsc::UnboundedReceiver<String>) {
+fn spawn_run_json_writer(
+    root: PathBuf,
+    file: PathBuf,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+) {
     tokio::spawn(async move {
         while let Some(text) = rx.recv().await {
-            if confine::confine_real_abs(&root, &file, false).await.is_some() {
+            if confine::confine_real_abs(&root, &file, false)
+                .await
+                .is_some()
+            {
                 let _ = tokio::fs::write(&file, &text).await;
             }
         }
@@ -306,7 +334,10 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
     // "could not read flow", not an escape refusal true of any missing
     // path. Confirms the file readFile actually followed is still really
     // inside root.
-    if confine::confine_real_abs(&root, Path::new(&flow_path), true).await.is_none() {
+    if confine::confine_real_abs(&root, Path::new(&flow_path), true)
+        .await
+        .is_none()
+    {
         return json!({"error": "flow is outside the open workspace folders"});
     }
 
@@ -315,9 +346,18 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
         Err(e) => return json!({"error": format!("could not read flow: {e}")}),
     };
     let obj = raw_value.as_object();
-    let name_ok = obj.and_then(|o| o.get("name")).and_then(Value::as_str).is_some_and(|s| !s.is_empty());
-    let nodes_ok = obj.and_then(|o| o.get("nodes")).map(Value::is_array).unwrap_or(false);
-    let edges_ok = obj.and_then(|o| o.get("edges")).map(Value::is_array).unwrap_or(false);
+    let name_ok = obj
+        .and_then(|o| o.get("name"))
+        .and_then(Value::as_str)
+        .is_some_and(|s| !s.is_empty());
+    let nodes_ok = obj
+        .and_then(|o| o.get("nodes"))
+        .map(Value::is_array)
+        .unwrap_or(false);
+    let edges_ok = obj
+        .and_then(|o| o.get("edges"))
+        .map(Value::is_array)
+        .unwrap_or(false);
     if !name_ok || !nodes_ok || !edges_ok {
         return json!({"error": "not a flow file"});
     }
@@ -334,7 +374,11 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
         return json!({"error": "this flow has no nodes"});
     }
     let node_ids: Vec<String> = flow.nodes.iter().map(|n| n.id.clone()).collect();
-    let edge_pairs: Vec<(String, String)> = flow.edges.iter().map(|e| (e.from.clone(), e.to.clone())).collect();
+    let edge_pairs: Vec<(String, String)> = flow
+        .edges
+        .iter()
+        .map(|e| (e.from.clone(), e.to.clone()))
+        .collect();
     let Some(plan) = run_plan::run_plan(&node_ids, &edge_pairs) else {
         return json!({"error": "flow has a cycle — cannot run"});
     };
@@ -342,7 +386,8 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
     // Every command line is built BEFORE anything is spawned or written. A
     // flow with one node whose kind has no headless template is refused
     // WHOLE and by name.
-    let node_by_id: HashMap<&str, &model::FlowNode> = flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+    let node_by_id: HashMap<&str, &model::FlowNode> =
+        flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
     let mut specs: HashMap<String, Vec<String>> = HashMap::new();
     for node_id in &plan.order {
         let node = node_by_id[node_id.as_str()];
@@ -354,7 +399,11 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
                 specs.insert(node_id.clone(), argv);
             }
             None => {
-                let kind_label = if node.kind.is_empty() { "no kind".to_string() } else { node.kind.clone() };
+                let kind_label = if node.kind.is_empty() {
+                    "no kind".to_string()
+                } else {
+                    node.kind.clone()
+                };
                 return json!({"error": format!(
                     "node \"{}\" ({kind_label}) can't run in the background — use Run in terminals",
                     node.display_name()
@@ -367,8 +416,16 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
         let inner = runs.inner.lock().expect("Runner lock poisoned");
         new_run_id(&inner)
     };
-    let dir = root.join(".tome").join("flows").join(&flow.name).join("runs").join(&id);
-    if confine::confine_real_abs(&root, &dir, false).await.is_none() {
+    let dir = root
+        .join(".tome")
+        .join("flows")
+        .join(&flow.name)
+        .join("runs")
+        .join(&id);
+    if confine::confine_real_abs(&root, &dir, false)
+        .await
+        .is_none()
+    {
         return json!({"error": "could not create the run folder: run folder escapes the workspace"});
     }
     if let Err(e) = tokio::fs::create_dir_all(&dir).await {
@@ -400,7 +457,10 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
             }
         })
         .collect();
-    let statuses: HashMap<String, String> = nodes.iter().map(|n| (n.id.clone(), "pending".to_string())).collect();
+    let statuses: HashMap<String, String> = nodes
+        .iter()
+        .map(|n| (n.id.clone(), "pending".to_string()))
+        .collect();
     let node_count = nodes.len();
 
     let (write_tx, write_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -523,7 +583,13 @@ fn pump(runs: Arc<Runner>, env: RunnerEnv, id: String) -> Pin<Box<dyn Future<Out
         let any_not_running = {
             let inner = runs.inner.lock().expect("Runner lock poisoned");
             let Some(r) = inner.runs.get(&id) else { return };
-            start.iter().any(|nid| r.nodes.iter().find(|n| &n.id == nid).map(|n| n.status.as_str()) != Some("running"))
+            start.iter().any(|nid| {
+                r.nodes
+                    .iter()
+                    .find(|n| &n.id == nid)
+                    .map(|n| n.status.as_str())
+                    != Some("running")
+            })
         };
         if any_not_running {
             pump(runs, env, id).await;
@@ -537,9 +603,22 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
     let pane_id = run_plan::run_pane_id(run_id, node_id);
     let (root, gapped, inner_argv, log_path, node_name, node_kind, node_model, node_started) = {
         let inner = runs.inner.lock().expect("Runner lock poisoned");
-        let Some(r) = inner.runs.get(run_id) else { return };
-        let Some(n) = r.nodes.iter().find(|n| n.id == node_id) else { return };
-        (r.root.clone(), r.gapped, n.inner_argv.clone(), n.log.clone(), n.name.clone(), n.kind.clone(), n.model.clone(), n.started.clone())
+        let Some(r) = inner.runs.get(run_id) else {
+            return;
+        };
+        let Some(n) = r.nodes.iter().find(|n| n.id == node_id) else {
+            return;
+        };
+        (
+            r.root.clone(),
+            r.gapped,
+            n.inner_argv.clone(),
+            n.log.clone(),
+            n.name.clone(),
+            n.kind.clone(),
+            n.model.clone(),
+            n.started.clone(),
+        )
     };
 
     let built = match (env.build_agent_env)(pane_id.clone(), gapped, inner_argv.clone()).await {
@@ -548,7 +627,11 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
             // Best-effort — a log this run cannot safely write to must
             // still fail the node, never the whole run.
             if let Some(confined) = confine::confine_real_abs(&root, &log_path, false).await {
-                let _ = tokio::fs::write(&confined, format!("# could not prepare the agent environment: {msg}\n")).await;
+                let _ = tokio::fs::write(
+                    &confined,
+                    format!("# could not prepare the agent environment: {msg}\n"),
+                )
+                .await;
             }
             set_status(runs, env, run_id, node_id, "failed", None);
             return;
@@ -579,16 +662,26 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
 
     // Re-confined for the same reason as the write above — this is the
     // node's own about-to-be-live cwd, not a static vault.
-    if confine::confine_real_abs(&root, &log_path, false).await.is_none() {
+    if confine::confine_real_abs(&root, &log_path, false)
+        .await
+        .is_none()
+    {
         (env.close_agent_env)(&pane_id);
         set_status(runs, env, run_id, node_id, "failed", None);
         return;
     }
 
-    let model_suffix = node_model.as_deref().map(|m| format!(" · {m}")).unwrap_or_default();
-    let header = format!("# {node_name} · {node_kind}{model_suffix} · {}\n", node_started.unwrap_or_default());
+    let model_suffix = node_model
+        .as_deref()
+        .map(|m| format!(" · {m}"))
+        .unwrap_or_default();
+    let header = format!(
+        "# {node_name} · {node_kind}{model_suffix} · {}\n",
+        node_started.unwrap_or_default()
+    );
     let file = tokio::fs::File::create(&log_path).await.ok();
-    let log: Arc<tokio::sync::Mutex<Option<tokio::fs::File>>> = Arc::new(tokio::sync::Mutex::new(file));
+    let log: Arc<tokio::sync::Mutex<Option<tokio::fs::File>>> =
+        Arc::new(tokio::sync::Mutex::new(file));
     write_to_log(&log, header.as_bytes()).await;
 
     // A SECOND cancel re-check, immediately before the real OS spawn.
@@ -613,14 +706,23 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
         return;
     }
 
-    let req = spawn::SpawnRequest { cmd: spawn_cmd, args: spawn_args, cwd: root.clone(), env: built.env };
+    let req = spawn::SpawnRequest {
+        cmd: spawn_cmd,
+        args: spawn_args,
+        cwd: root.clone(),
+        env: built.env,
+    };
     match (env.spawn)(req) {
         spawn::SpawnOutcome::Failed(e) => {
             // A missing CLI arrives here (Rust's spawn fails synchronously
             // for ENOENT, unlike Node's async 'error' event — see
             // spawn.rs's own doc comment) — it goes in the log, where the
             // pane is already looking.
-            let detail = if e.kind() == std::io::ErrorKind::NotFound { format!("ENOENT: {e}") } else { e.to_string() };
+            let detail = if e.kind() == std::io::ErrorKind::NotFound {
+                format!("ENOENT: {e}")
+            } else {
+                e.to_string()
+            };
             write_to_log(&log, format!("# failed to start: {detail}\n").as_bytes()).await;
             (env.close_agent_env)(&pane_id);
             set_status(runs, env, run_id, node_id, "failed", None);
@@ -636,8 +738,12 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
                 }
             }
 
-            let stdout_task = spawned.stdout.map(|s| tokio::spawn(pipe_to_log(s, log.clone())));
-            let stderr_task = spawned.stderr.map(|s| tokio::spawn(pipe_to_log(s, log.clone())));
+            let stdout_task = spawned
+                .stdout
+                .map(|s| tokio::spawn(pipe_to_log(s, log.clone())));
+            let stderr_task = spawned
+                .stderr
+                .map(|s| tokio::spawn(pipe_to_log(s, log.clone())));
 
             let runs2 = runs.clone();
             let env2 = env.clone();
@@ -647,7 +753,10 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
             let log2 = log.clone();
             let exit_rx = spawned.exit;
             tokio::spawn(async move {
-                let outcome = exit_rx.await.unwrap_or(spawn::ExitOutcome { code: None, signal: None });
+                let outcome = exit_rx.await.unwrap_or(spawn::ExitOutcome {
+                    code: None,
+                    signal: None,
+                });
                 // "close", not "exit": wait for the stdio drains too, so
                 // the log is complete before anything reads it.
                 if let Some(t) = stdout_task {
@@ -670,7 +779,13 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
                 }
                 let trailer = match outcome.code {
                     Some(c) => format!("# exit {c}\n"),
-                    None => format!("# exit signal {}\n", outcome.signal.map(|s| s.to_string()).unwrap_or_else(|| "unknown".to_string())),
+                    None => format!(
+                        "# exit signal {}\n",
+                        outcome
+                            .signal
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| "unknown".to_string())
+                    ),
                 };
                 {
                     let mut guard = log2.lock().await;
@@ -682,12 +797,22 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
                 (env2.close_agent_env)(&pane_id2);
                 let canceling_now = {
                     let inner = runs2.inner.lock().expect("Runner lock poisoned");
-                    inner.runs.get(&run_id2).map(|r| r.canceling).unwrap_or(false)
+                    inner
+                        .runs
+                        .get(&run_id2)
+                        .map(|r| r.canceling)
+                        .unwrap_or(false)
                 };
                 // Cancelled beats failed: a node we killed exits non-zero
                 // by definition, and reporting that as a failure would
                 // blame the flow for the user's own Cancel click.
-                let status = if canceling_now { "canceled" } else if outcome.code == Some(0) { "done" } else { "failed" };
+                let status = if canceling_now {
+                    "canceled"
+                } else if outcome.code == Some(0) {
+                    "done"
+                } else {
+                    "failed"
+                };
                 set_status(&runs2, &env2, &run_id2, &node_id2, status, outcome.code);
                 pump(runs2, env2, run_id2).await;
             });
@@ -711,7 +836,10 @@ async fn write_to_log(log: &Arc<tokio::sync::Mutex<Option<tokio::fs::File>>>, by
 
 /// Both streams into one file, interleaved as the agent produced them —
 /// raw byte piping (not line-buffered), mirroring Node's `.pipe()`.
-async fn pipe_to_log(mut reader: Box<dyn tokio::io::AsyncRead + Unpin + Send>, log: Arc<tokio::sync::Mutex<Option<tokio::fs::File>>>) {
+async fn pipe_to_log(
+    mut reader: Box<dyn tokio::io::AsyncRead + Unpin + Send>,
+    log: Arc<tokio::sync::Mutex<Option<tokio::fs::File>>>,
+) {
     use tokio::io::AsyncReadExt;
     let mut buf = [0u8; 8192];
     loop {
@@ -723,13 +851,24 @@ async fn pipe_to_log(mut reader: Box<dyn tokio::io::AsyncRead + Unpin + Send>, l
     }
 }
 
-fn set_status(runs: &Runner, env: &RunnerEnv, run_id: &str, node_id: &str, status: &str, exit: Option<i32>) {
+fn set_status(
+    runs: &Runner,
+    env: &RunnerEnv,
+    run_id: &str,
+    node_id: &str,
+    status: &str,
+    exit: Option<i32>,
+) {
     let (flow_name, kind) = {
         let mut inner = runs.inner.lock().expect("Runner lock poisoned");
-        let Some(r) = inner.runs.get_mut(run_id) else { return };
+        let Some(r) = inner.runs.get_mut(run_id) else {
+            return;
+        };
         let now = now_iso8601();
         let kind = {
-            let Some(n) = r.nodes.iter_mut().find(|n| n.id == node_id) else { return };
+            let Some(n) = r.nodes.iter_mut().find(|n| n.id == node_id) else {
+                return;
+            };
             n.status = status.to_string();
             if status == "running" {
                 n.started = Some(now.clone());
@@ -770,17 +909,26 @@ fn set_status(runs: &Runner, env: &RunnerEnv, run_id: &str, node_id: &str, statu
 fn settle_if_done(runs: &Runner, env: &RunnerEnv, run_id: &str) {
     let settled = {
         let mut inner = runs.inner.lock().expect("Runner lock poisoned");
-        let Some(r) = inner.runs.get_mut(run_id) else { return };
+        let Some(r) = inner.runs.get_mut(run_id) else {
+            return;
+        };
         if r.ended.is_some() {
             return;
         }
-        if r.nodes.iter().any(|n| n.status == "pending" || n.status == "running") {
+        if r.nodes
+            .iter()
+            .any(|n| n.status == "pending" || n.status == "running")
+        {
             return;
         }
         // Derived from the nodes, never tracked alongside them, so a run
         // can never claim 'done' with a failed node in it.
         let derived = run_plan::run_status(&r.statuses);
-        let final_status = if r.canceling && derived == "done" { "canceled" } else { derived };
+        let final_status = if r.canceling && derived == "done" {
+            "canceled"
+        } else {
+            derived
+        };
         r.status = final_status.to_string();
         r.ended = Some(now_iso8601());
         let flow_name = r.flow.clone();
@@ -789,7 +937,9 @@ fn settle_if_done(runs: &Runner, env: &RunnerEnv, run_id: &str) {
         push(env, &inner);
         Some((flow_name, final_status.to_string()))
     };
-    let Some((flow_name, final_status)) = settled else { return };
+    let Some((flow_name, final_status)) = settled else {
+        return;
+    };
     (env.log_event)(
         "flow-run",
         vec![
@@ -810,7 +960,11 @@ fn settle_if_done(runs: &Runner, env: &RunnerEnv, run_id: &str) {
 /// process-group signal itself errors (no such process/group — including
 /// a child that failed to spawn at all, or one whose group has already
 /// died).
-fn signal_pid_group_or_fallback(pid: i32, kill_fn: Option<Arc<dyn Fn(i32) -> std::io::Result<()> + Send + Sync>>, sig: i32) {
+fn signal_pid_group_or_fallback(
+    pid: i32,
+    kill_fn: Option<Arc<dyn Fn(i32) -> std::io::Result<()> + Send + Sync>>,
+    sig: i32,
+) {
     if spawn::signal_pid(-pid, sig).is_err() {
         if let Some(f) = kill_fn {
             let _ = f(sig);
@@ -842,15 +996,31 @@ pub fn cancel_run(runs: &Arc<Runner>, env: &RunnerEnv, id: &str) -> Value {
             return json!({"ok": true});
         }
         r.canceling = true;
-        let pending: Vec<String> = r.nodes.iter().filter(|n| n.status == "pending").map(|n| n.id.clone()).collect();
-        let live: Vec<(String, i32, Option<Arc<dyn Fn(i32) -> std::io::Result<()> + Send + Sync>>)> =
-            r.nodes.iter().filter_map(|n| n.pid.map(|pid| (n.id.clone(), pid, n.kill_fn.clone()))).collect();
+        let pending: Vec<String> = r
+            .nodes
+            .iter()
+            .filter(|n| n.status == "pending")
+            .map(|n| n.id.clone())
+            .collect();
+        let live: Vec<(
+            String,
+            i32,
+            Option<Arc<dyn Fn(i32) -> std::io::Result<()> + Send + Sync>>,
+        )> = r
+            .nodes
+            .iter()
+            .filter_map(|n| n.pid.map(|pid| (n.id.clone(), pid, n.kill_fn.clone())))
+            .collect();
         (r.flow.clone(), pending, live)
     };
 
     (env.log_event)(
         "flow-run",
-        vec![("event".to_string(), json!("cancel")), ("run".to_string(), json!(id)), ("flow".to_string(), json!(flow_name))],
+        vec![
+            ("event".to_string(), json!("cancel")),
+            ("run".to_string(), json!(id)),
+            ("flow".to_string(), json!(flow_name)),
+        ],
     );
 
     // Downstream first: a node that never started is 'skipped', which
@@ -861,7 +1031,12 @@ pub fn cancel_run(runs: &Arc<Runner>, env: &RunnerEnv, id: &str) -> Value {
     }
     for (node_id, pid, kill_fn) in live {
         signal_pid_group_or_fallback(pid, kill_fn, spawn::SIGTERM);
-        arm_kill_timer(runs.clone(), id.to_string(), node_id.clone(), env.kill_grace);
+        arm_kill_timer(
+            runs.clone(),
+            id.to_string(),
+            node_id.clone(),
+            env.kill_grace,
+        );
     }
 
     // Nothing was running, so no exit handler is coming to settle this run.
@@ -890,8 +1065,12 @@ fn arm_kill_timer(runs: Arc<Runner>, run_id: String, node_id: String, grace: std
         // somebody else.
         let (pid, kill_fn) = {
             let inner = runs_for_timer.inner.lock().expect("Runner lock poisoned");
-            let Some(r) = inner.runs.get(&run_id_for_timer) else { return };
-            let Some(n) = r.nodes.iter().find(|n| n.id == node_id_for_timer) else { return };
+            let Some(r) = inner.runs.get(&run_id_for_timer) else {
+                return;
+            };
+            let Some(n) = r.nodes.iter().find(|n| n.id == node_id_for_timer) else {
+                return;
+            };
             (n.pid, n.kill_fn.clone())
         };
         if let Some(pid) = pid {

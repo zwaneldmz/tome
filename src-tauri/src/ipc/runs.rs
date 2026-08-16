@@ -84,9 +84,12 @@ pub async fn runs_start(
             .as_ref()
             .map(|a| a.status().configured)
             .unwrap_or(false);
-        if crate::pty_authority::unrestricted_spawn_needs_reauth(effective_gapped, auth_configured) {
+        if crate::pty_authority::unrestricted_spawn_needs_reauth(effective_gapped, auth_configured)
+        {
             let mut guard = state.auth.lock().expect("AppState.auth lock poisoned");
-            let auth_lock = guard.as_mut().ok_or_else(|| "auth: not initialized".to_string())?;
+            let auth_lock = guard
+                .as_mut()
+                .ok_or_else(|| "auth: not initialized".to_string())?;
             let wait = auth_lock.throttle_retry_in("flow:unrestricted");
             if wait > 0 {
                 return Ok(json!({
@@ -95,15 +98,20 @@ pub async fn runs_start(
                 }));
             }
             let payload_supplied = auth.is_some();
-            let verified = payload_supplied
-                && {
-                    let payload = auth.as_ref().expect("payload_supplied just checked Some");
-                    if auth_lock.totp_active() {
-                        payload.get("code").and_then(Value::as_str).is_some_and(|c| auth_lock.verify_totp(c))
-                    } else {
-                        payload.get("passphrase").and_then(Value::as_str).is_some_and(|p| auth_lock.verify_passphrase(p))
-                    }
-                };
+            let verified = payload_supplied && {
+                let payload = auth.as_ref().expect("payload_supplied just checked Some");
+                if auth_lock.totp_active() {
+                    payload
+                        .get("code")
+                        .and_then(Value::as_str)
+                        .is_some_and(|c| auth_lock.verify_totp(c))
+                } else {
+                    payload
+                        .get("passphrase")
+                        .and_then(Value::as_str)
+                        .is_some_and(|p| auth_lock.verify_passphrase(p))
+                }
+            };
             match crate::ipc::pty::evaluate_reauth(payload_supplied, verified) {
                 crate::ipc::pty::ReauthOutcome::NeedsCredentials => {
                     return Ok(json!({
@@ -115,7 +123,9 @@ pub async fn runs_start(
                     auth_lock.record_failure("flow:unrestricted");
                     return Ok(json!({"reauth": true, "error": "Incorrect passphrase or code."}));
                 }
-                crate::ipc::pty::ReauthOutcome::Verified => auth_lock.record_success("flow:unrestricted"),
+                crate::ipc::pty::ReauthOutcome::Verified => {
+                    auth_lock.record_success("flow:unrestricted")
+                }
             }
         }
     }
@@ -134,7 +144,11 @@ pub async fn runs_start(
 /// }` for both a real cancellation and a no-op (already finished), `{
 /// error }` only for an unknown id.
 #[tauri::command]
-pub async fn runs_cancel(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<Value, String> {
+pub async fn runs_cancel(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "runs:cancel")?;
     let runs = app.state::<AppState>().inner().flow.clone();
     let env = flow::runner::env::production_env(app);

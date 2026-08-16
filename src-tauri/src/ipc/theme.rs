@@ -43,7 +43,11 @@ pub async fn theme_set(
         Some("dark") => "dark",
         _ => "system",
     };
-    let mode = if mode.as_deref() == Some("dark") { "dark" } else { "light" };
+    let mode = if mode.as_deref() == Some("dark") {
+        "dark"
+    } else {
+        "light"
+    };
     *state
         .theme
         .write()

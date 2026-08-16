@@ -31,10 +31,14 @@ pub(crate) fn strip_ansi(s: &str) -> String {
     static CSI: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     static ESC: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     static CTRL: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let osc = OSC.get_or_init(|| Regex::new(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)").expect("static pattern is valid"));
-    let csi = CSI.get_or_init(|| Regex::new(r"\x1b\[[0-9;?]*[ -/]*[@-~]").expect("static pattern is valid"));
+    let osc = OSC.get_or_init(|| {
+        Regex::new(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)").expect("static pattern is valid")
+    });
+    let csi = CSI
+        .get_or_init(|| Regex::new(r"\x1b\[[0-9;?]*[ -/]*[@-~]").expect("static pattern is valid"));
     let esc = ESC.get_or_init(|| Regex::new(r"\x1b[@-_]").expect("static pattern is valid"));
-    let ctrl = CTRL.get_or_init(|| Regex::new(r"[\x00-\x08\x0b-\x1f\x7f]").expect("static pattern is valid"));
+    let ctrl = CTRL
+        .get_or_init(|| Regex::new(r"[\x00-\x08\x0b-\x1f\x7f]").expect("static pattern is valid"));
     let s = osc.replace_all(s, "");
     let s = csi.replace_all(&s, "");
     let s = esc.replace_all(&s, "");
@@ -48,7 +52,8 @@ pub(crate) fn strip_ansi(s: &str) -> String {
 /// exactly that one boundary (`\x0b` vs `\x0a`), ported verbatim.
 pub(crate) fn strip_control_chars(s: &str) -> String {
     static CTRL: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let ctrl = CTRL.get_or_init(|| Regex::new(r"[\x00-\x08\x0a-\x1f\x7f]").expect("static pattern is valid"));
+    let ctrl = CTRL
+        .get_or_init(|| Regex::new(r"[\x00-\x08\x0a-\x1f\x7f]").expect("static pattern is valid"));
     ctrl.replace_all(s, "").into_owned()
 }
 
@@ -63,7 +68,11 @@ fn agent_kinds_text(agent_ids: &[String]) -> String {
 fn openable_kinds_description(agent_ids: &[String]) -> String {
     let mut kinds = vec!["terminal".to_string()];
     kinds.extend(agent_ids.iter().cloned());
-    kinds.extend(["chat", "brain", "flow", "runs"].iter().map(|s| s.to_string()));
+    kinds.extend(
+        ["chat", "brain", "flow", "runs"]
+            .iter()
+            .map(|s| s.to_string()),
+    );
     let quoted: Vec<String> = kinds.iter().map(|k| format!("'{k}'")).collect();
     format!("kind is one of: {}.", quoted.join(", "))
 }
@@ -99,7 +108,8 @@ pub(crate) fn mentor_prompt_text(agent_ids: &[String], gate: bool) -> String {
         agent_kinds_text(agent_ids)
     );
     const GATE_INSTRUCTION: &str = "When the user asks you to implement a feature or make a significant change, first write a failing test that captures the requirement with write_file, then call gate_question with 1-3 comprehension questions about that test; do NOT implement until gate_question returns the user's answers, then judge whether they understand. If they skipped or answered poorly, explain what was missing before implementing. ";
-    const TAIL: &str = "Keep your replies focused, brief, and speakable — plain text only, no markdown tables.";
+    const TAIL: &str =
+        "Keep your replies focused, brief, and speakable — plain text only, no markdown tables.";
     if gate {
         format!("{base}{GATE_INSTRUCTION}{TAIL}")
     } else {
@@ -263,7 +273,13 @@ pub(crate) fn tool_schemas(agent_ids: &[String]) -> Vec<Value> {
 /// simplification over the JS `ok:false` path, noted here since nothing
 /// currently exercises it. `async` so `run_command` can await its process
 /// backend; the other arms stay synchronous inside the same fn.
-pub async fn run_tool(c: &Conductor, env: &ConductorEnv, name: &str, input: &Value, chat_id: &str) -> String {
+pub async fn run_tool(
+    c: &Conductor,
+    env: &ConductorEnv,
+    name: &str,
+    input: &Value,
+    chat_id: &str,
+) -> String {
     match name {
         "list_panes" => list_panes(c),
         "read_terminal" => read_terminal(c, env, input),
@@ -301,7 +317,11 @@ fn list_panes(c: &Conductor) -> String {
         .panes_snapshot()
         .into_iter()
         .map(|p| {
-            let id = p.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+            let id = p
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             match c.meta_of(&id) {
                 Some(m) => {
                     let mut obj = p.as_object().cloned().unwrap_or_default();
@@ -350,7 +370,11 @@ fn read_terminal(c: &Conductor, env: &ConductorEnv, input: &Value) -> String {
     let all_lines: Vec<&str> = stripped.split('\n').collect();
     // `Math.min(Math.max(input.lines || 60, 1), 400)` — `|| 60` treats an
     // absent/zero/non-numeric value as "use the default", not just absent.
-    let raw = input.get("lines").and_then(Value::as_f64).filter(|n| *n != 0.0).unwrap_or(60.0);
+    let raw = input
+        .get("lines")
+        .and_then(Value::as_f64)
+        .filter(|n| *n != 0.0)
+        .unwrap_or(60.0);
     let want = raw.clamp(1.0, 400.0) as usize;
     let start = all_lines.len().saturating_sub(want);
     let tail = &all_lines[start..];
@@ -358,7 +382,10 @@ fn read_terminal(c: &Conductor, env: &ConductorEnv, input: &Value) -> String {
     // count only — never the scrollback content itself.
     (env.log_event)(
         "conductor:read",
-        vec![("paneId".to_string(), json!(pane_id)), ("lines".to_string(), json!(tail.len()))],
+        vec![
+            ("paneId".to_string(), json!(pane_id)),
+            ("lines".to_string(), json!(tail.len())),
+        ],
     );
     let joined = tail.join("\n");
     if joined.is_empty() {
@@ -372,11 +399,18 @@ fn type_in_terminal(c: &Conductor, env: &ConductorEnv, input: &Value) -> String 
     let pane_id = input.get("pane_id").and_then(Value::as_str).unwrap_or("");
     let text_raw = input.get("text").and_then(Value::as_str).unwrap_or("");
     let allow_run = c.allow_run();
-    let press_enter = input.get("press_enter").and_then(Value::as_bool).unwrap_or(false);
+    let press_enter = input
+        .get("press_enter")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let enter = press_enter && allow_run;
     // With auto-run off the text must stay un-submitted, so strip the
     // control chars that would submit or signal on their own.
-    let text = if allow_run { text_raw.to_string() } else { strip_control_chars(text_raw) };
+    let text = if allow_run {
+        text_raw.to_string()
+    } else {
+        strip_control_chars(text_raw)
+    };
     let payload = if enter { format!("{text}\r") } else { text };
     if !(env.write_pty)(pane_id, &payload) {
         return "No such live terminal pane. Use list_panes.".to_string();
@@ -403,7 +437,8 @@ fn open_file(env: &ConductorEnv, input: &Value, chat_id: &str) -> String {
     // The model must not make main open/parse arbitrary files on disk —
     // only paths inside the open workspace folders or a brain vault.
     if !(env.can_open_file)(Path::new(file)) {
-        return "Refused: open_file is confined to the open workspace folders and brain vaults.".to_string();
+        return "Refused: open_file is confined to the open workspace folders and brain vaults."
+            .to_string();
     }
     (env.send)("conductor:open", json!({ "file": file, "source": chat_id }));
     "Requested.".to_string()
@@ -425,7 +460,10 @@ fn draft_flow(env: &ConductorEnv, input: &Value, chat_id: &str) -> String {
     // Open the pane only on create; overwrites reach the already-open pane
     // through the disk watcher, so re-opening would just churn the grid.
     if let Some(open_path) = &result.open_path {
-        (env.send)("conductor:open", json!({ "file": open_path.to_string_lossy(), "source": chat_id }));
+        (env.send)(
+            "conductor:open",
+            json!({ "file": open_path.to_string_lossy(), "source": chat_id }),
+        );
     }
     result.text
 }
@@ -447,7 +485,10 @@ fn write_file(env: &ConductorEnv, input: &Value) -> String {
         return e.to_string();
     }
     // Audit the write: path only — never the content.
-    (env.log_event)("conductor:writeFile", vec![("path".to_string(), json!(path))]);
+    (env.log_event)(
+        "conductor:writeFile",
+        vec![("path".to_string(), json!(path))],
+    );
     format!("Wrote {} bytes to {}.", content.len(), path)
 }
 
@@ -469,13 +510,17 @@ fn read_file(env: &ConductorEnv, input: &Value) -> String {
         content.truncate(cut);
     }
     // Audit the read: path only — never the content.
-    (env.log_event)("conductor:readFile", vec![("path".to_string(), json!(path))]);
+    (env.log_event)(
+        "conductor:readFile",
+        vec![("path".to_string(), json!(path))],
+    );
     content
 }
 
 async fn run_command(c: &Conductor, env: &ConductorEnv, input: &Value) -> String {
     if !c.allow_run() {
-        return "Refused: enable \"assistant may run commands\" to let me run commands.".to_string();
+        return "Refused: enable \"assistant may run commands\" to let me run commands."
+            .to_string();
     }
     let cwd = input.get("cwd").and_then(Value::as_str).unwrap_or("");
     let cmd = input.get("cmd").and_then(Value::as_str).unwrap_or("");
@@ -488,7 +533,9 @@ async fn run_command(c: &Conductor, env: &ConductorEnv, input: &Value) -> String
     // Audit the run: cwd only — never the command.
     (env.log_event)("conductor:run", vec![("cwd".to_string(), json!(cwd))]);
     let cwd_str = resolved.to_string_lossy().into_owned();
-    (env.run_command)(cwd_str.as_str(), cmd).await.unwrap_or_else(|e| e)
+    (env.run_command)(cwd_str.as_str(), cmd)
+        .await
+        .unwrap_or_else(|e| e)
 }
 
 fn list_skills(env: &ConductorEnv, _input: &Value) -> String {
@@ -515,5 +562,7 @@ fn read_skill(env: &ConductorEnv, input: &Value) -> String {
 /// input object and returns the seam's `String` result (or its `Err` text)
 /// as the tool result the loop appends to the transcript.
 async fn gate_question(env: &ConductorEnv, input: &Value) -> String {
-    (env.gate_question)(input.clone()).await.unwrap_or_else(|e| e)
+    (env.gate_question)(input.clone())
+        .await
+        .unwrap_or_else(|e| e)
 }

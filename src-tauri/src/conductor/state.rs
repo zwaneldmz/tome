@@ -122,11 +122,22 @@ impl Conductor {
     /// `false`. Also opens this pane's scrollback ring at `""`, matching
     /// `scrolls.set(id, '')`.
     pub fn register(&self, id: &str, kind: &str, cwd: &str, airgap: bool) {
-        self.meta.lock().expect("Conductor.meta lock poisoned").insert(
-            id.to_string(),
-            PaneMeta { kind: kind.to_string(), cwd: cwd.to_string(), airgap, exited: false },
-        );
-        self.scrolls.lock().expect("Conductor.scrolls lock poisoned").insert(id.to_string(), String::new());
+        self.meta
+            .lock()
+            .expect("Conductor.meta lock poisoned")
+            .insert(
+                id.to_string(),
+                PaneMeta {
+                    kind: kind.to_string(),
+                    cwd: cwd.to_string(),
+                    airgap,
+                    exited: false,
+                },
+            );
+        self.scrolls
+            .lock()
+            .expect("Conductor.scrolls lock poisoned")
+            .insert(id.to_string(), String::new());
     }
 
     /// `record(id, data)` — appends to a REGISTERED pane's scrollback ring
@@ -142,8 +153,13 @@ impl Conductor {
     // chunk (the batcher's `flush_buf`), the Rust equivalent of
     // `conductor.js`'s `p.onData = data => conductor.record(id, data)`.
     pub fn record(&self, id: &str, data: &str) {
-        let mut scrolls = self.scrolls.lock().expect("Conductor.scrolls lock poisoned");
-        let Some(buf) = scrolls.get_mut(id) else { return };
+        let mut scrolls = self
+            .scrolls
+            .lock()
+            .expect("Conductor.scrolls lock poisoned");
+        let Some(buf) = scrolls.get_mut(id) else {
+            return;
+        };
         buf.push_str(data);
         if buf.len() > SCROLL_CAP {
             let mut cut = buf.len() - SCROLL_CAP;
@@ -157,7 +173,12 @@ impl Conductor {
     /// `markExited(id)` — a no-op for an unregistered pane, same as the
     /// JS's `const m = meta.get(id); if (m) m.exited = true`.
     pub fn mark_exited(&self, id: &str) {
-        if let Some(m) = self.meta.lock().expect("Conductor.meta lock poisoned").get_mut(id) {
+        if let Some(m) = self
+            .meta
+            .lock()
+            .expect("Conductor.meta lock poisoned")
+            .get_mut(id)
+        {
             m.exited = true;
         }
     }
@@ -166,10 +187,22 @@ impl Conductor {
     /// one-shot read-request gate (so a reopened pane can re-ask), exactly
     /// the four maps `conductor.js`'s `forget` clears.
     pub fn forget(&self, id: &str) {
-        self.meta.lock().expect("Conductor.meta lock poisoned").remove(id);
-        self.scrolls.lock().expect("Conductor.scrolls lock poisoned").remove(id);
-        self.read_consent.lock().expect("Conductor.read_consent lock poisoned").remove(id);
-        self.read_requested.lock().expect("Conductor.read_requested lock poisoned").remove(id);
+        self.meta
+            .lock()
+            .expect("Conductor.meta lock poisoned")
+            .remove(id);
+        self.scrolls
+            .lock()
+            .expect("Conductor.scrolls lock poisoned")
+            .remove(id);
+        self.read_consent
+            .lock()
+            .expect("Conductor.read_consent lock poisoned")
+            .remove(id);
+        self.read_requested
+            .lock()
+            .expect("Conductor.read_requested lock poisoned")
+            .remove(id);
     }
 
     // ---- renderer-synced / consent-gate setters (ipc::panes / ipc::conductor) ----
@@ -195,7 +228,10 @@ impl Conductor {
     /// `setReadConsent(paneId, allowed)` — `conductor:allowRead` (TOME-009).
     /// Grants or revokes; never itself asks — see [`Self::mark_read_requested`].
     pub fn set_read_consent(&self, id: &str, allowed: bool) {
-        let mut set = self.read_consent.lock().expect("Conductor.read_consent lock poisoned");
+        let mut set = self
+            .read_consent
+            .lock()
+            .expect("Conductor.read_consent lock poisoned");
         if allowed {
             set.insert(id.to_string());
         } else {
@@ -213,30 +249,54 @@ impl Conductor {
     // see the module doc comment's "Production wiring note".
     #[allow(dead_code)]
     pub fn set_agents(&self, list: &[String]) {
-        let mut ids = self.agent_ids.lock().expect("Conductor.agent_ids lock poisoned");
-        *ids = if list.is_empty() { AGENTS.iter().map(|s| s.to_string()).collect() } else { list.to_vec() };
+        let mut ids = self
+            .agent_ids
+            .lock()
+            .expect("Conductor.agent_ids lock poisoned");
+        *ids = if list.is_empty() {
+            AGENTS.iter().map(|s| s.to_string()).collect()
+        } else {
+            list.to_vec()
+        };
     }
 
     pub(crate) fn agent_ids(&self) -> Vec<String> {
-        self.agent_ids.lock().expect("Conductor.agent_ids lock poisoned").clone()
+        self.agent_ids
+            .lock()
+            .expect("Conductor.agent_ids lock poisoned")
+            .clone()
     }
 
     // ---- read-only accessors for tools.rs's dispatch ----
 
     pub(crate) fn panes_snapshot(&self) -> Vec<Value> {
-        self.panes.lock().expect("Conductor.panes lock poisoned").clone()
+        self.panes
+            .lock()
+            .expect("Conductor.panes lock poisoned")
+            .clone()
     }
 
     pub(crate) fn meta_of(&self, id: &str) -> Option<PaneMeta> {
-        self.meta.lock().expect("Conductor.meta lock poisoned").get(id).cloned()
+        self.meta
+            .lock()
+            .expect("Conductor.meta lock poisoned")
+            .get(id)
+            .cloned()
     }
 
     pub(crate) fn scrollback_of(&self, id: &str) -> Option<String> {
-        self.scrolls.lock().expect("Conductor.scrolls lock poisoned").get(id).cloned()
+        self.scrolls
+            .lock()
+            .expect("Conductor.scrolls lock poisoned")
+            .get(id)
+            .cloned()
     }
 
     pub(crate) fn has_read_consent(&self, id: &str) -> bool {
-        self.read_consent.lock().expect("Conductor.read_consent lock poisoned").contains(id)
+        self.read_consent
+            .lock()
+            .expect("Conductor.read_consent lock poisoned")
+            .contains(id)
     }
 
     /// Returns `true` the FIRST time this pane is asked about (the caller
@@ -246,7 +306,10 @@ impl Conductor {
     /// collapsed into one atomic check-and-set (`HashSet::insert`'s own
     /// return value) rather than a separate has/add pair.
     pub(crate) fn mark_read_requested(&self, id: &str) -> bool {
-        self.read_requested.lock().expect("Conductor.read_requested lock poisoned").insert(id.to_string())
+        self.read_requested
+            .lock()
+            .expect("Conductor.read_requested lock poisoned")
+            .insert(id.to_string())
     }
 
     // ---- chat abort registry (TOME-015) ----
@@ -256,19 +319,30 @@ impl Conductor {
     /// `controller.signal` `runChat` reads throughout its loop.
     pub(crate) fn begin_chat(&self, id: &str) -> CancellationToken {
         let token = CancellationToken::new();
-        self.inflight.lock().expect("Conductor.inflight lock poisoned").insert(id.to_string(), token.clone());
+        self.inflight
+            .lock()
+            .expect("Conductor.inflight lock poisoned")
+            .insert(id.to_string(), token.clone());
         token
     }
 
     /// `inflight.delete(id)` — the `finally` half of `runChat`.
     pub(crate) fn end_chat(&self, id: &str) {
-        self.inflight.lock().expect("Conductor.inflight lock poisoned").remove(id);
+        self.inflight
+            .lock()
+            .expect("Conductor.inflight lock poisoned")
+            .remove(id);
     }
 
     /// `abortChat(id)` (`chat:abort`) — `inflight.get(id)?.abort()`, a safe
     /// no-op for an unknown/already-finished chat id.
     pub fn abort_chat(&self, id: &str) {
-        if let Some(token) = self.inflight.lock().expect("Conductor.inflight lock poisoned").get(id) {
+        if let Some(token) = self
+            .inflight
+            .lock()
+            .expect("Conductor.inflight lock poisoned")
+            .get(id)
+        {
             token.cancel();
         }
     }

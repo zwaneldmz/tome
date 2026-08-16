@@ -45,9 +45,7 @@ pub async fn popout_close(
             .lock()
             .expect("AppState.popout_approved lock poisoned")
             .insert(id.clone());
-        window
-            .close()
-            .map_err(|e| format!("popout:close: {e}"))?;
+        window.close().map_err(|e| format!("popout:close: {e}"))?;
     }
     // A label with no live window is a no-op, matching the JS original's
     // `if (!child || child.isDestroyed()) return`.
