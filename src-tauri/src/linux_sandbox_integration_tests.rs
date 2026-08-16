@@ -126,6 +126,26 @@ fn require_bwrap() {
     );
 }
 
+/// bwrap must not merely be installed — it must be able to actually create a
+/// user namespace (unprivileged userns), which some environments forbid.
+/// Notably the fedora CI job runs in a docker container whose runner's kernel
+/// userns policy bwrap cannot relax from inside the container, so these tests
+/// SKIP there (returning `None` from `build_fixture`) rather than fail; the
+/// ubuntu legs, which `sysctl` the restriction away, still run the full
+/// matrix. Cached: the smoke test is a fork+exec, not worth repeating per test.
+fn bwrap_userns_available() -> bool {
+    static CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CACHE.get_or_init(|| {
+        std::process::Command::new("bwrap")
+            .args(["--unshare-user", "--dev-bind", "/", "/", "--", "/bin/true"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    })
+}
+
 /// `TOME_SHIM_BIN` override, else the release build `scripts/build-sidecar.sh`
 /// (and this repo's own CI job) produces, else a plain dev `cargo build -p
 /// tome-shim` output — checked in that order so a CI job that already ran
@@ -245,8 +265,12 @@ async fn build_fixture(
     pane_id: &str,
     initial_allowed: Vec<String>,
     inner_argv: Vec<String>,
-) -> SandboxFixture {
+) -> Option<SandboxFixture> {
     require_bwrap();
+    if !bwrap_userns_available() {
+        eprintln!("skipping: bwrap cannot create a user namespace on this host (unprivileged userns disabled)");
+        return None;
+    }
     let runtime_dir = tempfile::tempdir().expect("runtime tempdir");
     let config_dir = tempfile::tempdir().expect("config tempdir");
     let sock_path = runtime_dir.path().join(format!("pane-{pane_id}.sock"));
@@ -272,13 +296,13 @@ async fn build_fixture(
     };
     let argv = build_bwrap_argv(&spec);
 
-    SandboxFixture {
+    Some(SandboxFixture {
         proxy,
         argv,
         config_dir,
         runtime_dir,
         blocked,
-    }
+    })
 }
 
 impl SandboxFixture {
@@ -397,7 +421,7 @@ async fn direct_curl_to_a_non_allowlisted_address_has_no_route() {
     // host, regardless of what's configured") is what actually guarantees
     // this specific request tests netns-level route absence rather than
     // proxy-level allowlist denial.
-    let fixture = build_fixture(
+    let Some(fixture) = build_fixture(
         "direct-egress",
         vec!["127.0.0.1".to_string()],
         vec![
@@ -412,7 +436,10 @@ async fn direct_curl_to_a_non_allowlisted_address_has_no_route() {
             "http://203.0.113.1/".to_string(),
         ],
     )
-    .await;
+    .await
+    else {
+        return;
+    };
 
     let child = fixture.spawn(&[]);
     let out = run_to_completion(child, TEST_TIMEOUT).await;
@@ -435,7 +462,7 @@ async fn direct_curl_to_a_non_allowlisted_address_has_no_route() {
 #[ignore = "requires a real Linux netns + bwrap — see .github/workflows/linux-sandbox.yml"]
 async fn curl_via_proxy_to_an_allowlisted_host_succeeds() {
     let upstream_port = spawn_fixed_response_upstream("allowlisted-ok").await;
-    let fixture = build_fixture(
+    let Some(fixture) = build_fixture(
         "proxy-allow",
         vec!["127.0.0.1".to_string()],
         vec![
@@ -446,7 +473,9 @@ async fn curl_via_proxy_to_an_allowlisted_host_succeeds() {
             ),
         ],
     )
-    .await;
+    .await else {
+        return;
+    };
 
     let child = fixture.spawn(&[]);
     let out = run_to_completion(child, TEST_TIMEOUT).await;
@@ -477,7 +506,7 @@ async fn curl_via_proxy_to_a_non_allowlisted_host_is_blocked() {
     let upstream_port = spawn_fixed_response_upstream("should-never-be-seen").await;
     // Only "127.0.0.1" is allowlisted; "localhost" resolves to the SAME
     // loopback upstream but is not itself a literal allowlist match.
-    let fixture = build_fixture(
+    let Some(fixture) = build_fixture(
         "proxy-block",
         vec!["127.0.0.1".to_string()],
         vec![
@@ -488,7 +517,9 @@ async fn curl_via_proxy_to_a_non_allowlisted_host_is_blocked() {
             ),
         ],
     )
-    .await;
+    .await else {
+        return;
+    };
 
     let child = fixture.spawn(&[]);
     let out = run_to_completion(child, TEST_TIMEOUT).await;
@@ -530,7 +561,7 @@ async fn grandchild_process_is_equally_contained() {
     // auto-detects this fixture's ambient `http_proxy` env var, which
     // would otherwise route this "direct egress" probe through the real
     // proxy instead of actually testing netns-level containment.
-    let fixture = build_fixture(
+    let Some(fixture) = build_fixture(
         "grandchild-egress",
         vec!["127.0.0.1".to_string()],
         vec![
@@ -540,7 +571,10 @@ async fn grandchild_process_is_equally_contained() {
                 .to_string(),
         ],
     )
-    .await;
+    .await
+    else {
+        return;
+    };
 
     let child = fixture.spawn(&[]);
     let out = run_to_completion(child, TEST_TIMEOUT).await;
@@ -562,7 +596,7 @@ async fn grandchild_process_is_equally_contained() {
 #[tokio::test]
 #[ignore = "requires a real Linux netns + bwrap — see .github/workflows/linux-sandbox.yml"]
 async fn app_config_dir_is_hidden_by_the_bwrap_tmpfs() {
-    let fixture = build_fixture(
+    let Some(fixture) = build_fixture(
         "tmpfs-hide",
         vec!["127.0.0.1".to_string()],
         vec![
@@ -572,7 +606,10 @@ async fn app_config_dir_is_hidden_by_the_bwrap_tmpfs() {
             "__unused_argv0_placeholder__".to_string(),
         ],
     )
-    .await;
+    .await
+    else {
+        return;
+    };
 
     // Write the marker AFTER build_fixture (which creates config_dir) but
     // BEFORE spawning — the auth file bwrap's own profile (and this
@@ -642,7 +679,7 @@ async fn relock_severs_a_live_tunnel_mid_transfer() {
     // allowlisted_one` unit test for the identical "same address, two
     // presented names" pattern this integration test mirrors for real).
     let upstream_port = spawn_drip_upstream(40).await; // ~6s of drip if never interrupted
-    let fixture = build_fixture(
+    let Some(fixture) = build_fixture(
         "relock-tunnel",
         vec!["127.0.0.1".to_string()], // fixed allowlist — "localhost" is deliberately NOT on it
         vec![
@@ -653,7 +690,9 @@ async fn relock_severs_a_live_tunnel_mid_transfer() {
             ),
         ],
     )
-    .await;
+    .await else {
+        return;
+    };
 
     // Mode::Open admits this tunnel despite "localhost" not being on the
     // fixed allowlist above — exactly the condition PaneProxy::relock has
@@ -735,7 +774,7 @@ async fn killing_the_wrap_leaves_no_orphan_process() {
     // became the renamed sleep, so the pgrep precondition below could
     // never hold. bash is present on every Linux CI runner (and is what
     // the sentinel rename needs), so name it explicitly.
-    let fixture = build_fixture(
+    let Some(fixture) = build_fixture(
         "orphan-check",
         vec!["127.0.0.1".to_string()],
         vec![
@@ -744,7 +783,10 @@ async fn killing_the_wrap_leaves_no_orphan_process() {
             format!("exec -a {MARKER} sleep 300"),
         ],
     )
-    .await;
+    .await
+    else {
+        return;
+    };
 
     let mut child = fixture.spawn(&[]);
 
