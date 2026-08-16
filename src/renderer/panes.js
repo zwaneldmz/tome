@@ -561,6 +561,7 @@ function componentOf(panel) {
   if (params.dir) return 'history'
   if (params.events) return 'events'
   if (params.runs) return 'runs'
+  if (params.report) return 'report'
   // Must precede the generic path&&mode / bare-path fallthroughs below, or a
   // flow's params (which are just { path }, same shape as an editor's) get
   // classified as 'editor' and the panel silently opens the raw JSON on
@@ -669,6 +670,10 @@ export async function restoreLayout() {
           // pane comes back empty after a restart rather than stale — which is
           // the honest state: those child processes died with the last window.
           spawnRuns(p)
+        } else if (component === 'report') {
+          // The report is regenerated on load, so a restored pane just
+          // re-runs review:generate — no stale content to reconcile.
+          spawnReport(p)
         } else if (component === 'editor' || component === 'doc' || component === 'flow') {
           // openFile() re-routes a .flow.json path to the flow component on
           // its own (see the check added there) — including the flow

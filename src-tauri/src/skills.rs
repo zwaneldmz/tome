@@ -2,9 +2,10 @@
 //! parses each one's YAML frontmatter, and serves a sorted `list` plus a
 //! per-skill `read` (skill metadata + markdown body).
 //!
-//! The skills themselves are already vendored: dev builds resolve the root
-//! to the `.agents/skills/` sibling of the working directory, packaged
-//! builds to `<app_data_dir>/skills`. [`default_root`] owns that split; every
+//! The skills themselves are already vendored: they ship as the tracked
+//! `skills/` directory (bundled via `tauri.conf.json` `bundle.resources`),
+//! so packaged builds read them from the resource dir and dev builds from the
+//! source tree. [`default_root`] owns that resolution; every
 //! other function here takes an explicit `&Path` root so the parser and
 //! scanner are unit-testable without a live `AppHandle` — the same "testable
 //! core + thin AppHandle wrapper" split `events.rs`/`fs.rs` use, with
@@ -62,16 +63,34 @@ pub fn read(root: &Path, name: &str) -> Option<(Skill, String)> {
     None
 }
 
-/// Resolves the skills root for the running app. Dev mode first: if a
-/// `.agents/skills` sibling of [`std::env::current_dir`] exists, use it (the
-/// vendored skills). Otherwise use `<app_data_dir>/skills`, creating it on
-/// demand. `None` only when `app_data_dir` itself is unresolvable AND the
-/// `.agents/skills` fallback is not present.
+/// Resolves the skills root for the running app, first match wins:
+///
+/// 1. **Bundled** — `<resource_dir>/skills` (a packaged build ships the
+///    tracked `skills/` directory via `tauri.conf.json`'s `bundle.resources`).
+/// 2. **Dev** — the tracked `skills/` sibling of [`std::env::current_dir`]
+///    (the same files, read straight from the source tree).
+/// 3. **Legacy/user** — `.agents/skills`, the git-ignored machine-local dir
+///    (holds the `orchestration` skill and any hand-added ones).
+/// 4. **Fallback** — `<app_data_dir>/skills`, created on demand for future
+///    user-installed skills.
+///
+/// `None` only when `app_data_dir` is unresolvable and none of the on-disk
+/// roots above exist.
 pub fn default_root(app: &tauri::AppHandle) -> Option<PathBuf> {
+    if let Ok(res) = app.path().resource_dir() {
+        let bundled = res.join("skills");
+        if bundled.is_dir() {
+            return Some(bundled);
+        }
+    }
     if let Ok(cwd) = std::env::current_dir() {
-        let dev = cwd.join(".agents").join("skills");
+        let dev = cwd.join("skills");
         if dev.is_dir() {
             return Some(dev);
+        }
+        let legacy = cwd.join(".agents").join("skills");
+        if legacy.is_dir() {
+            return Some(legacy);
         }
     }
     let dir = app.path().app_data_dir().ok()?.join("skills");

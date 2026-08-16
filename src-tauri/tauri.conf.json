@@ -5,8 +5,8 @@
   "build": {
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist-web",
-    "beforeDevCommand": "npm run dev:renderer",
-    "beforeBuildCommand": "npm run build:renderer && bash scripts/build-sidecar.sh"
+    "beforeDevCommand": "bun run dev:renderer",
+    "beforeBuildCommand": "bun run build:renderer && bash scripts/build-sidecar.sh"
   },
   "app": {
     "withGlobalTauri": true,
@@ -43,6 +43,7 @@
       "icons/icon.ico"
     ],
     "externalBin": ["binaries/tome-shim"],
+    "resources": ["../skills"],
     "linux": {
       "deb": {
         "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]

@@ -345,9 +345,10 @@
     },
 
     chat: {
-      send: (id, messages, brainWs, verbose) => call('chat_send', { id, messages, brainWs, verbose }),
+      send: (id, messages, brainWs, verbose, gate) => call('chat_send', { id, messages, brainWs, verbose, gate }),
       abort: (id) => fire('chat_abort', { id }),
       providers: () => call('chat_providers'),
+      complete: (messages, system) => call('chat_complete', { messages, system }),
       // Rust side emits these as plain events until the real chat command
       // lands (plan §Chat) — same wire names, same shim, no special-casing.
       onDelta: (cb) => on('chat:delta', cb),
@@ -379,6 +380,7 @@
     mentor: {
       onCheck: (cb) => on('mentor:check', cb),
       answer: (id, answers, skip) => call('mentor_answer', { id, answers, skip }),
+      judge: (answer, context) => call('mentor_judge', { answer, context }),
     },
 
     lsp: {

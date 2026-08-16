@@ -63,6 +63,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::chat::providers;
+use crate::chat::sse;
 use crate::conductor;
 use crate::state::AppState;
 use crate::{lock_gate, login_env, store};
@@ -126,23 +127,15 @@ pub async fn chat_providers(app: AppHandle, state: State<'_, AppState>) -> Resul
     Ok(json!({ "providers": list, "active": active }))
 }
 
-/// `chat:send` (`index.js` ~1271-1305). See this file's module doc comment
-/// for the provider-resolution/tool-loop split with `conductor::chat`.
-#[tauri::command]
-#[allow(unused_variables)] // brain_ws: accepted for wire-shape completeness, unused this phase — see module doc comment
-pub async fn chat_send(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    id: String,
-    messages: Vec<Value>,
-    brain_ws: Option<String>,
-    verbose: Option<bool>,
-) -> Result<Value, String> {
-    lock_gate::guard(&state, "chat:send")?;
-    // Backward-compatible: the renderer lands the `verbose` flag in a later
-    // slice; absent means the default (non-mentor) persona.
-    let verbose = verbose.unwrap_or(false);
-
+/// Resolves the active provider + beta/fallback flags from the login shell
+/// and stored chat-provider/chat-model keys. Mirrors `chat_send`'s inline
+/// resolution, factored out so `chat_send`, `complete_once`, and the
+/// `mentor_judge` command share one resolution path. Returns a friendly
+/// `KeyMissing` error string when no key is available.
+pub(crate) async fn resolve_chat(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+) -> Result<(providers::ResolvedProvider, Option<Vec<String>>, Option<String>), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let locked = *state.locked.read().expect("AppState.locked lock poisoned");
     let login = login_env::login_env().await;
@@ -170,8 +163,7 @@ pub async fn chat_send(
                 "{} needs {} — export it in your shell and restart, or pick another provider in \u{2318}, \u{2192} Assistant.",
                 entry.label, entry.key_env
             );
-            emit_done(&app, &id, false, Some(message));
-            return Ok(json!({}));
+            return Err(message);
         }
         providers::ProviderResolution::Ready(p) => p,
     };
@@ -185,13 +177,67 @@ pub async fn chat_send(
         (None, None)
     };
 
+    Ok((provider, betas, fallbacks))
+}
+
+/// Non-streaming one-shot completion: resolves the provider, streams into a
+/// `String` (discarding tool use), returns the full text. Backs
+/// [`chat_complete`] and `ipc::mentor::mentor_judge`.
+pub(crate) async fn complete_once(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    messages: &[Value],
+    system: &str,
+) -> Result<String, String> {
+    let (provider, betas, fallbacks) = resolve_chat(app, state).await?;
+    let mut text = String::new();
+    let args = sse::StreamChatArgs {
+        system: Some(system),
+        messages,
+        tools: &[],
+        betas: betas.as_deref(),
+        fallbacks: fallbacks.as_deref(),
+    };
+    sse::stream_chat(http_client(), &provider, args, |t: &str| text.push_str(t))
+        .await
+        .map(|_| text)
+        .map_err(|e| e.message())
+}
+
+/// `chat:send` (`index.js` ~1271-1305). See this file's module doc comment
+/// for the provider-resolution/tool-loop split with `conductor::chat`.
+#[tauri::command]
+#[allow(unused_variables)] // brain_ws: accepted for wire-shape completeness, unused this phase — see module doc comment
+pub async fn chat_send(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    messages: Vec<Value>,
+    brain_ws: Option<String>,
+    verbose: Option<bool>,
+    gate: Option<bool>,
+) -> Result<Value, String> {
+    lock_gate::guard(&state, "chat:send")?;
+    // Backward-compatible: the renderer lands the `verbose`/`gate` flags in
+    // later slices; absent means the default (non-mentor) persona / gate on.
+    let verbose = verbose.unwrap_or(false);
+    let gate = gate.unwrap_or(true);
+
+    let (provider, betas, fallbacks) = match resolve_chat(&app, &state).await {
+        Ok(r) => r,
+        Err(message) => {
+            emit_done(&app, &id, false, Some(message));
+            return Ok(json!({}));
+        }
+    };
+
     // conductor.SYSTEM + brain vault context — brain_ws-driven vault context
     // is not yet ported (see module doc comment); system is conductor's own
     // prompt alone, exactly the fallback `run_chat` would apply itself, made
     // explicit here to mirror index.js's `let system = conductor.SYSTEM`
     // assignment site. `verbose: true` swaps in the mentor (teaching)
-    // persona — `conductor.mentor_system_prompt()` — instead.
-    let system = if verbose { state.conductor.mentor_system_prompt() } else { state.conductor.system_prompt() };
+    // persona — `conductor.mentor_system_prompt(gate)` — instead.
+    let system = if verbose { state.conductor.mentor_system_prompt(gate) } else { state.conductor.system_prompt() };
     let conductor_env = conductor::env::production_env(app.clone(), provider, betas, fallbacks);
 
     // `run_chat` owns the whole multi-turn loop, including the abort race
@@ -212,6 +258,21 @@ pub async fn chat_send(
         emit_done(&app, &id, false, Some(friendly));
     }
     Ok(json!({}))
+}
+
+/// `chat:complete` — non-streaming one-shot completion. Used by the
+/// renderer's LLM-judged comprehension gate (and anything else that needs a
+/// single full-text reply without a streaming chat id). See [`complete_once`].
+#[tauri::command]
+pub async fn chat_complete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    messages: Vec<Value>,
+    system: String,
+) -> Result<Value, String> {
+    lock_gate::guard(&state, "chat:complete")?;
+    let text = complete_once(&app, &state, &messages, &system).await?;
+    Ok(json!({ "text": text }))
 }
 
 /// `chat:abort` (`ipcMain.on('chat:abort', (e, id) => conductor.abortChat(id))`).

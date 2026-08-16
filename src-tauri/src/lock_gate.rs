@@ -197,6 +197,7 @@ pub const CHANNEL_OF_COMMAND: &[(&str, &str)] = &[
     ("chat_send", "chat:send"),
     ("chat_abort", "chat:abort"),
     ("chat_providers", "chat:providers"),
+    ("chat_complete", "chat:complete"),
     ("brain_open", "brain:open"),
     ("brain_close", "brain:close"),
     ("brain_index", "brain:index"),
@@ -217,6 +218,7 @@ pub const CHANNEL_OF_COMMAND: &[(&str, &str)] = &[
     ("skills_list", "skills:list"),
     ("skills_read", "skills:read"),
     ("mentor_answer", "mentor:answer"),
+    ("mentor_judge", "mentor:judge"),
     ("review_generate", "review:generate"),
 ];
 

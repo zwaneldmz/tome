@@ -552,9 +552,16 @@ fn tool_schemas_names_exactly_the_thirteen_tools_in_order() {
 
 #[test]
 fn mentor_prompt_text_mentions_gate_and_skills() {
-    let text = tools::mentor_prompt_text(&["claude".to_string()]);
+    let text = tools::mentor_prompt_text(&["claude".to_string()], true);
     assert!(text.contains("gate_question"), "mentor prompt must mention gate_question: {text}");
     assert!(text.contains("list_skills"), "mentor prompt must mention list_skills: {text}");
+}
+
+#[test]
+fn mentor_prompt_text_omits_gate_when_disabled() {
+    let text = tools::mentor_prompt_text(&["claude".to_string()], false);
+    assert!(!text.contains("gate_question"), "mentor prompt must not mention gate_question when the gate is off: {text}");
+    assert!(text.contains("list_skills"), "mentor prompt must still mention list_skills: {text}");
 }
 
 #[test]
