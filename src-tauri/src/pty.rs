@@ -920,6 +920,10 @@ mod tests {
 
     #[test]
     fn terminal_command_env_is_exactly_what_was_given_not_merged_with_this_process() {
+        // Seed a known value into THIS process's env first, so the leak-check
+        // below stays meaningful even on a minimal CI container (e.g. fedora)
+        // that sets neither USER nor LOGNAME.
+        std::env::set_var("USER", "tome-test-user");
         let cmd = build_terminal_command(&opts(vec![("PATH", "/usr/bin"), ("HOME", "/home/x")]));
         assert_eq!(cmd.get_env("PATH").unwrap().to_string_lossy(), "/usr/bin");
         assert_eq!(cmd.get_env("HOME").unwrap().to_string_lossy(), "/home/x");
