@@ -185,6 +185,11 @@ code {
 .gnode.is-on .gcard { stroke: var(--accent); }
 .gnode.is-on .gring { stroke: var(--accent-ring); }
 .gnode.is-on .gname { fill: var(--bright); }
+/* A node you have scrolled past reads as a finished run stage — the same
+   green the app's Flow runs pills wear when a node exits 0. */
+.gnode.is-done .gnum { fill: var(--ok); }
+.gnode.is-done .gcard { stroke: var(--ok); stroke-opacity: 0.55; }
+.rnode.is-done .rbadge { color: var(--ok); border-color: var(--ok); }
 
 /* ---- the same graph, collapsed to a rail on narrow screens ---- */
 .rail { display: none; list-style: none; margin: 0 auto; padding: 4px 20px; max-width: 880px; position: relative; }
@@ -211,11 +216,25 @@ code {
 
 /* ---- steps ---- */
 main { padding-bottom: 40px; }
-.step { padding: 46px 0 8px; scroll-margin-top: 12px; }
+.step { padding: 46px 0 30px; scroll-margin-top: 18px; }
 .step + .step { border-top: 1px solid var(--line); }
-.js .step { display: none; border-top: 0; }
-.js .step.is-on { display: block; animation: rise 0.28s var(--ease) both; }
-@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+/* One thin line of state, fixed to the top: how far through the run you are. */
+.progress {
+  position: fixed; top: 0; left: 0; z-index: 10;
+  height: 2px; width: 0; background: var(--accent);
+}
+
+/* Scroll-reveal: observed, never scrubbed. The observer adds .in-view once and
+   never removes it — a step you have read stays read. */
+@media (prefers-reduced-motion: no-preference) {
+  .js .step .media, .js .step .board, .js .step .artifact, .js .step .why {
+    opacity: 0; transform: translateY(10px);
+    transition: opacity 0.5s var(--ease), transform 0.5s var(--ease);
+  }
+  .js .step .in-view, .js.no-io .step .media, .js.no-io .step .board,
+  .js.no-io .step .artifact, .js.no-io .step .why { opacity: 1; transform: none; }
+}
 .eyebrow { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
 .eyebrow .nodename { font-family: var(--mono); font-size: var(--fs-meta); color: var(--muted); }
 .step h2 { font-size: var(--fs-section); margin-bottom: 16px; }
@@ -283,24 +302,13 @@ main { padding-bottom: 40px; }
 .artifact video { display: block; width: 100%; height: auto; background: var(--bg-sunken); }
 .outro .artifact { margin-bottom: 34px; }
 
-/* ---- prev / next ---- */
-.stepnav { display: none; }
-.js .stepnav {
-  display: flex; align-items: center; gap: 14px;
-  margin: 40px 0 0; padding-top: 20px; border-top: 1px solid var(--line);
-  font-family: var(--mono); font-size: var(--fs-meta);
+/* ---- hero CTAs ---- */
+.hero-cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+
+/* ---- wide media: text stays at measure, recordings get the room ---- */
+@media (min-width: 1104px) {
+  .hero .shot, .step .media { margin-left: -72px; margin-right: -72px; }
 }
-.navbtn {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 8px 14px;
-  color: var(--text); text-decoration: none;
-  border: 1px solid var(--line); border-radius: var(--r-pill);
-}
-.navbtn:hover { border-color: var(--line-2); color: var(--bright); }
-.navbtn.is-off { visibility: hidden; }
-.navbtn .k { color: var(--muted); }
-.stepnav .count { flex: 1; text-align: center; color: var(--muted); }
-.stepnav .count b { color: var(--bright); font-weight: 600; }
 
 /* ---- outro ---- */
 .outro { border-top: 1px solid var(--line); margin-top: 60px; padding: 46px 0 90px; }
@@ -312,6 +320,8 @@ main { padding-bottom: 40px; }
   border: 1px solid var(--accent-ring); border-radius: var(--r-pill);
 }
 .cta:hover { border-color: var(--accent); }
+.cta-2 { color: var(--text); border-color: var(--line-2); margin-left: 10px; }
+.cta-2:hover { border-color: var(--text); color: var(--bright); }
 
 @media (max-width: 759px) {
   .graph-strip, .tour-hint { display: none; }
@@ -323,23 +333,24 @@ main { padding-bottom: 40px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .js .step.is-on { animation: none; }
   * { transition: none !important; }
 }
 </style>
 <script>document.documentElement.classList.add('js')</script>
 </head>
 <body>
+<div class="progress" aria-hidden="true"></div>
 <header class="mast"><img src="icon.png" width="256" height="256" alt="The Tome app icon: a small book mark on a dark tile."><span class="name">tome</span><a class="src" href="https://github.com/zwaneldmz/tome">source &#8599;</a></header>
 <div class="wrap">
 <section class="hero" aria-labelledby="title">
 <h1 id="title">Run your coding agents behind an air gap, in one workspace.</h1>
 <p class="sub">Agents, terminals, editors, documents and an assistant in one grid — every agent pane sandboxed, with the only route out a per-pane allowlist proxy. What follows is one worked example end to end: an empty workspace, a five-node review pipeline, and the audit trail it leaves behind.</p>
+<p class="hero-cta"><a class="cta" href="#workspace">Take the tour ↓</a><a class="cta cta-2" href="https://github.com/zwaneldmz/tome/releases">Download for macOS or Linux</a></p>
 <figure class="shot"><img src="screenshot.png" width="2880" height="1800" alt="Tome running in dark mode: a project tree on the left, a zsh terminal pane in the middle, and on the right an assistant chat above an editor tab showing package.json."></figure>
 </section>
 </div>
 <nav class="tour-nav" aria-label="Tour steps">
-<p class="tour-hint">Ten steps, one pipeline &#183; click a node, or use &#8592; &#8594;</p>
+<p class="tour-hint">Ten steps, one pipeline &#183; scroll, click a node, or use &#8592; &#8594;</p>
 <div class="graph-strip"><svg class="graph" viewBox="0 0 1540 168" width="1540" height="168"><g><path class="gedge" d="M 148 92 C 188 92, 136 48, 176 48"/><path class="gedge" d="M 300 48 C 340 48, 288 92, 328 92"/><path class="gedge" d="M 452 92 C 492 92, 440 136, 480 136"/><path class="gedge" d="M 604 136 C 644 136, 592 92, 632 92"/><path class="gedge" d="M 756 92 C 796 92, 744 48, 784 48"/><path class="gedge" d="M 908 48 C 948 48, 896 92, 936 92"/><path class="gedge" d="M 1060 92 C 1100 92, 1048 136, 1088 136"/><path class="gedge" d="M 1212 136 C 1252 136, 1200 92, 1240 92"/><path class="gedge" d="M 1364 92 C 1404 92, 1352 92, 1392 92"/></g><a class="gnode" href="#workspace" data-goto="workspace" data-x="86" aria-label="Step 1 of 10: Open a workspace"><rect class="gfocus" x="18" y="64" width="136" height="56" rx="12"/><rect class="gring" x="23" y="69" width="126" height="46" rx="8"/><rect class="gcard" x="24" y="70" width="124" height="44" rx="7"/><rect class="gbadge" x="33" y="84" width="23" height="17" rx="5"/><text class="gnum" x="44.5" y="96">01</text><text class="gname" x="62" y="96">workspace</text><circle class="gport" cx="148" cy="92" r="3.5"/></a><a class="gnode" href="#airgap" data-goto="airgap" data-x="238" aria-label="Step 2 of 10: Arm the air gap"><rect class="gfocus" x="170" y="20" width="136" height="56" rx="12"/><rect class="gring" x="175" y="25" width="126" height="46" rx="8"/><rect class="gcard" x="176" y="26" width="124" height="44" rx="7"/><rect class="gbadge" x="185" y="40" width="23" height="17" rx="5"/><text class="gnum" x="196.5" y="52">02</text><text class="gname" x="214" y="52">airgap</text><circle class="gport" cx="176" cy="48" r="3.5"/><circle class="gport" cx="300" cy="48" r="3.5"/></a><a class="gnode" href="#create" data-goto="create" data-x="390" aria-label="Step 3 of 10: Grow the tree"><rect class="gfocus" x="322" y="64" width="136" height="56" rx="12"/><rect class="gring" x="327" y="69" width="126" height="46" rx="8"/><rect class="gcard" x="328" y="70" width="124" height="44" rx="7"/><rect class="gbadge" x="337" y="84" width="23" height="17" rx="5"/><text class="gnum" x="348.5" y="96">03</text><text class="gname" x="366" y="96">create</text><circle class="gport" cx="328" cy="92" r="3.5"/><circle class="gport" cx="452" cy="92" r="3.5"/></a><a class="gnode" href="#editor" data-goto="editor" data-x="542" aria-label="Step 4 of 10: Edit with diagnostics"><rect class="gfocus" x="474" y="108" width="136" height="56" rx="12"/><rect class="gring" x="479" y="113" width="126" height="46" rx="8"/><rect class="gcard" x="480" y="114" width="124" height="44" rx="7"/><rect class="gbadge" x="489" y="128" width="23" height="17" rx="5"/><text class="gnum" x="500.5" y="140">04</text><text class="gname" x="518" y="140">editor</text><circle class="gport" cx="480" cy="136" r="3.5"/><circle class="gport" cx="604" cy="136" r="3.5"/></a><a class="gnode" href="#flow" data-goto="flow" data-x="694" aria-label="Step 5 of 10: Draw the flow"><rect class="gfocus" x="626" y="64" width="136" height="56" rx="12"/><rect class="gring" x="631" y="69" width="126" height="46" rx="8"/><rect class="gcard" x="632" y="70" width="124" height="44" rx="7"/><rect class="gbadge" x="641" y="84" width="23" height="17" rx="5"/><text class="gnum" x="652.5" y="96">05</text><text class="gname" x="670" y="96">flow</text><circle class="gport" cx="632" cy="92" r="3.5"/><circle class="gport" cx="756" cy="92" r="3.5"/></a><a class="gnode" href="#models" data-goto="models" data-x="846" aria-label="Step 6 of 10: Pin cheaper models"><rect class="gfocus" x="778" y="20" width="136" height="56" rx="12"/><rect class="gring" x="783" y="25" width="126" height="46" rx="8"/><rect class="gcard" x="784" y="26" width="124" height="44" rx="7"/><rect class="gbadge" x="793" y="40" width="23" height="17" rx="5"/><text class="gnum" x="804.5" y="52">06</text><text class="gname" x="822" y="52">models</text><circle class="gport" cx="784" cy="48" r="3.5"/><circle class="gport" cx="908" cy="48" r="3.5"/></a><a class="gnode" href="#run" data-goto="run" data-x="998" aria-label="Step 7 of 10: Run the flow"><rect class="gfocus" x="930" y="64" width="136" height="56" rx="12"/><rect class="gring" x="935" y="69" width="126" height="46" rx="8"/><rect class="gcard" x="936" y="70" width="124" height="44" rx="7"/><rect class="gbadge" x="945" y="84" width="23" height="17" rx="5"/><text class="gnum" x="956.5" y="96">07</text><text class="gname" x="974" y="96">run</text><circle class="gport" cx="936" cy="92" r="3.5"/><circle class="gport" cx="1060" cy="92" r="3.5"/></a><a class="gnode" href="#conductor" data-goto="conductor" data-x="1150" aria-label="Step 8 of 10: Ask the conductor"><rect class="gfocus" x="1082" y="108" width="136" height="56" rx="12"/><rect class="gring" x="1087" y="113" width="126" height="46" rx="8"/><rect class="gcard" x="1088" y="114" width="124" height="44" rx="7"/><rect class="gbadge" x="1097" y="128" width="23" height="17" rx="5"/><text class="gnum" x="1108.5" y="140">08</text><text class="gname" x="1126" y="140">conductor</text><circle class="gport" cx="1088" cy="136" r="3.5"/><circle class="gport" cx="1212" cy="136" r="3.5"/></a><a class="gnode" href="#audit" data-goto="audit" data-x="1302" aria-label="Step 9 of 10: Read the log"><rect class="gfocus" x="1234" y="64" width="136" height="56" rx="12"/><rect class="gring" x="1239" y="69" width="126" height="46" rx="8"/><rect class="gcard" x="1240" y="70" width="124" height="44" rx="7"/><rect class="gbadge" x="1249" y="84" width="23" height="17" rx="5"/><text class="gnum" x="1260.5" y="96">09</text><text class="gname" x="1278" y="96">audit</text><circle class="gport" cx="1240" cy="92" r="3.5"/><circle class="gport" cx="1364" cy="92" r="3.5"/></a><a class="gnode" href="#ship" data-goto="ship" data-x="1454" aria-label="Step 10 of 10: Ship it"><rect class="gfocus" x="1386" y="64" width="136" height="56" rx="12"/><rect class="gring" x="1391" y="69" width="126" height="46" rx="8"/><rect class="gcard" x="1392" y="70" width="124" height="44" rx="7"/><rect class="gbadge" x="1401" y="84" width="23" height="17" rx="5"/><text class="gnum" x="1412.5" y="96">10</text><text class="gname" x="1430" y="96">ship</text><circle class="gport" cx="1392" cy="92" r="3.5"/></a></svg></div>
 <ol class="rail"><li><a class="rnode" href="#workspace" data-goto="workspace"><span class="badge rbadge">01</span><span class="rname">workspace</span><span class="rtitle">Open a workspace</span></a></li><li><a class="rnode" href="#airgap" data-goto="airgap"><span class="badge rbadge">02</span><span class="rname">airgap</span><span class="rtitle">Arm the air gap</span></a></li><li><a class="rnode" href="#create" data-goto="create"><span class="badge rbadge">03</span><span class="rname">create</span><span class="rtitle">Grow the tree</span></a></li><li><a class="rnode" href="#editor" data-goto="editor"><span class="badge rbadge">04</span><span class="rname">editor</span><span class="rtitle">Edit with diagnostics</span></a></li><li><a class="rnode" href="#flow" data-goto="flow"><span class="badge rbadge">05</span><span class="rname">flow</span><span class="rtitle">Draw the flow</span></a></li><li><a class="rnode" href="#models" data-goto="models"><span class="badge rbadge">06</span><span class="rname">models</span><span class="rtitle">Pin cheaper models</span></a></li><li><a class="rnode" href="#run" data-goto="run"><span class="badge rbadge">07</span><span class="rname">run</span><span class="rtitle">Run the flow</span></a></li><li><a class="rnode" href="#conductor" data-goto="conductor"><span class="badge rbadge">08</span><span class="rname">conductor</span><span class="rtitle">Ask the conductor</span></a></li><li><a class="rnode" href="#audit" data-goto="audit"><span class="badge rbadge">09</span><span class="rname">audit</span><span class="rtitle">Read the log</span></a></li><li><a class="rnode" href="#ship" data-goto="ship"><span class="badge rbadge">10</span><span class="rname">ship</span><span class="rtitle">Ship it</span></a></li></ol>
 </nav>
@@ -356,11 +367,11 @@ main { padding-bottom: 40px; }
 <div class="why">
 <p class="label">Why it is built this way</p>
 <h3>Workspaces and the pane grid</h3>
-<p>A workspace is a named group of project folders, not a project format — nothing is written into your repo to open one. Panes are what actually cost: one <code>node-pty</code> process and one <code>xterm</code> instance each, inside a single renderer, so "spawning a pane adds a process, not a browser" and a six-pane workspace has the same number of browser processes as a one-pane workspace. Switching workspaces tears the panes down; an idle workspace costs its files on disk, not resident processes. The ＋ in a pane header opens the new pane as a tab in that group, so an agent and the helpers it needs stay stacked instead of carving up the grid.</p>
+<p>A workspace is a named group of project folders, not a project format — nothing is written into your repo to open one. Panes are what actually cost: one PTY, owned by the Rust backend, and one <code>xterm</code> instance each, inside a single webview — spawning a pane adds a process, not a browser, and a six-pane workspace has exactly as many webviews as a one-pane workspace: one. Switching workspaces tears the panes down; an idle workspace costs its files on disk, not resident processes. The ＋ in a pane header opens the new pane as a tab in that group, so an agent and the helpers it needs stay stacked instead of carving up the grid.</p>
 </div>
 <figure class="artifact">
 <figcaption id="cap-workspace"><span class="badge">sh</span> docs/perf.md — the footprint is yours to measure, not ours to claim.</figcaption>
-<pre tabindex="0" role="region" aria-labelledby="cap-workspace"><code>ps -A -o rss,comm | grep -i "tome\|electron" | awk '{s+=$1} END {print s/1024 " MB"}'</code></pre>
+<pre tabindex="0" role="region" aria-labelledby="cap-workspace"><code>ps -A -o rss,comm | grep -i "tome" | awk '{s+=$1} END {print s/1024 " MB"}'</code></pre>
 </figure>
 </section>
 <section class="step" id="airgap" aria-labelledby="h-airgap">
@@ -374,7 +385,7 @@ main { padding-bottom: 40px; }
 <p>The sandbox kills all direct egress, DNS included; the only route out is a per-pane CONNECT proxy on <code>127.0.0.1</code> that allows model-provider domains. Freeing a pane widens that proxy and never the sandbox — the seatbelt profile is fixed at spawn and no code path weakens it afterwards, so raw sockets and ssh stay dead even in a freed pane, and tools that ignore proxy env vars fail closed. Consent to a repo's list is per-user and pinned to the file's SHA-1, verified in the main process, so editing one character re-prompts everyone: "that re-prompt is a feature, not friction — the user sees the change". Honest caveat: Claude Code's <code>WebSearch/WebFetch</code> run server-side at <code>api.anthropic.com</code>, so an air-gapped claude can still search, while opencode's and pi's client-side fetches are genuinely blocked until freed.</p>
 </div>
 <figure class="artifact">
-<figcaption id="cap-airgap"><span class="badge">scheme</span> src/main/airgap.js — the whole sandbox, six lines, later rules winning.</figcaption>
+<figcaption id="cap-airgap"><span class="badge">scheme</span> src-tauri/src/airgap/seatbelt.rs — the whole macOS sandbox, six lines, later rules winning. (Linux builds the same wall from bubblewrap network namespaces, in airgap/linux.rs.)</figcaption>
 <pre tabindex="0" role="region" aria-labelledby="cap-airgap"><code>(version 1)
 (allow default)
 (deny network-outbound)
@@ -468,13 +479,10 @@ for (const seg of segments) {
 <p>The list is fixed in <code>src/shared/agent-models.js</code> because this is a security boundary and not a convenience: main builds the pty command line itself, compares the incoming value against that list, and "passes its OWN copy through, never the string it was handed". What it builds goes to <code>zsh -l -c</code>, which is why a bare <code>[a-z0-9-]</code> character guard sits behind the allowlist — "the single place in this app where untrusted-adjacent input and a literal get concatenated into something a shell will interpret". A pin this build no longer lists is dropped with a warning and the node spawns on the CLI default: "Dropped, not refused" — an older flow should still run rather than fail to spawn. Absent is the schema's spelling of "default", so the editor deletes the key instead of writing "", and every existing <code>.flow.json</code> stays valid with no version bump and no migration.</p>
 </div>
 <figure class="artifact">
-<figcaption id="cap-models"><span class="badge">js</span> What a pinned node actually spawns — ungapped, then air-gapped.</figcaption>
-<pre tabindex="0" role="region" aria-labelledby="cap-models"><code>pty.spawn('/bin/zsh', ['-l', '-c', 'claude --model haiku'])
+<figcaption id="cap-models"><span class="badge">sh</span> What a pinned node actually spawns — ungapped, then air-gapped. The command line is built in src-tauri/src/agent_spawn.rs, from main's own copy of the model name, never the string it was handed.</figcaption>
+<pre tabindex="0" role="region" aria-labelledby="cap-models"><code>/bin/zsh -l -c 'claude --model haiku'
 
-pty.spawn('/usr/bin/sandbox-exec', [
-  '-p', seatbeltProfile(userData),
-  '/bin/zsh', '-l', '-c', 'claude --model haiku',
-])</code></pre>
+/usr/bin/sandbox-exec -p "$(seatbelt_profile)" /bin/zsh -l -c 'claude --model haiku'</code></pre>
 </figure>
 </section>
 <section class="step" id="run" aria-labelledby="h-run">
@@ -485,10 +493,10 @@ pty.spawn('/usr/bin/sandbox-exec', [
 <div class="why">
 <p class="label">Why it is built this way</p>
 <h3>Flow Run — the one thing a flow submits</h3>
-<p>This is the one place in Tome where something is submitted for you, and it is deliberately the narrowest shape that still runs a pipeline: a flow submits <em>only</em> the composed brief, <em>only</em> on an explicit Run click, <em>only</em> headless — <code>claude -p</code>, a process that answers and exits, leaving no interactive session for anything to be typed into — and inside the same air gap a freshly spawned agent pane would get, with every transition in the event log, because "an agent nobody is watching has to be MORE auditable than one in a visible pane, not less". That last clause is deliberately not "always air-gapped": a background node reads the same ＋ menu default a new pane does, so turning "spawn agents air-gapped" off puts the run on the open internet exactly as it would a pane. The difference is that a pane says so — it wears the strip — and a background node has nothing to wear it on, which is why the run's gap state rides on its row in the Flow runs page as ⛨ or ⛉ open internet, and why those proxies are the one thing the status bar's pane counter deliberately ignores. The brief rides as a single <code>argv</code> element to <code>child_process.spawn</code>, never through a shell, which is exactly why it needs no character guard while a pinned model still does: the model goes into a command line <code>zsh -l -c</code> will parse, the brief does not. Sequencing is real here in a way the pane mode never was — a node starts only once every upstream exited 0, two at a time across the whole run — and a node whose upstream failed is skipped rather than started on a handoff file that was never written. What Run in terminals kept is the older promise, unchanged: the prompt is flattened to one line and then control-stripped, in that order, because it embeds hand-editable <code>flow.json</code> fields verbatim and "a bare embedded LF submits a shell line on its own" — flattening first because the strip is blunt and "stripping alone would glue words together at every line join". Handoff stays one markdown file per output rather than any new IPC, so the same <code>n1-plan.md</code> lands whichever way you ran it.</p>
+<p>This is the one place in Tome where something is submitted for you, and it is deliberately the narrowest shape that still runs a pipeline: a flow submits <em>only</em> the composed brief, <em>only</em> on an explicit Run click, <em>only</em> headless — <code>claude -p</code>, a process that answers and exits, leaving no interactive session for anything to be typed into — and inside the same air gap a freshly spawned agent pane would get, with every transition in the event log, because "an agent nobody is watching has to be MORE auditable than one in a visible pane, not less". That last clause is deliberately not "always air-gapped": a background node reads the same ＋ menu default a new pane does, so turning "spawn agents air-gapped" off puts the run on the open internet exactly as it would a pane. The difference is that a pane says so — it wears the strip — and a background node has nothing to wear it on, which is why the run's gap state rides on its row in the Flow runs page as ⛨ or ⛉ open internet, and why those proxies are the one thing the status bar's pane counter deliberately ignores. The brief rides as a single <code>argv</code> element to the process spawn, never through a shell, which is exactly why it needs no character guard while a pinned model still does: the model goes into a command line <code>zsh -l -c</code> will parse, the brief does not. Sequencing is real here in a way the pane mode never was — a node starts only once every upstream exited 0, two at a time across the whole run — and a node whose upstream failed is skipped rather than started on a handoff file that was never written. What Run in terminals kept is the older promise, unchanged: the prompt is flattened to one line and then control-stripped, in that order, because it embeds hand-editable <code>flow.json</code> fields verbatim and "a bare embedded LF submits a shell line on its own" — flattening first because the strip is blunt and "stripping alone would glue words together at every line join". Handoff stays one markdown file per output rather than any new IPC, so the same <code>n1-plan.md</code> lands whichever way you ran it.</p>
 </div>
 <figure class="artifact">
-<figcaption id="cap-run"><span class="badge">text</span> src/renderer/flow-model.js — the brief Run composes for the implementer. Byte for byte the same text either way: <code>argv[2]</code> of a headless run, or flattened to one unsubmitted line at a terminal's prompt.</figcaption>
+<figcaption id="cap-run"><span class="badge">text</span> src-tauri/src/flow/model.rs — the brief Run composes for the implementer. Byte for byte the same text either way: one argv element of a headless run, or flattened to one unsubmitted line at a terminal's prompt.</figcaption>
 <pre tabindex="0" role="region" aria-labelledby="cap-run"><code>You are "implementer" in a Tome flow "review-pipeline".
 
 Instructions: Read the plan from the handoff file. Implement it slice by slice, running the test suite after each slice and keeping the build green.
@@ -515,7 +523,7 @@ Hand off "code" by writing it to .tome/flows/review-pipeline/n2-code.md, then te
 <p>Scrollback is attacker-influenceable — any program can print text that looks like an instruction — so the loop is treated as a classic confused deputy: with auto-run off, control characters that would submit or signal are stripped from typed text, so <code>text: "ls\r"</code> cannot run a command you never approved. The loop is bounded to eight tool turns and a cumulative token budget, and the scrollback it reads is capped at 200,000 characters per pty, so a chatty agent can't grow memory without bound. Its file-opening tool is confined to the open workspace folders and brain vaults, and refuses anything outside them. The chat API key never enters the renderer: the client lives in main and the renderer receives streamed deltas over IPC.</p>
 </div>
 <figure class="artifact">
-<figcaption id="cap-conductor"><span class="badge">text</span> src/main/conductor.js — the tool description the model itself is given.</figcaption>
+<figcaption id="cap-conductor"><span class="badge">text</span> src-tauri/src/conductor/tools.rs — the tool description the model itself is given.</figcaption>
 <pre tabindex="0" role="region" aria-labelledby="cap-conductor"><code>type_in_terminal — "Type text into a terminal or agent pane. Set press_enter to also
 submit it — that only takes effect when the user has enabled "assistant may run
 commands"; otherwise the text is left in the prompt for the user to review and
@@ -564,12 +572,12 @@ submit."</code></pre>
         └── n3-verdict.md             # reviewer → verify</code></pre>
 </figure>
 </section>
-<div class="stepnav"><a class="navbtn" data-nav="prev" href="#workspace"><span class="k">&#8592;</span><span class="l">workspace</span></a><span class="count"><b data-count>01</b> / 10</span><a class="navbtn" data-nav="next" href="#airgap"><span class="l">airgap</span><span class="k">&#8594;</span></a></div>
 </main>
 <footer class="outro"><div class="wrap">
 <h2>Everything here is a file you can read</h2>
-<p>The pipeline is a <code>.flow.json</code>, the policy is a <code>.tome/airgap.json</code>, the handoffs are markdown, and the sandbox is six lines of seatbelt profile. Nothing in that run depended on a modified agent CLI or a service we host. Tome is macOS first — the allowlist proxy is platform-neutral and genuinely ports, but the seatbelt sandbox is macOS-only today, and Linux would need <code>bwrap</code> or namespaces, which is design-compatible but unbuilt. Packaged builds are unsigned for now, so a fresh copy into <code>/Applications</code> needs <code>xattr -dr com.apple.quarantine</code> once.</p>
-<a class="cta" href="https://github.com/zwaneldmz/tome">Read the source on GitHub</a>
+<p>The pipeline is a <code>.flow.json</code>, the policy is a <code>.tome/airgap.json</code>, the handoffs are markdown, and the sandbox is six lines of seatbelt profile. Nothing in that run depended on a modified agent CLI or a service we host. Tome runs on macOS and Linux — the wall is seatbelt (<code>sandbox-exec</code>) on macOS and bubblewrap network namespaces on Linux; the allowlist proxy between them is platform-neutral. Packaged builds are unsigned for now, so a fresh copy into <code>/Applications</code> needs <code>xattr -dr com.apple.quarantine</code> once.</p>
+<a class="cta" href="https://github.com/zwaneldmz/tome/releases">Download for macOS or Linux</a>
+<a class="cta cta-2" href="https://github.com/zwaneldmz/tome">Read the source</a>
 </div></footer>
 <script>
 (function () {
@@ -578,27 +586,17 @@ submit."</code></pre>
   var ids = steps.map(function (s) { return s.id; });
   var navLinks = Array.prototype.slice.call(document.querySelectorAll('.tour-nav [data-goto]'));
   var strip = document.querySelector('.graph-strip');
-  var prev = document.querySelector('[data-nav="prev"]');
-  var next = document.querySelector('[data-nav="next"]');
-  var count = document.querySelector('[data-count]');
+  var bar = document.querySelector('.progress');
   var reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
   var current = -1;
 
+  // Every step is on the page; the graph is a map of the scroll, not a gate in
+  // front of it. The scrollbar is observed, never hijacked.
+
   function ease() { return reduce.matches ? 'auto' : 'smooth'; }
 
-  function setBtn(btn, i) {
-    var ok = i >= 0 && i < ids.length;
-    btn.classList.toggle('is-off', !ok);
-    btn.setAttribute('aria-hidden', ok ? 'false' : 'true');
-    btn.tabIndex = ok ? 0 : -1;
-    if (!ok) return;
-    btn.setAttribute('href', '#' + ids[i]);
-    btn.setAttribute('data-goto', ids[i]);
-    btn.querySelector('.l').textContent = ids[i];
-  }
-
-  // Pan the graph so the running node is visible — the strip is a viewport, the
-  // same as the app's flow canvas.
+  // Pan the graph so the running node is visible — the strip is a viewport,
+  // the same as the app's flow canvas.
   function revealNode(id) {
     if (!strip || !strip.clientWidth) return;
     var node = strip.querySelector('[data-goto="' + id + '"]');
@@ -608,63 +606,68 @@ submit."</code></pre>
     else strip.scrollLeft = left;
   }
 
-  function show(id) {
-    var i = ids.indexOf(id);
-    if (i < 0 || i === current) return false;
-    current = i;
-    steps.forEach(function (s, n) { s.classList.toggle('is-on', n === i); });
+  // The nav reads like the app's Flow runs page: the step on screen is the
+  // running node, every step scrolled past has exited 0 and wears the app's
+  // done-green tick, everything below is still queued.
+  function paint(i) {
     navLinks.forEach(function (a) {
-      var on = a.getAttribute('data-goto') === id;
+      var n = ids.indexOf(a.getAttribute('data-goto'));
+      var on = n === i, done = n < i;
       a.classList.toggle('is-on', on);
+      a.classList.toggle('is-done', done);
       if (on) a.setAttribute('aria-current', 'step');
       else a.removeAttribute('aria-current');
+      var num = a.querySelector('.gnum') || a.querySelector('.rbadge');
+      if (num) {
+        if (!num.dataset.n) num.dataset.n = num.textContent;
+        num.textContent = done ? '\u2713' : num.dataset.n;
+      }
     });
-    setBtn(prev, i - 1);
-    setBtn(next, i + 1);
-    count.textContent = ('0' + (i + 1)).slice(-2);
-    revealNode(id);
-    return true;
   }
 
-  // Activating a step swaps the whole of <main>, so focus has to follow it or
-  // the change is imperceptible without sight: the heading is what gets
-  // announced, and it puts the next Tab inside the step the reader just asked
-  // for instead of back at the masthead. It also rescues focus from the
-  // prev/next button, which hides ITSELF at either end of the tour — setBtn's
-  // visibility:hidden on the very element holding focus drops Chromium back to
-  // <body>. preventScroll because the navigation below already owns the
-  // scrolling. This is what finally lets .step h2:focus-visible fire.
-  function focusStep(id) {
-    var i = ids.indexOf(id);
-    if (i < 0) return;
-    var h = steps[i].querySelector('h2');
+  var ticking = false;
+  function onScroll() {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(function () {
+      ticking = false;
+      var doc = document.documentElement;
+      var max = doc.scrollHeight - window.innerHeight;
+      if (bar) bar.style.width = (max > 0 ? (window.scrollY / max) * 100 : 0) + '%';
+      // The running step is the last one whose top has crossed a band a third
+      // of the way down the viewport; above the first step, nothing runs yet.
+      var line = window.innerHeight * 0.35, i = -1;
+      for (var n = 0; n < steps.length; n++) {
+        if (steps[n].getBoundingClientRect().top <= line) i = n;
+        else break;
+      }
+      if (i === current) return;
+      current = i;
+      paint(i);
+      if (i >= 0) {
+        revealNode(ids[i]);
+        if (history.replaceState) history.replaceState(null, '', i === 0 && !location.hash ? location.pathname : '#' + ids[i]);
+      }
+    });
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', onScroll, { passive: true });
+  onScroll();
+
+  // Focus follows an explicit jump (a click on a node, an arrow key, a hash),
+  // so the announcement and the next Tab land inside the step the reader asked
+  // for. Plain scrolling never steals focus.
+  function focusStep(i) {
+    var h = steps[i] && steps[i].querySelector('h2');
     if (h) h.focus({ preventScroll: true });
-  }
-
-  // Navigating by hash keeps every step linkable and keeps the back button
-  // honest; the browser does the scrolling, so scroll-behavior stays in CSS.
-  // show() is called for its side effects only and never gates the navigation:
-  // it returns false for the step already on screen, and gating on that made
-  // the very first node a curious reader clicks — 01, while they are still
-  // parked at the hero — do nothing at all, because the click handler has
-  // already cancelled the native anchor jump.
-  function go(id) {
-    if (ids.indexOf(id) < 0) return;
-    show(id);
-    if (location.hash.slice(1) === id) {
-      document.getElementById(id).scrollIntoView({ behavior: ease(), block: 'start' });
-    } else {
-      location.hash = id;
-    }
-    focusStep(id);
   }
 
   document.addEventListener('click', function (e) {
     if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     var a = e.target && e.target.closest ? e.target.closest('[data-goto]') : null;
-    if (!a || a.classList.contains('is-off')) return;
-    e.preventDefault();
-    go(a.getAttribute('data-goto'));
+    if (!a) return;
+    var i = ids.indexOf(a.getAttribute('data-goto'));
+    if (i >= 0) focusStep(i);
   });
 
   document.addEventListener('keydown', function (e) {
@@ -672,28 +675,50 @@ submit."</code></pre>
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     var t = e.target;
     // Arrow keys belong to whatever the user is scrolling or typing in.
-    if (t && t.closest && t.closest('input, textarea, select, [contenteditable], pre, .graph-strip')) return;
-    var i = current + (e.key === 'ArrowRight' ? 1 : -1);
-    if (i < 0 || i >= ids.length) return;
+    if (t && t.closest && t.closest('input, textarea, select, [contenteditable], pre, .graph-strip, video')) return;
+    var i = Math.min(ids.length - 1, Math.max(0, current + (e.key === 'ArrowRight' ? 1 : -1)));
+    if (i === current) return;
     e.preventDefault();
-    go(ids[i]);
+    steps[i].scrollIntoView({ behavior: ease(), block: 'start' });
+    focusStep(i);
   });
 
-  // An empty or unrecognised fragment means "back to the start", exactly as a
-  // cold load with one does (see start, below). Silently no-oping instead is
-  // what made the back button dishonest: Back out of #run left step 07 on
-  // screen under a URL carrying no fragment at all.
   window.addEventListener('hashchange', function () {
-    var h = location.hash.slice(1);
-    if (ids.indexOf(h) < 0) h = ids[0];
-    if (show(h)) focusStep(h);
+    var i = ids.indexOf(location.hash.slice(1));
+    if (i >= 0) focusStep(i);
   });
 
-  var start = location.hash.slice(1);
-  if (ids.indexOf(start) < 0) start = ids[0];
-  show(start);
-  if (location.hash.slice(1) === start) {
-    document.getElementById(start).scrollIntoView({ behavior: 'auto', block: 'start' });
+  // Scroll-reveal and the video, both observed. Without IntersectionObserver
+  // everything simply shows, and the video keeps its native controls.
+  if (!('IntersectionObserver' in window)) {
+    document.documentElement.classList.add('no-io');
+    return;
+  }
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (!en.isIntersecting) return;
+      en.target.classList.add('in-view');
+      io.unobserve(en.target);
+    });
+  }, { rootMargin: '0px 0px -8% 0px' });
+  steps.forEach(function (s) {
+    Array.prototype.forEach.call(s.querySelectorAll('.media, .board, .artifact, .why'), function (el) {
+      io.observe(el);
+    });
+  });
+
+  // The one recording plays itself only while it is on screen and only when
+  // motion is welcome; otherwise it stays a poster with its native controls.
+  var vid = document.querySelector('.media video');
+  if (vid && !reduce.matches) {
+    vid.muted = true; vid.loop = true; vid.removeAttribute('controls');
+    var vio = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (en.isIntersecting) { var p = vid.play(); if (p && p.catch) p.catch(function () { vid.setAttribute('controls', ''); }); }
+        else vid.pause();
+      });
+    }, { threshold: 0.35 });
+    vio.observe(vid);
   }
 })();
 </script>
