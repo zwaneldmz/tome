@@ -21,13 +21,13 @@ can't quietly phone home.
 
 ## Quick start
 
-You need **Node 22+** and a stable **Rust toolchain** (plus the Xcode Command
+You need **Bun** (1.3+) and a stable **Rust toolchain** (plus the Xcode Command
 Line Tools on macOS). On Linux, also install **bubblewrap** — it's what the
 sandbox is built on.
 
 ```bash
-npm install     # installs the renderer deps
-npm run dev     # launch the app (tauri dev)
+bun install     # installs the renderer deps
+bun run dev     # launch the app (tauri dev)
 ```
 
 Prebuilt bundles (macOS universal, Linux `.deb`/`.rpm`/`.AppImage`) are on the
@@ -115,7 +115,7 @@ command to fetch the model file.
 ## Building a release
 
 ```bash
-npm run package     # tauri build → src-tauri/target/release/bundle/  (unsigned)
+bun run package  # tauri build → src-tauri/target/release/bundle/  (unsigned)
 ```
 
 Local packages are **unsigned by design**, so contributors don't need an Apple

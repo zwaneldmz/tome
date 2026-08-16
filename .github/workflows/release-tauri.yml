@@ -84,17 +84,16 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
-          cache: npm
+          bun-version: '1.3.10'
 
       # The renderer bundle only — tauri-apps/tauri-action runs
-      # beforeBuildCommand itself, which is `npm run build:renderer &&
+      # beforeBuildCommand itself, which is `bun run build:renderer &&
       # bash scripts/build-sidecar.sh`; installing deps is all this step
       # needs to guarantee.
       - name: Install renderer dependencies
-        run: npm ci --ignore-scripts
+        run: bun install --frozen-lockfile
 
       - name: Import Developer ID certificate (macOS, no-op without secrets)
         if: runner.os == 'macOS' && env.HAS_APPLE_CERTIFICATE == 'true'
