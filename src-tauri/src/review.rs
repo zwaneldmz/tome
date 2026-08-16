@@ -21,16 +21,15 @@
 //! exist), and anything richer belongs in the chat pane where the user has
 //! already decided to send it.
 //!
-//! ## Provider resolution — mirrors `ipc::chat::chat_send`
+//! ## Provider resolution — shared with chat
 //!
-//! [`generate_report`] reproduces `chat_send`'s resolution path verbatim
-//! (login-shell secrets + `std::env::vars()` + the `chat-provider`/
-//! `chat-model` store keys → `providers::resolve_chat_provider`) and its
-//! betas/fallbacks attachment. `SERVER_SIDE_FALLBACK_BETA` is private to
-//! `ipc/chat.rs`, so its literal is inlined here (the spec calls this out).
-//! The only structural difference from chat is the one-shot shape: `tools:
-//! &[]` and an `on_text` closure that just accumulates deltas into a
-//! `String`, then return that string rather than streaming it.
+//! [`generate_report`] delegates provider resolution to
+//! `ipc::chat::resolve_chat` (the same path `chat_send` and `mentor_judge`
+//! use), so built-ins, the custom provider, DeepSeek, Requesty, and the env
+//! override all resolve identically for a report. The only structural
+//! difference from chat is the one-shot shape: `tools: &[]` and an `on_text`
+//! closure that accumulates deltas into a `String`, then returns that string
+//! rather than streaming it.
 //!
 //! ## Testing boundary
 //!
@@ -156,49 +155,10 @@ pub async fn build_summary(app: &AppHandle) -> Value {
 pub async fn generate_report(app: &AppHandle) -> Result<String, String> {
     let summary = build_summary(app).await;
 
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    // Same provider resolution + betas/fallbacks as chat_send, shared via
+    // ipc::chat::resolve_chat (also picks up the custom provider and DeepSeek).
     let state = app.state::<AppState>();
-    let locked = *state.locked.read().expect("AppState.locked lock poisoned");
-    let login = crate::login_env::login_env().await;
-    let env: HashMap<String, String> = std::env::vars().collect();
-    let (stored_provider, stored_model) = {
-        let dir = dir.clone();
-        tokio::task::spawn_blocking(move || {
-            (
-                crate::store::get(&dir, "chat-provider", locked),
-                crate::store::get(&dir, "chat-model", locked),
-            )
-        })
-        .await
-        .map_err(|e| e.to_string())?
-    };
-
-    let provider = match crate::chat::providers::resolve_chat_provider(
-        &env,
-        &login.secrets,
-        stored_provider.as_str(),
-        stored_model.as_str(),
-    ) {
-        crate::chat::providers::ProviderResolution::KeyMissing { entry, .. } => {
-            return Err(format!(
-                "{} needs {} — export it in your shell and restart.",
-                entry.label, entry.key_env
-            ));
-        }
-        crate::chat::providers::ProviderResolution::Ready(p) => p,
-    };
-
-    // Same betas/fallbacks attachment as chat_send; the beta flag's literal
-    // is inlined here because SERVER_SIDE_FALLBACK_BETA is private to
-    // ipc/chat.rs.
-    let (betas, fallbacks): (Option<Vec<String>>, Option<String>) = if provider.beta {
-        (
-            Some(vec!["server-side-fallback-2026-07-01".to_string()]),
-            Some("default".to_string()),
-        )
-    } else {
-        (None, None)
-    };
+    let (provider, betas, fallbacks) = crate::ipc::chat::resolve_chat(app, &state).await?;
 
     let system = "You are Tome's usage reviewer. Write a concise Markdown report with three sections: (1) Skill improvements — which skills to adopt or sharpen; (2) Usage tips — underused Tome features to try; (3) Novel ideas — new ways to combine the user's observed workflow. Ground every suggestion in the provided usage summary; be specific and practical, not generic.";
 

@@ -43,6 +43,8 @@
 
 use std::collections::HashMap;
 
+use serde_json::Value;
+
 /// Which wire dialect a provider speaks — `'openai' | 'anthropic'` in the
 /// JS original's `wire` string field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,9 +99,64 @@ pub const CHAT_PROVIDERS: &[ProviderEntry] = &[
         model: "claude-opus-5",
         key_env: "ANTHROPIC_API_KEY",
     },
+    ProviderEntry {
+        id: "deepseek",
+        label: "DeepSeek (V4 Pro)",
+        wire: Wire::OpenAi,
+        base_url: Some("https://api.deepseek.com/v1"),
+        model: "deepseek-v4-pro",
+        key_env: "DEEPSEEK_API_KEY",
+    },
+    ProviderEntry {
+        id: "deepseek-flash",
+        label: "DeepSeek (V4 Flash)",
+        wire: Wire::OpenAi,
+        base_url: Some("https://api.deepseek.com/v1"),
+        model: "deepseek-v4-flash",
+        key_env: "DEEPSEEK_API_KEY",
+    },
 ];
 
 pub const DEFAULT_CHAT_PROVIDER: &str = "kimi";
+
+/// The stored-provider id for the user's own "any provider" entry — resolved
+/// from the `custom-provider` store key rather than the static
+/// [`CHAT_PROVIDERS`] table.
+pub const CUSTOM_ID: &str = "custom";
+
+/// A user-configured provider ("use any provider"): a label, an
+/// OpenAI- or Anthropic-compatible base URL, a model id, and the API key.
+/// Unlike the built-ins, the key lives in the 0600 JSON store (not a login-
+/// shell env var) so it can be pasted in Preferences.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CustomProvider {
+    pub label: String,
+    pub wire: Wire,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+}
+
+/// Parses the stored `custom-provider` value (a JSON object) into a
+/// [`CustomProvider`]. `None` unless `label`, `baseUrl`, `model`, and `key`
+/// are all non-empty strings; `wire` is `"openai"` unless explicitly
+/// `"anthropic"`. Lenient on unknown fields so an older entry round-trips
+/// through a newer parser.
+pub fn parse_custom_provider(value: &Value) -> Option<CustomProvider> {
+    let obj = value.as_object()?;
+    let label = obj.get("label")?.as_str()?.trim().to_string();
+    let base_url = obj.get("baseUrl")?.as_str()?.trim().to_string();
+    let model = obj.get("model")?.as_str()?.trim().to_string();
+    let api_key = obj.get("key")?.as_str()?.trim().to_string();
+    if label.is_empty() || base_url.is_empty() || model.is_empty() || api_key.is_empty() {
+        return None;
+    }
+    let wire = match obj.get("wire").and_then(Value::as_str) {
+        Some("anthropic") => Wire::Anthropic,
+        _ => Wire::OpenAi,
+    };
+    Some(CustomProvider { label, wire, base_url, api_key, model })
+}
 
 /// Requesty routes Claude via vertex/bedrock; bare `anthropic/*` model ids
 /// 403 unless the key's Model Library approves them — verbatim from the JS
@@ -122,10 +179,11 @@ fn claude_entry() -> &'static ProviderEntry {
 /// the `chat:providers` handler; this port gives it one name instead of
 /// two copies).
 pub fn active_provider_id(stored: Option<&str>) -> &'static str {
-    stored
-        .and_then(provider_entry)
-        .map(|e| e.id)
-        .unwrap_or(DEFAULT_CHAT_PROVIDER)
+    match stored {
+        Some(CUSTOM_ID) => CUSTOM_ID,
+        Some(id) => provider_entry(id).map(|e| e.id).unwrap_or(DEFAULT_CHAT_PROVIDER),
+        None => DEFAULT_CHAT_PROVIDER,
+    }
 }
 
 /// `!!(secrets[keyEnv] || process.env[keyEnv])` — the `chat:providers`
@@ -175,6 +233,36 @@ pub enum ProviderResolution {
     },
 }
 
+/// Builds the resolved provider for the custom-provider path — never `beta`
+/// (routers 400 on Anthropic-only beta args, same as the env/Requesty
+/// branches).
+pub fn resolve_custom(c: &CustomProvider) -> ResolvedProvider {
+    ResolvedProvider {
+        id: CUSTOM_ID.to_string(),
+        label: c.label.clone(),
+        wire: c.wire,
+        base_url: Some(c.base_url.clone()),
+        api_key: Some(c.api_key.clone()),
+        model: c.model.clone(),
+        beta: false,
+    }
+}
+
+/// The `KeyMissing` placeholder for "custom" selected but not configured.
+/// `key_env` is empty — callers special-case this id for a friendlier
+/// message rather than formatting an empty env-var name.
+fn custom_missing_entry() -> &'static ProviderEntry {
+    static E: ProviderEntry = ProviderEntry {
+        id: "custom",
+        label: "Custom provider",
+        wire: Wire::OpenAi,
+        base_url: None,
+        model: "",
+        key_env: "",
+    };
+    &E
+}
+
 /// `!!s` in JS — `Some` only for a genuinely non-empty string. JS's `||`
 /// chains (`secrets[k] || process.env[k]`, `envBase || envModel`, …) treat
 /// `""` as falsy exactly like `null`/`undefined`; this is that check,
@@ -191,10 +279,12 @@ fn truthy_lookup<'a>(map: &'a HashMap<String, String>, key: &str) -> Option<&'a 
 /// Direct port of `resolveChatProvider` (`src/main/lib/chat-client.js`).
 /// See the module doc comment for the one deliberate behavioral deviation
 /// (env-override + anthropic-wire's `api_key`) and for why this is a pure
-/// function of four parameters rather than reading `process.env`/an async
-/// `readStore` callback directly.
+/// function of its parameters rather than reading `process.env`/an async
+/// `readStore` callback directly. `custom` is the parsed `custom-provider`
+/// store value (threaded in by `ipc::chat`); `None` means "not configured".
 ///
-/// Precedence, verbatim from the JS original:
+/// Precedence, verbatim from the JS original (plus the custom-provider
+/// branch in step 3):
 /// 1. `TOME_CHAT_BASE_URL`/`TOME_CHAT_MODEL` env override — anthropic wire
 ///    iff `TOME_CHAT_WIRE == "anthropic"` or the base URL's host is
 ///    `api.anthropic.com`, else openai wire.
@@ -202,15 +292,16 @@ fn truthy_lookup<'a>(map: &'a HashMap<String, String>, key: &str) -> Option<&'a 
 ///    from every other key lookup below) → the Requesty router, hardcoded
 ///    vertex model, anthropic wire, beta forced off.
 /// 3. The stored `chat-provider` preference (validated against
-///    [`CHAT_PROVIDERS`], default [`DEFAULT_CHAT_PROVIDER`]) with an
-///    optional stored `chat-model` override —
-///    [`ProviderResolution::KeyMissing`] if that provider's key isn't in
-///    `secrets` or `env`.
+///    [`CHAT_PROVIDERS`] or [`CUSTOM_ID`], default [`DEFAULT_CHAT_PROVIDER`])
+///    with an optional stored `chat-model` override — [`ProviderResolution::
+///    KeyMissing`] if a built-in's key isn't in `secrets`/`env`, or if
+///    "custom" is selected but not configured.
 pub fn resolve_chat_provider(
     env: &HashMap<String, String>,
     secrets: &HashMap<String, String>,
     stored_provider: Option<&str>,
     stored_model: Option<&str>,
+    custom: Option<&CustomProvider>,
 ) -> ProviderResolution {
     let env_base = truthy_lookup(env, "TOME_CHAT_BASE_URL");
     let env_model = truthy_lookup(env, "TOME_CHAT_MODEL");
@@ -263,8 +354,14 @@ pub fn resolve_chat_provider(
     }
 
     let id = active_provider_id(stored_provider);
+    if id == CUSTOM_ID {
+        let Some(c) = custom else {
+            return ProviderResolution::KeyMissing { entry: custom_missing_entry(), id: id.to_string() };
+        };
+        return ProviderResolution::Ready(resolve_custom(c));
+    }
     let entry =
-        provider_entry(id).expect("active_provider_id always returns a valid CHAT_PROVIDERS id");
+        provider_entry(id).expect("active_provider_id only returns a static CHAT_PROVIDERS id here");
     let Some(api_key) =
         truthy_lookup(secrets, entry.key_env).or_else(|| truthy_lookup(env, entry.key_env))
     else {
@@ -314,7 +411,7 @@ mod tests {
             ("REQUESTY_API_KEY", "rq"),
         ]);
         let secrets = map(&[("ANTHROPIC_API_KEY", "sk")]);
-        let res = resolve_chat_provider(&env, &secrets, Some("claude"), None);
+        let res = resolve_chat_provider(&env, &secrets, Some("claude"), None, None);
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready, got {res:?}")
         };
@@ -327,7 +424,7 @@ mod tests {
     #[test]
     fn env_override_on_api_anthropic_com_hostname_is_anthropic_wire() {
         let env = map(&[("TOME_CHAT_BASE_URL", "https://api.anthropic.com")]);
-        let res = resolve_chat_provider(&env, &HashMap::new(), None, None);
+        let res = resolve_chat_provider(&env, &HashMap::new(), None, None, None);
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready, got {res:?}")
         };
@@ -340,7 +437,7 @@ mod tests {
             ("TOME_CHAT_BASE_URL", "http://localhost:9999"),
             ("TOME_CHAT_WIRE", "anthropic"),
         ]);
-        let res = resolve_chat_provider(&env, &HashMap::new(), None, None);
+        let res = resolve_chat_provider(&env, &HashMap::new(), None, None, None);
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready, got {res:?}")
         };
@@ -357,14 +454,14 @@ mod tests {
             ("TOME_CHAT_BASE_URL", "https://api.anthropic.com"),
             ("ANTHROPIC_API_KEY", "env-key"),
         ]);
-        let res = resolve_chat_provider(&env_only, &HashMap::new(), None, None);
+        let res = resolve_chat_provider(&env_only, &HashMap::new(), None, None, None);
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready, got {res:?}")
         };
         assert_eq!(p.api_key.as_deref(), Some("env-key"));
 
         let secrets = map(&[("ANTHROPIC_API_KEY", "secret-key")]);
-        let res2 = resolve_chat_provider(&env_only, &secrets, None, None);
+        let res2 = resolve_chat_provider(&env_only, &secrets, None, None, None);
         let ProviderResolution::Ready(p2) = res2 else {
             panic!("expected Ready, got {res2:?}")
         };
@@ -374,7 +471,7 @@ mod tests {
     #[test]
     fn requesty_key_beats_the_store_and_keeps_the_vertex_model_verbatim() {
         let env = map(&[("REQUESTY_API_KEY", "rq-key")]);
-        let res = resolve_chat_provider(&env, &HashMap::new(), Some("glm"), None);
+        let res = resolve_chat_provider(&env, &HashMap::new(), Some("glm"), None, None);
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready, got {res:?}")
         };
@@ -391,7 +488,7 @@ mod tests {
         // checks env BEFORE secrets — verbatim JS precedence.
         let env = map(&[("REQUESTY_API_KEY", "env-rq")]);
         let secrets = map(&[("REQUESTY_API_KEY", "secret-rq")]);
-        let res = resolve_chat_provider(&env, &secrets, None, None);
+        let res = resolve_chat_provider(&env, &secrets, None, None, None);
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready, got {res:?}")
         };
@@ -401,7 +498,7 @@ mod tests {
     #[test]
     fn store_provider_and_login_shell_key_resolves_that_provider() {
         let secrets = map(&[("ZHIPU_API_KEY", "z-key")]);
-        let res = resolve_chat_provider(&HashMap::new(), &secrets, Some("glm"), Some("glm-custom"));
+        let res = resolve_chat_provider(&HashMap::new(), &secrets, Some("glm"), Some("glm-custom"), None);
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready, got {res:?}")
         };
@@ -418,7 +515,7 @@ mod tests {
     #[test]
     fn defaults_to_kimi_with_its_default_model_when_the_store_is_empty() {
         let secrets = map(&[("MOONSHOT_API_KEY", "m-key")]);
-        let res = resolve_chat_provider(&HashMap::new(), &secrets, None, None);
+        let res = resolve_chat_provider(&HashMap::new(), &secrets, None, None, None);
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready, got {res:?}")
         };
@@ -433,7 +530,7 @@ mod tests {
     #[test]
     fn an_invalid_stored_provider_falls_back_to_the_default() {
         let secrets = map(&[("MOONSHOT_API_KEY", "m-key")]);
-        let res = resolve_chat_provider(&HashMap::new(), &secrets, Some("bogus"), None);
+        let res = resolve_chat_provider(&HashMap::new(), &secrets, Some("bogus"), None, None);
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready, got {res:?}")
         };
@@ -442,7 +539,7 @@ mod tests {
 
     #[test]
     fn missing_key_resolves_to_key_missing_naming_the_provider_entry() {
-        let res = resolve_chat_provider(&HashMap::new(), &HashMap::new(), None, None);
+        let res = resolve_chat_provider(&HashMap::new(), &HashMap::new(), None, None, None);
         let ProviderResolution::KeyMissing { entry, id } = res else {
             panic!("expected KeyMissing, got {res:?}")
         };
@@ -453,7 +550,7 @@ mod tests {
     #[test]
     fn claude_resolves_anthropic_wire_with_beta_on() {
         let secrets = map(&[("ANTHROPIC_API_KEY", "a-key")]);
-        let res = resolve_chat_provider(&HashMap::new(), &secrets, Some("claude"), None);
+        let res = resolve_chat_provider(&HashMap::new(), &secrets, Some("claude"), None, None);
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready, got {res:?}")
         };
@@ -465,7 +562,7 @@ mod tests {
     #[test]
     fn a_blank_stored_model_override_falls_back_to_the_entrys_default() {
         let secrets = map(&[("MOONSHOT_API_KEY", "m-key")]);
-        let res = resolve_chat_provider(&HashMap::new(), &secrets, None, Some("   "));
+        let res = resolve_chat_provider(&HashMap::new(), &secrets, None, Some("   "), None);
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready, got {res:?}")
         };
@@ -475,7 +572,7 @@ mod tests {
     #[test]
     fn a_stored_model_override_is_trimmed() {
         let secrets = map(&[("MOONSHOT_API_KEY", "m-key")]);
-        let res = resolve_chat_provider(&HashMap::new(), &secrets, None, Some("  custom-id  "));
+        let res = resolve_chat_provider(&HashMap::new(), &secrets, None, Some("  custom-id  "), None);
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready, got {res:?}")
         };
@@ -514,9 +611,9 @@ mod tests {
     // ================= CHAT_PROVIDERS table shape =================
 
     #[test]
-    fn chat_providers_has_exactly_kimi_glm_claude_in_that_order() {
+    fn chat_providers_has_exactly_the_five_builtins_in_that_order() {
         let ids: Vec<&str> = CHAT_PROVIDERS.iter().map(|p| p.id).collect();
-        assert_eq!(ids, vec!["kimi", "glm", "claude"]);
+        assert_eq!(ids, vec!["kimi", "glm", "claude", "deepseek", "deepseek-flash"]);
     }
 
     #[test]
@@ -524,5 +621,73 @@ mod tests {
         for p in CHAT_PROVIDERS {
             assert_eq!(p.wire == Wire::Anthropic, p.id == "claude");
         }
+    }
+
+    // ---- custom provider ("any provider") ----
+
+    #[test]
+    fn parse_custom_provider_requires_all_fields() {
+        let good = serde_json::json!({
+            "label": "My endpoint",
+            "baseUrl": "https://api.example.com/v1",
+            "model": "some-model",
+            "key": "sk-secret",
+            "wire": "openai",
+        });
+        let parsed = parse_custom_provider(&good).unwrap();
+        assert_eq!(parsed.label, "My endpoint");
+        assert_eq!(parsed.wire, Wire::OpenAi);
+        assert_eq!(parsed.base_url, "https://api.example.com/v1");
+
+        // missing key → None
+        let no_key = serde_json::json!({ "label": "x", "baseUrl": "https://e.com", "model": "m" });
+        assert!(parse_custom_provider(&no_key).is_none());
+        // non-object → None
+        assert!(parse_custom_provider(&serde_json::json!("nope")).is_none());
+    }
+
+    #[test]
+    fn parse_custom_provider_selects_anthropic_wire_explicitly_only() {
+        let a = parse_custom_provider(&serde_json::json!({
+            "label": "x", "baseUrl": "https://e.com", "model": "m", "key": "k", "wire": "anthropic"
+        }))
+        .unwrap();
+        assert_eq!(a.wire, Wire::Anthropic);
+        // anything else (missing/garbage) defaults to openai
+        let o = parse_custom_provider(&serde_json::json!({
+            "label": "x", "baseUrl": "https://e.com", "model": "m", "key": "k", "wire": "garbage"
+        }))
+        .unwrap();
+        assert_eq!(o.wire, Wire::OpenAi);
+    }
+
+    #[test]
+    fn stored_custom_resolves_the_custom_provider() {
+        let custom = CustomProvider {
+            label: "Local".to_string(),
+            wire: Wire::OpenAi,
+            base_url: "http://localhost:9999/v1".to_string(),
+            api_key: "k".to_string(),
+            model: "local-model".to_string(),
+        };
+        let res = resolve_chat_provider(&HashMap::new(), &HashMap::new(), Some("custom"), None, Some(&custom));
+        let ProviderResolution::Ready(p) = res else {
+            panic!("expected Ready")
+        };
+        assert_eq!(p.id, "custom");
+        assert_eq!(p.label, "Local");
+        assert_eq!(p.base_url.as_deref(), Some("http://localhost:9999/v1"));
+        assert_eq!(p.model, "local-model");
+        assert!(!p.beta);
+    }
+
+    #[test]
+    fn stored_custom_without_a_configured_entry_is_key_missing() {
+        let res = resolve_chat_provider(&HashMap::new(), &HashMap::new(), Some("custom"), None, None);
+        let ProviderResolution::KeyMissing { entry, id } = res else {
+            panic!("expected KeyMissing")
+        };
+        assert_eq!(entry.id, "custom");
+        assert_eq!(id, "custom");
     }
 }

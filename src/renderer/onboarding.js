@@ -294,7 +294,13 @@ export async function showOnboarding() {
           b.type = 'button'
           b.dataset.pid = p.id
           b.setAttribute('role', 'radio')
-          b.title = p.keySet ? `${p.keyEnv} found in your login shell` : `${p.keyEnv} not found — set it and restart Tome`
+          b.title = p.keyEnv
+            ? p.keySet
+              ? `${p.keyEnv} found in your login shell`
+              : `${p.keyEnv} not found — set it and restart Tome`
+            : p.keySet
+              ? 'custom provider configured in Settings'
+              : 'custom provider not configured — set it in Settings'
           b.append(
             el('span', 'ob-dot-avail ' + (p.keySet ? 'ok' : 'off'), p.keySet ? '●' : '○'),
             el('span', 'ob-agent-name', p.label || p.id),
