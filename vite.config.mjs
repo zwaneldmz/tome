@@ -22,7 +22,11 @@ export default defineConfig({
     // outDir resolves outside of root, so Vite would otherwise warn and
     // leave it un-emptied by default — this app wants a clean rebuild.
     emptyOutDir: true,
-    rollupOptions: {
+    // Vite 8's default browser target (Baseline: Chrome 111 / Safari 16.4)
+    // is newer than the WebKitGTK / WKWebView floor Tauri v2 still supports
+    // on older Linux and macOS hosts — pin to Tauri's recommended floor.
+    target: ['es2021', 'chrome105', 'safari15'],
+    rolldownOptions: {
       // popout.html is the shell document a dragged-out pane gets its own OS
       // window for — both documents are built from the same renderer tree.
       input: {

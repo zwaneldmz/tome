@@ -1,8 +1,8 @@
 // The dockview grid and the pane-opening actions (terminal, chat, brain,
 // history, file). Also the conductor bridge: keeps main's pane snapshot
 // fresh and honors assistant open requests.
-import { createDockview } from 'dockview-core'
-import 'dockview-core/dist/styles/dockview.css'
+import { createDockview } from 'dockview'
+import 'dockview/dist/styles/dockview.css'
 import { tome, toast, el } from './util.js'
 import { prefs, counters } from './state.js'
 import { activeWorkspace, paneCwd } from './workspaces.js'
