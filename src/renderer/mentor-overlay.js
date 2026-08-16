@@ -50,7 +50,10 @@ export function showMentorOverlay({ id, questions, test_code: testCode, summary 
         radio.type = 'radio'
         radio.name = `mentor-q-${i}`
         radio.value = opt
-        radio.addEventListener('change', () => (answers[key] = opt))
+        radio.addEventListener('change', () => {
+          answers[key] = opt
+          for (const l of group.children) l.classList.toggle('sel', l === label)
+        })
         label.append(radio, el('span', '', opt))
         group.appendChild(label)
       }
