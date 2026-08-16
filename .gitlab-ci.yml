@@ -1,0 +1,118 @@
+# Tome — Linux CI/CD mirror.
+#
+# GitLab.com shared runners are Linux-only (macOS runners are a paid/beta
+# feature), so this pipeline covers everything that does NOT need macOS:
+#   renderer  — bun install + dependency audit gate + eslint + vitest + vite build
+#   rust      — the real Linux compile (cargo build --all-targets) + unit tests
+#   sandbox   — the bwrap curl matrix (the actual air-gap enforcement proof)
+#   release   — tag-only Linux packaging (.deb / .rpm / .AppImage) + SHA256SUMS
+# The macOS build/test (seatbelt, Touch ID, objc2 deps) and the macOS release
+# stay on GitHub Actions (`.github/workflows/`).
+#
+# Base image rationale: `rust:1-bookworm` (Debian 12) ships
+# `libwebkit2gtk-4.1-dev` natively, which Tauri v2 requires and Ubuntu 22.04's
+# default repos do not carry.
+
+stages:
+  - renderer
+  - rust
+  - sandbox
+  - release
+
+# ---- shared cargo cache (target + registry), keyed on the lockfile ----
+.cargo-cache: &cargo-cache
+  key:
+    files:
+      - src-tauri/Cargo.lock
+  paths:
+    - src-tauri/target
+    - ~/.cargo/registry
+    - ~/.cargo/git
+
+# ---- apt prerequisites + rust for any Linux/Rust job ----
+.rust-base:
+  image: rust:1-bookworm
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends
+        bubblewrap procps curl wget file build-essential
+        libwebkit2gtk-4.1-dev libxdo-dev libssl-dev
+        libayatana-appindicator3-dev librsvg2-dev pkg-config
+    - rustc --version && cargo --version
+
+# ---- stage 1: renderer (bun) ----
+renderer:
+  image: oven/bun:1.3.10
+  stage: renderer
+  script:
+    - bun install --frozen-lockfile
+    - bun audit --json | node scripts/audit-gate.mjs high
+    - bun run lint
+    - bun run test
+    - bun run build
+  cache:
+    - key:
+        files: [bun.lock]
+      paths: [node_modules, ~/.bun]
+
+# ---- stage 2: Linux compile + unit tests ----
+rust-build:
+  extends: .rust-base
+  stage: rust
+  script:
+    - bash scripts/build-sidecar.sh
+    - cd src-tauri
+    - cargo build --workspace --all-targets --locked
+    - cargo test --workspace --locked
+  cache: *cargo-cache
+
+# ---- stage 3: the bwrap curl matrix (air-gap enforcement proof) ----
+sandbox:
+  extends: .rust-base
+  stage: sandbox
+  needs: [rust-build]
+  script:
+    - cd src-tauri
+    # The curl matrix runs the #[ignore]'d integration tests against the real
+    # bwrap + netns + tome-shim — the only place the air gap is proven by
+    # execution (see src-tauri/src/linux_sandbox_integration_tests.rs).
+    - TOME_SHIM_BIN="$CI_PROJECT_DIR/src-tauri/target/release/tome-shim" cargo test --workspace --locked -- --ignored --test-threads=1
+  cache: *cargo-cache
+
+# ---- stage 4: tag-only Linux release packaging ----
+release-linux:
+  extends: .rust-base
+  stage: release
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  before_script:
+    # rust-base's apt prerequisites, plus bun (tauri's beforeBuildCommand runs
+    # `bun run build:renderer`; `tauri build` needs the renderer bundle).
+    - apt-get update
+    - apt-get install -y --no-install-recommends
+        bubblewrap procps curl wget file build-essential
+        libwebkit2gtk-4.1-dev libxdo-dev libssl-dev
+        libayatana-appindicator3-dev librsvg2-dev pkg-config unzip
+    - curl -fsSL https://bun.sh/install | bash
+    - export BUN_INSTALL="$HOME/.bun" && export PATH="$BUN_INSTALL/bin:$PATH"
+    - bun install --frozen-lockfile
+  script:
+    - export PATH="$HOME/.bun/bin:$PATH"
+    - bun run package
+    - cd src-tauri/target/release/bundle
+    - find . -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+    - cat SHA256SUMS
+  artifacts:
+    paths:
+      - src-tauri/target/release/bundle/*.deb
+      - src-tauri/target/release/bundle/*.rpm
+      - src-tauri/target/release/bundle/*.AppImage
+      - src-tauri/target/release/bundle/SHA256SUMS
+    expire_in: 1 week
+  release:
+    tag_name: $CI_COMMIT_TAG
+    description: 'Tome $CI_COMMIT_TAG — Linux bundles (.deb / .rpm / .AppImage).'
+    assets:
+      links:
+        - name: SHA256SUMS
+          url: '$CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/file/src-tauri/target/release/bundle/SHA256SUMS'
