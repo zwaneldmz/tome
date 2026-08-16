@@ -1,11 +1,13 @@
-// Dependency-audit CI gate. Reads `npm audit --json` from stdin and fails
-// (nonzero exit) on any advisory at or above the given severity level unless
-// reviews/validation/audit-exceptions.json lists it with a reason and an
-// unexpired `expires` date. npm audit's own exit code has no concept of
-// reviewed exceptions, so this script — not npm audit — is CI's pass/fail
-// authority; see .github/workflows/build.yml for how the two are wired.
+// Dependency-audit CI gate. Reads `bun audit --json` (or `npm audit --json`)
+// from stdin and fails (nonzero exit) on any advisory at or above the given
+// severity level unless reviews/validation/audit-exceptions.json lists it
+// with a reason and an unexpired `expires` date. Neither audit tool's exit
+// code has any concept of a reviewed exception, so this script — not the
+// audit command — is CI's pass/fail authority; see .github/workflows/build.yml
+// for how the two are wired. bun audit's JSON shape differs from npm's, so
+// normalizeAudit() folds bun's into npm's before evaluateAudit() runs.
 //
-// Usage: npm audit [--omit=dev] --audit-level=<level> --json | node scripts/audit-gate.mjs <level>
+// Usage: bun audit --json | node scripts/audit-gate.mjs <level>
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -93,6 +95,36 @@ export function evaluateAudit(vulnerabilities, exceptions, threshold) {
   return { blocked, excepted, reviewed }
 }
 
+// bun audit --json emits a bare map { "<package>": [ <advisory>, ... ] } where
+// each advisory carries `severity` directly; npm audit nests it as
+// { vulnerabilities: { "<package>": { severity, via: [<advisory>...] } } }.
+// Fold bun's shape into npm's so evaluateAudit() stays the single pass/fail
+// authority for both. The package's severity is the worst advisory in its
+// array (npm reports the max the same way), and `via` carries { title, url,
+// source } so advisoryId() resolves GHSA slugs and numeric ids unchanged.
+export function bunToNpm(report) {
+  const vulnerabilities = {}
+  for (const [name, advisories] of Object.entries(report || {})) {
+    if (!Array.isArray(advisories)) continue
+    const ranks = advisories.map((a) => SEVERITY_RANK[a.severity] ?? SEVERITY_RANK.critical)
+    const maxRank = ranks.length ? Math.max(...ranks) : SEVERITY_RANK.critical
+    const severity = Object.keys(SEVERITY_RANK).find((k) => SEVERITY_RANK[k] === maxRank) || 'critical'
+    vulnerabilities[name] = {
+      name,
+      severity,
+      via: advisories.map((a) => ({ title: a.title, url: a.url, source: a.id })),
+    }
+  }
+  return { vulnerabilities }
+}
+
+// npm audit's JSON has a top-level `vulnerabilities` object; bun audit's has
+// a bare name->advisories map. Pass npm through untouched, transform bun.
+export function normalizeAudit(report) {
+  if (report && report.vulnerabilities && typeof report.vulnerabilities === 'object') return report
+  return bunToNpm(report)
+}
+
 function main() {
   const level = process.argv[2]
   if (!level || !(level in SEVERITY_RANK)) {
@@ -105,15 +137,16 @@ function main() {
   try {
     report = JSON.parse(readStdin())
   } catch (error) {
-    fail(`could not parse npm audit output as JSON: ${error.message}`)
+    fail(`could not parse audit output as JSON: ${error.message}`)
     return
   }
   if (report.error) {
-    fail(`npm audit did not complete: ${report.error.summary || report.error.code || 'unknown error'}`)
+    fail(`audit did not complete: ${report.error.summary || report.error.code || 'unknown error'}`)
     return
   }
+  report = normalizeAudit(report)
   if (!report.vulnerabilities || typeof report.vulnerabilities !== 'object') {
-    fail('npm audit output has no "vulnerabilities" object — treating as a failed audit run, not a clean one')
+    fail('audit output has no "vulnerabilities" object — treating as a failed audit run, not a clean one')
     return
   }
 

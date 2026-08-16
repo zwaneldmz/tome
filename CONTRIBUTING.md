@@ -3,14 +3,11 @@
 ## Dev setup
 
 ```bash
-npm install     # rebuilds node-pty for Electron's ABI (needs Xcode CLT)
-npm run dev     # run the app
-npm test        # vitest
-npm run build   # electron-vite build — must stay green after every change
+bun install     # installs the renderer deps
+bun run dev     # run the app
+bun run test    # vitest
+bun run build   # vite build — must stay green after every change
 ```
-
-If `npm run dev` fails with `Error: Electron uninstall`, run
-`npm run fix:electron` once.
 
 ## The golden rules
 
@@ -35,7 +32,7 @@ If `npm run dev` fails with `Error: Electron uninstall`, run
   bypass for dev screenshots and must never be reachable in a packaged build.
 - **Comments explain *why***, including the bugs a naive approach would hit.
   See `src/renderer/panes.js` for the house style.
-- `npm run build` green after every change; `npm test` before committing.
+- `bun run build` green after every change; `bun run test` before committing.
 
 ## Where the specs live
 

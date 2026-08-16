@@ -10,7 +10,7 @@
 // `if (import.meta.main)`, so importing this module for its exported pure
 // functions never touches stdin or process.exitCode.
 import { describe, it, expect } from 'vitest'
-import { SEVERITY_RANK, isLive, advisoryId, evaluateAudit } from '../scripts/audit-gate.mjs'
+import { SEVERITY_RANK, isLive, advisoryId, evaluateAudit, bunToNpm, normalizeAudit } from '../scripts/audit-gate.mjs'
 
 describe('SEVERITY_RANK', () => {
   it('ranks strictly info < low < moderate < high < critical', () => {
@@ -161,5 +161,49 @@ describe('evaluateAudit()', () => {
     const first = evaluateAudit(report, {}, SEVERITY_RANK.critical)
     const second = evaluateAudit(report, {}, SEVERITY_RANK.critical)
     expect(second).toEqual(first)
+  })
+})
+
+describe('bunToNpm()', () => {
+  it('folds bun audit JSON into the npm shape evaluateAudit() consumes', () => {
+    const bun = {
+      nanoid: [
+        { id: 1139427, url: 'https://github.com/advisories/GHSA-2v37-7h3g-55p8', title: 'nanoid: bad thing', severity: 'high' },
+        { id: 123, url: 'https://github.com/advisories/GHSA-aaaa-bbbb-cccc', title: 'nanoid: worse thing', severity: 'critical' },
+      ],
+      'some-pkg': [{ id: 999, url: 'https://github.com/advisories/GHSA-zzzz', title: 'low', severity: 'low' }],
+    }
+    const npm = bunToNpm(bun)
+    expect(npm.vulnerabilities.nanoid).toEqual({
+      name: 'nanoid',
+      severity: 'critical', // the max of high + critical, like npm reports
+      via: [
+        { title: 'nanoid: bad thing', url: 'https://github.com/advisories/GHSA-2v37-7h3g-55p8', source: 1139427 },
+        { title: 'nanoid: worse thing', url: 'https://github.com/advisories/GHSA-aaaa-bbbb-cccc', source: 123 },
+      ],
+    })
+    expect(npm.vulnerabilities['some-pkg'].severity).toBe('low')
+  })
+
+  it('ranks an unrecognized bun severity as critical — fails safe, never skipped', () => {
+    const bun = { pkg: [{ id: 1, title: 'x', url: 'https://github.com/advisories/GHSA-zz', severity: 'made-up' }] }
+    expect(bunToNpm(bun).vulnerabilities.pkg.severity).toBe('critical')
+  })
+
+  it('treats an empty report as an empty vulnerabilities object, not a failure', () => {
+    expect(bunToNpm({})).toEqual({ vulnerabilities: {} })
+  })
+})
+
+describe('normalizeAudit()', () => {
+  it('passes npm-shaped reports through untouched', () => {
+    const npm = { vulnerabilities: { pkg: { name: 'pkg', severity: 'high', via: [] } } }
+    expect(normalizeAudit(npm)).toBe(npm)
+  })
+
+  it('transforms bun-shaped reports (no top-level vulnerabilities key)', () => {
+    const bun = { pkg: [{ id: 1, url: 'https://github.com/advisories/GHSA-zz', title: 'x', severity: 'high' }] }
+    const normalized = normalizeAudit(bun)
+    expect(normalized.vulnerabilities.pkg.severity).toBe('high')
   })
 })

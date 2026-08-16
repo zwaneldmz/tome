@@ -13,25 +13,23 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      # npm audit's own exit code has no concept of a reviewed exception, so
-      # scripts/audit-gate.mjs (not npm audit) is the pass/fail authority for
-      # both steps below — see reviews/validation/audit-exceptions.json and
-      # reviews/validation/TOME-017-acceptance.md.
-      - name: Dependency audit gate — production (high+)
-        run: npm audit --omit=dev --audit-level=high --json | node scripts/audit-gate.mjs high
-      - name: Dependency audit gate — all dependencies (critical)
-        run: npm audit --audit-level=critical --json | node scripts/audit-gate.mjs critical
+          bun-version: '1.3.10'
+      - run: bun install --frozen-lockfile
+      # bun audit's own exit code has no concept of a reviewed exception, so
+      # scripts/audit-gate.mjs (not bun audit) is the pass/fail authority for
+      # the step below — see reviews/validation/audit-exceptions.json. bun
+      # audit has no --omit=dev split, so this is one high+ gate over all
+      # dependencies (prod and dev) where npm used two tiers.
+      - name: Dependency audit gate (high+)
+        run: bun audit --json | node scripts/audit-gate.mjs high
       - name: Lint (hygiene gate)
-        run: npm run lint
+        run: bun run lint
       - name: Tests (vitest floor — crypto, guards, confinement)
-        run: npm test
+        run: bun run test
       - name: Build (gates on a broken renderer import)
-        run: npm run build
+        run: bun run build
       # Renderer smoke check: the bundle built and every module import
       # resolved into it — a broken import fails at build, not at runtime.
       # Vite emits to dist-web/ (tauri.conf.json's frontendDist), not the
