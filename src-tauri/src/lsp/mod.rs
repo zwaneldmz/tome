@@ -72,13 +72,33 @@ pub struct ServerSpec {
 pub const SERVERS: &[ServerSpec] = &[
     ServerSpec {
         id: "typescript",
-        langs: &["typescript", "typescriptreact", "javascript", "javascriptreact"],
+        langs: &[
+            "typescript",
+            "typescriptreact",
+            "javascript",
+            "javascriptreact",
+        ],
         cmd: "typescript-language-server",
         args: &["--stdio"],
     },
-    ServerSpec { id: "python", langs: &["python"], cmd: "pyright-langserver", args: &["--stdio"] },
-    ServerSpec { id: "go", langs: &["go"], cmd: "gopls", args: &[] },
-    ServerSpec { id: "rust", langs: &["rust"], cmd: "rust-analyzer", args: &[] },
+    ServerSpec {
+        id: "python",
+        langs: &["python"],
+        cmd: "pyright-langserver",
+        args: &["--stdio"],
+    },
+    ServerSpec {
+        id: "go",
+        langs: &["go"],
+        cmd: "gopls",
+        args: &[],
+    },
+    ServerSpec {
+        id: "rust",
+        langs: &["rust"],
+        cmd: "rust-analyzer",
+        args: &[],
+    },
     ServerSpec {
         id: "json",
         langs: &["json"],
@@ -91,7 +111,12 @@ pub const SERVERS: &[ServerSpec] = &[
         cmd: "vscode-css-language-server",
         args: &["--stdio"],
     },
-    ServerSpec { id: "html", langs: &["html"], cmd: "vscode-html-language-server", args: &["--stdio"] },
+    ServerSpec {
+        id: "html",
+        langs: &["html"],
+        cmd: "vscode-html-language-server",
+        args: &["--stdio"],
+    },
 ];
 
 /// Ports `LANG_BY_EXT` verbatim (18 entries).
@@ -203,8 +228,7 @@ impl FrameParser {
     fn push(&mut self, bytes: &[u8]) -> Vec<Value> {
         self.buf.extend_from_slice(bytes);
         let mut out = Vec::new();
-        loop {
-            let Some(split) = find_subslice(&self.buf, b"\r\n\r\n") else { break };
+        while let Some(split) = find_subslice(&self.buf, b"\r\n\r\n") {
             let header = String::from_utf8_lossy(&self.buf[..split]).into_owned();
             let Some(len) = parse_content_length(&header) else {
                 // unparseable header, skip it — matches `this.buf =
@@ -242,8 +266,11 @@ fn parse_content_length(header: &str) -> Option<usize> {
     let lower = header.to_ascii_lowercase();
     let idx = lower.find("content-length:")?;
     let after = &header[idx + "content-length:".len()..];
-    let digits: String =
-        after.chars().skip_while(|c| c.is_whitespace()).take_while(char::is_ascii_digit).collect();
+    let digits: String = after
+        .chars()
+        .skip_while(|c| c.is_whitespace())
+        .take_while(char::is_ascii_digit)
+        .collect();
     if digits.is_empty() {
         None
     } else {
@@ -266,7 +293,10 @@ fn extract_hover_text(result: &Value) -> Option<String> {
         arr.iter()
             .map(|x| {
                 x.as_str().map(str::to_string).unwrap_or_else(|| {
-                    x.get("value").and_then(Value::as_str).unwrap_or("").to_string()
+                    x.get("value")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string()
                 })
             })
             .collect::<Vec<_>>()
@@ -274,7 +304,11 @@ fn extract_hover_text(result: &Value) -> Option<String> {
     } else if let Some(s) = contents.as_str() {
         s.to_string()
     } else {
-        contents.get("value").and_then(Value::as_str).unwrap_or("").to_string()
+        contents
+            .get("value")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
     };
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -301,7 +335,11 @@ pub struct DefinitionLocation {
 /// `first.range || first.targetSelectionRange || first.targetRange` port
 /// directly to a fallback chain.
 fn extract_definition(result: &Value) -> Option<DefinitionLocation> {
-    let first: &Value = if let Some(arr) = result.as_array() { arr.first()? } else { result };
+    let first: &Value = if let Some(arr) = result.as_array() {
+        arr.first()?
+    } else {
+        result
+    };
     if first.is_null() {
         return None;
     }
@@ -317,7 +355,11 @@ fn extract_definition(result: &Value) -> Option<DefinitionLocation> {
     let start = range.get("start")?;
     let line = start.get("line").and_then(Value::as_u64)?;
     let character = start.get("character").and_then(Value::as_u64)?;
-    Some(DefinitionLocation { path: target, line, character })
+    Some(DefinitionLocation {
+        path: target,
+        line,
+        character,
+    })
 }
 
 // ==================== document version bookkeeping ====================
@@ -402,7 +444,10 @@ fn spawn_child(spec: &ServerSpec, root: &Path) -> std::io::Result<tokio::process
 
 fn initialize_params(root: &Path) -> Value {
     let root_uri = uri_of(root);
-    let name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = root
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     json!({
         "processId": std::process::id(),
         "rootUri": root_uri,
@@ -448,11 +493,24 @@ impl Server {
     /// entire lifetime and is the sole place any exit (early or late) is
     /// noticed (mirrors the JS original's `proc.on('exit', fail)` net
     /// effect via a different, Rust-idiomatic mechanism).
-    async fn spawn_and_init(spec: &'static ServerSpec, root: PathBuf, app: AppHandle) -> Result<Arc<Server>, String> {
+    async fn spawn_and_init(
+        spec: &'static ServerSpec,
+        root: PathBuf,
+        app: AppHandle,
+    ) -> Result<Arc<Server>, String> {
         let mut child = spawn_child(spec, &root).map_err(|e| e.to_string())?;
-        let stdin = child.stdin.take().expect("spawn_child requests piped stdin");
-        let stdout = child.stdout.take().expect("spawn_child requests piped stdout");
-        let mut stderr = child.stderr.take().expect("spawn_child requests piped stderr");
+        let stdin = child
+            .stdin
+            .take()
+            .expect("spawn_child requests piped stdin");
+        let stdout = child
+            .stdout
+            .take()
+            .expect("spawn_child requests piped stdout");
+        let mut stderr = child
+            .stderr
+            .take()
+            .expect("spawn_child requests piped stderr");
 
         let server = Arc::new(Server {
             stdin: AsyncMutex::new(stdin),
@@ -479,7 +537,9 @@ impl Server {
             reader_server.fail_all("language server exited");
         });
 
-        let init = server.request("initialize", initialize_params(&root), REQUEST_TIMEOUT).await;
+        let init = server
+            .request("initialize", initialize_params(&root), REQUEST_TIMEOUT)
+            .await;
         if let Err(e) = init {
             server.kill().await;
             return Err(e);
@@ -495,26 +555,43 @@ impl Server {
         let body = serde_json::to_vec(payload).expect("Value always serializes");
         let header = format!("Content-Length: {}\r\n\r\n", body.len());
         let mut stdin = self.stdin.lock().await;
-        stdin.write_all(header.as_bytes()).await.map_err(|e| e.to_string())?;
+        stdin
+            .write_all(header.as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
         stdin.write_all(&body).await.map_err(|e| e.to_string())?;
         stdin.flush().await.map_err(|e| e.to_string())
     }
 
     async fn notify(&self, method: &str, params: Value) {
-        let _ = self.send(&json!({"jsonrpc": "2.0", "method": method, "params": params})).await;
+        let _ = self
+            .send(&json!({"jsonrpc": "2.0", "method": method, "params": params}))
+            .await;
     }
 
-    async fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
+    async fn request(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, String> {
         if self.dead.load(Ordering::SeqCst) {
             return Err("language server exited".to_string());
         }
         let id = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().expect("Server.pending lock poisoned").insert(id, tx);
-        if let Err(e) =
-            self.send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})).await
+        self.pending
+            .lock()
+            .expect("Server.pending lock poisoned")
+            .insert(id, tx);
+        if let Err(e) = self
+            .send(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
+            .await
         {
-            self.pending.lock().expect("Server.pending lock poisoned").remove(&id);
+            self.pending
+                .lock()
+                .expect("Server.pending lock poisoned")
+                .remove(&id);
             return Err(e);
         }
         match tokio::time::timeout(timeout, rx).await {
@@ -522,7 +599,10 @@ impl Server {
             // sender dropped without a reply — only happens via fail_all
             Ok(Err(_)) => Err("language server exited".to_string()),
             Err(_) => {
-                self.pending.lock().expect("Server.pending lock poisoned").remove(&id);
+                self.pending
+                    .lock()
+                    .expect("Server.pending lock poisoned")
+                    .remove(&id);
                 Err(format!("{method} timed out"))
             }
         }
@@ -533,7 +613,12 @@ impl Server {
     /// the reader task's EOF path and an explicit [`Server::kill`].
     fn fail_all(&self, message: &str) {
         self.dead.store(true, Ordering::SeqCst);
-        for (_, tx) in self.pending.lock().expect("Server.pending lock poisoned").drain() {
+        for (_, tx) in self
+            .pending
+            .lock()
+            .expect("Server.pending lock poisoned")
+            .drain()
+        {
             let _ = tx.send(Err(message.to_string()));
         }
     }
@@ -555,14 +640,24 @@ impl Server {
     /// JS branches with neither firing).
     async fn dispatch(self: &Arc<Self>, msg: Value, app: &AppHandle) {
         let id = msg.get("id").and_then(Value::as_u64);
-        let method = msg.get("method").and_then(Value::as_str).map(str::to_string);
+        let method = msg
+            .get("method")
+            .and_then(Value::as_str)
+            .map(str::to_string);
 
         if let Some(id) = id {
-            let tx = self.pending.lock().expect("Server.pending lock poisoned").remove(&id);
+            let tx = self
+                .pending
+                .lock()
+                .expect("Server.pending lock poisoned")
+                .remove(&id);
             if let Some(tx) = tx {
                 let result = if let Some(err) = msg.get("error") {
-                    let message =
-                        err.get("message").and_then(Value::as_str).unwrap_or("lsp error").to_string();
+                    let message = err
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .unwrap_or("lsp error")
+                        .to_string();
                     Err(message)
                 } else {
                     Ok(msg.get("result").cloned().unwrap_or(Value::Null))
@@ -573,8 +668,14 @@ impl Server {
             if let Some(m) = method {
                 // answer the few server -> client requests that block
                 // startup if ignored.
-                let result = if m == "workspace/configuration" { json!([{}]) } else { Value::Null };
-                let _ = self.send(&json!({"jsonrpc": "2.0", "id": id, "result": result})).await;
+                let result = if m == "workspace/configuration" {
+                    json!([{}])
+                } else {
+                    Value::Null
+                };
+                let _ = self
+                    .send(&json!({"jsonrpc": "2.0", "id": id, "result": result}))
+                    .await;
             }
             return;
         }
@@ -582,7 +683,10 @@ impl Server {
         if method.as_deref() == Some("textDocument/publishDiagnostics") {
             if let Some(params) = msg.get("params") {
                 if let Some(path) = params.get("uri").and_then(Value::as_str).and_then(path_of) {
-                    let diagnostics = params.get("diagnostics").cloned().unwrap_or_else(|| json!([]));
+                    let diagnostics = params
+                        .get("diagnostics")
+                        .cloned()
+                        .unwrap_or_else(|| json!([]));
                     let _ = app.emit(
                         "lsp:diagnostics",
                         json!({ "path": path.to_string_lossy(), "diagnostics": diagnostics }),
@@ -640,8 +744,11 @@ impl Server {
         if !removed {
             return;
         }
-        self.notify("textDocument/didClose", json!({"textDocument": {"uri": uri_of(Path::new(path))}}))
-            .await;
+        self.notify(
+            "textDocument/didClose",
+            json!({"textDocument": {"uri": uri_of(Path::new(path))}}),
+        )
+        .await;
     }
 }
 
@@ -689,13 +796,21 @@ fn missing() -> &'static Mutex<HashSet<String>> {
 /// outside every open folder — every one of those is a silent no-op to
 /// the caller, matching the JS original's optional-chaining call sites
 /// (`s?.server.didOpen(...)`, etc.).
-async fn server_of(app: &AppHandle, path: &str, folders: &[PathBuf]) -> Option<(Arc<Server>, &'static str)> {
+async fn server_of(
+    app: &AppHandle,
+    path: &str,
+    folders: &[PathBuf],
+) -> Option<(Arc<Server>, &'static str)> {
     let lang_id = language_id_for(path)?;
     let spec = server_for(lang_id)?;
     let root = policy::confine_to_root(path, folders)?;
 
     let missing_key = format!("{} {}", root.display(), spec.cmd);
-    if missing().lock().expect("MISSING lock poisoned").contains(&missing_key) {
+    if missing()
+        .lock()
+        .expect("MISSING lock poisoned")
+        .contains(&missing_key)
+    {
         return None;
     }
 
@@ -725,7 +840,10 @@ async fn server_of(app: &AppHandle, path: &str, folders: &[PathBuf]) -> Option<(
             // treat a server that will not start as absent: report once,
             // then stay quiet — matches `catch { ...; if (!missing.has(mark))
             // { missing.add(mark); notifyMissing(...) } return null }`.
-            if should_report_missing(&mut missing().lock().expect("MISSING lock poisoned"), missing_key) {
+            if should_report_missing(
+                &mut missing().lock().expect("MISSING lock poisoned"),
+                missing_key,
+            ) {
                 let _ = app.emit("lsp:missing", json!({"cmd": spec.cmd, "langId": lang_id}));
             }
             None
@@ -758,7 +876,13 @@ pub async fn did_close(app: &AppHandle, path: &str, folders: &[PathBuf]) {
 /// `lsp:hover` — ports `hover()`; `None` for no server, a request error,
 /// or empty/whitespace-only content (any of which the JS original also
 /// collapses to `null`, via its own `try { ... } catch { return null }`).
-pub async fn hover(app: &AppHandle, path: &str, line: u64, character: u64, folders: &[PathBuf]) -> Option<String> {
+pub async fn hover(
+    app: &AppHandle,
+    path: &str,
+    line: u64,
+    character: u64,
+    folders: &[PathBuf],
+) -> Option<String> {
     let (server, _) = server_of(app, path, folders).await?;
     let result = server
         .request(
@@ -802,7 +926,12 @@ pub async fn definition(
 /// is non-blocking, so this stays fast enough to run inside the same
 /// 1.5s-capped quit handshake `shutdown_all_proxies` already does.
 pub async fn shutdown_all() {
-    let slots: Vec<Arc<PoolSlot>> = pool().lock().expect("POOL lock poisoned").values().cloned().collect();
+    let slots: Vec<Arc<PoolSlot>> = pool()
+        .lock()
+        .expect("POOL lock poisoned")
+        .values()
+        .cloned()
+        .collect();
     for slot in slots {
         let mut guard = slot.lock().await;
         if let Some(server) = guard.take() {
@@ -825,13 +954,38 @@ mod tests {
     #[test]
     fn servers_table_matches_lsp_js_argv_exactly() {
         let expected: &[(&str, &[&str], &str, &[&str])] = &[
-            ("typescript", &["typescript", "typescriptreact", "javascript", "javascriptreact"], "typescript-language-server", &["--stdio"]),
+            (
+                "typescript",
+                &[
+                    "typescript",
+                    "typescriptreact",
+                    "javascript",
+                    "javascriptreact",
+                ],
+                "typescript-language-server",
+                &["--stdio"],
+            ),
             ("python", &["python"], "pyright-langserver", &["--stdio"]),
             ("go", &["go"], "gopls", &[]),
             ("rust", &["rust"], "rust-analyzer", &[]),
-            ("json", &["json"], "vscode-json-language-server", &["--stdio"]),
-            ("css", &["css", "scss", "less"], "vscode-css-language-server", &["--stdio"]),
-            ("html", &["html"], "vscode-html-language-server", &["--stdio"]),
+            (
+                "json",
+                &["json"],
+                "vscode-json-language-server",
+                &["--stdio"],
+            ),
+            (
+                "css",
+                &["css", "scss", "less"],
+                "vscode-css-language-server",
+                &["--stdio"],
+            ),
+            (
+                "html",
+                &["html"],
+                "vscode-html-language-server",
+                &["--stdio"],
+            ),
         ];
         for (spec, (id, langs, cmd, args)) in SERVERS.iter().zip(expected.iter()) {
             assert_eq!(spec.id, *id);
@@ -846,7 +1000,11 @@ mod tests {
     #[test]
     fn language_id_for_maps_every_known_extension() {
         for (ext, lang) in LANG_BY_EXT {
-            assert_eq!(language_id_for(&format!("file.{ext}")), Some(*lang), "extension {ext}");
+            assert_eq!(
+                language_id_for(&format!("file.{ext}")),
+                Some(*lang),
+                "extension {ext}"
+            );
         }
     }
 
@@ -873,14 +1031,20 @@ mod tests {
     #[test]
     fn language_id_for_uses_the_last_extension_of_a_multi_dot_path() {
         assert_eq!(language_id_for("archive.tar.gz"), None); // "gz" is unknown
-        assert_eq!(language_id_for("component.test.tsx"), Some("typescriptreact"));
+        assert_eq!(
+            language_id_for("component.test.tsx"),
+            Some("typescriptreact")
+        );
     }
 
     #[test]
     fn server_for_resolves_every_registered_language_to_the_right_spec() {
         assert_eq!(server_for("rust").map(|s| s.id), Some("rust"));
         assert_eq!(server_for("scss").map(|s| s.id), Some("css"));
-        assert_eq!(server_for("javascriptreact").map(|s| s.id), Some("typescript"));
+        assert_eq!(
+            server_for("javascriptreact").map(|s| s.id),
+            Some("typescript")
+        );
     }
 
     #[test]
@@ -892,7 +1056,10 @@ mod tests {
 
     #[test]
     fn uri_of_builds_a_file_uri_for_an_absolute_posix_path() {
-        assert_eq!(uri_of(Path::new("/workspace/proj/src/index.ts")), "file:///workspace/proj/src/index.ts");
+        assert_eq!(
+            uri_of(Path::new("/workspace/proj/src/index.ts")),
+            "file:///workspace/proj/src/index.ts"
+        );
     }
 
     #[test]
@@ -934,7 +1101,10 @@ mod tests {
         bytes.extend_from_slice(body);
 
         let split_at = bytes.len() - 5;
-        assert!(fp.push(&bytes[..split_at]).is_empty(), "must not emit a partial message");
+        assert!(
+            fp.push(&bytes[..split_at]).is_empty(),
+            "must not emit a partial message"
+        );
         let msgs = fp.push(&bytes[split_at..]);
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0]["id"], 2);
@@ -971,7 +1141,10 @@ mod tests {
     fn parse_content_length_is_case_insensitive_and_tolerates_whitespace() {
         assert_eq!(parse_content_length("Content-Length: 42"), Some(42));
         assert_eq!(parse_content_length("CONTENT-LENGTH:7"), Some(7));
-        assert_eq!(parse_content_length("Content-Type: foo\r\ncontent-length:  13"), Some(13));
+        assert_eq!(
+            parse_content_length("Content-Type: foo\r\ncontent-length:  13"),
+            Some(13)
+        );
     }
 
     #[test]
@@ -983,7 +1156,10 @@ mod tests {
 
     #[test]
     fn extract_hover_text_handles_a_plain_string() {
-        assert_eq!(extract_hover_text(&json!({"contents": "hello"})), Some("hello".to_string()));
+        assert_eq!(
+            extract_hover_text(&json!({"contents": "hello"})),
+            Some("hello".to_string())
+        );
     }
 
     #[test]
@@ -1017,7 +1193,10 @@ mod tests {
 
     #[test]
     fn extract_hover_text_trims_surrounding_whitespace() {
-        assert_eq!(extract_hover_text(&json!({"contents": "  hi  "})), Some("hi".to_string()));
+        assert_eq!(
+            extract_hover_text(&json!({"contents": "  hi  "})),
+            Some("hi".to_string())
+        );
     }
 
     // ================= extract_definition =================
@@ -1030,7 +1209,11 @@ mod tests {
         });
         assert_eq!(
             extract_definition(&v),
-            Some(DefinitionLocation { path: PathBuf::from("/workspace/proj/a.ts"), line: 4, character: 2 })
+            Some(DefinitionLocation {
+                path: PathBuf::from("/workspace/proj/a.ts"),
+                line: 4,
+                character: 2
+            })
         );
     }
 
@@ -1043,7 +1226,11 @@ mod tests {
         });
         assert_eq!(
             extract_definition(&v),
-            Some(DefinitionLocation { path: PathBuf::from("/workspace/proj/b.ts"), line: 10, character: 3 })
+            Some(DefinitionLocation {
+                path: PathBuf::from("/workspace/proj/b.ts"),
+                line: 10,
+                character: 3
+            })
         );
     }
 
@@ -1053,7 +1240,10 @@ mod tests {
             {"uri": "file:///a.ts", "range": {"start": {"line": 1, "character": 1}}},
             {"uri": "file:///b.ts", "range": {"start": {"line": 2, "character": 2}}},
         ]);
-        assert_eq!(extract_definition(&v).map(|d| d.path), Some(PathBuf::from("/a.ts")));
+        assert_eq!(
+            extract_definition(&v).map(|d| d.path),
+            Some(PathBuf::from("/a.ts"))
+        );
     }
 
     #[test]
@@ -1076,14 +1266,20 @@ mod tests {
     #[test]
     fn advance_doc_open_starts_a_fresh_document_at_version_1() {
         let mut docs = HashMap::new();
-        assert!(matches!(advance_doc_open(&mut docs, "a.ts"), OpenTransition::FreshOpen(1)));
+        assert!(matches!(
+            advance_doc_open(&mut docs, "a.ts"),
+            OpenTransition::FreshOpen(1)
+        ));
         assert_eq!(docs.get("a.ts"), Some(&1));
     }
 
     #[test]
     fn advance_doc_open_on_an_already_open_document_behaves_as_a_change() {
         let mut docs = HashMap::from([("a.ts".to_string(), 1u64)]);
-        assert!(matches!(advance_doc_open(&mut docs, "a.ts"), OpenTransition::TreatedAsChange(2)));
+        assert!(matches!(
+            advance_doc_open(&mut docs, "a.ts"),
+            OpenTransition::TreatedAsChange(2)
+        ));
         assert_eq!(docs.get("a.ts"), Some(&2));
     }
 
@@ -1123,7 +1319,10 @@ mod tests {
     fn should_report_missing_tracks_keys_independently() {
         let mut set = HashSet::new();
         assert!(should_report_missing(&mut set, "root gopls".to_string()));
-        assert!(should_report_missing(&mut set, "root rust-analyzer".to_string()));
+        assert!(should_report_missing(
+            &mut set,
+            "root rust-analyzer".to_string()
+        ));
     }
 
     // ================= spawn_child (real, deterministic OS failure) =================
@@ -1145,9 +1344,15 @@ mod tests {
         // `cat` with no args just waits on stdin — enough to prove
         // spawn_child's plumbing (piped stdio, cwd, env replacement) works
         // for a binary that DOES exist, not only the missing-binary path.
-        let spec = ServerSpec { id: "test-cat", langs: &[], cmd: "cat", args: &[] };
+        let spec = ServerSpec {
+            id: "test-cat",
+            langs: &[],
+            cmd: "cat",
+            args: &[],
+        };
         let root = std::env::temp_dir();
-        let mut child = spawn_child(&spec, &root).expect("cat is on PATH in this dev/CI environment");
+        let mut child =
+            spawn_child(&spec, &root).expect("cat is on PATH in this dev/CI environment");
         let _ = child.start_kill();
     }
 }

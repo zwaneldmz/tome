@@ -60,8 +60,7 @@
 //! permanently unreadable here by construction — [`AuthLock::unprotect_secret`]
 //! recognizes the prefix and fails closed (verification simply returns
 //! `false`) rather than mis-decoding ciphertext as base32 or panicking.
-//! [`AuthLock::totp_migration_needed`] surfaces that condition so a caller
-//! can prompt re-enrollment; the prompt/UX itself is out of scope for this
+//! Re-enrollment UX for that failed-closed case is out of scope for this
 //! phase (tracked as a later migration phase). The no-keychain-available
 //! fallback, by contrast, **is** wire-compatible both ways: both this file
 //! and `authlock.js` write the bare base32 string with no prefix at all
@@ -292,7 +291,9 @@ fn backoff_delay_ms(fails: u32) -> u64 {
         return 0;
     }
     let exp = (fails - BACKOFF_AFTER).min(20);
-    BACKOFF_BASE_MS.saturating_mul(1u64 << exp).min(BACKOFF_MAX_MS)
+    BACKOFF_BASE_MS
+        .saturating_mul(1u64 << exp)
+        .min(BACKOFF_MAX_MS)
 }
 
 impl AuthLock {
@@ -314,7 +315,12 @@ impl AuthLock {
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
-        Self { path, state, protector, attempts: HashMap::new() }
+        Self {
+            path,
+            state,
+            protector,
+            attempts: HashMap::new(),
+        }
     }
 
     fn save(&self) -> Result<(), AuthError> {
@@ -365,7 +371,9 @@ impl AuthLock {
         let (Some(salt), Some(hash_hex)) = (&self.state.salt, &self.state.hash) else {
             return false;
         };
-        let Some(expected) = hex_decode(hash_hex) else { return false };
+        let Some(expected) = hex_decode(hash_hex) else {
+            return false;
+        };
         let got = scrypt_hash(pass.as_bytes(), salt.as_bytes());
         bool::from(got[..].ct_eq(&expected[..]))
     }
@@ -385,7 +393,10 @@ impl AuthLock {
         rand::rng().fill_bytes(&mut raw);
         let secret = b32encode(&raw);
         let stored = self.protect_secret(&secret);
-        self.state.totp = Some(TotpState { secret: stored, active: false });
+        self.state.totp = Some(TotpState {
+            secret: stored,
+            active: false,
+        });
         self.save()?;
         let uri = format!("otpauth://totp/tome?secret={secret}&issuer=tome");
         Ok(TotpEnrollment { secret, uri })
@@ -398,8 +409,12 @@ impl AuthLock {
     /// "wrong code" alike — verification has exactly one honest outcome
     /// space, `bool`, same as the JS original.
     pub fn verify_totp(&self, code: &str) -> bool {
-        let Some(t) = &self.state.totp else { return false };
-        let Some(plain) = self.unprotect_secret(&t.secret) else { return false };
+        let Some(t) = &self.state.totp else {
+            return false;
+        };
+        let Some(plain) = self.unprotect_secret(&t.secret) else {
+            return false;
+        };
         let secret = b32decode(&plain);
         let step = now_ms() / 30_000;
         [step.saturating_sub(1), step, step + 1]
@@ -426,21 +441,14 @@ impl AuthLock {
         self.state.totp.as_ref().is_some_and(|t| t.active)
     }
 
-    /// Whether the stored TOTP secret is an Electron `safeStorage` blob
-    /// this build cannot decrypt — the "signal re-enroll needed" half of
-    /// the migration story described in the module doc comment (the
-    /// re-enrollment UX itself is a later phase).
-    pub fn totp_migration_needed(&self) -> bool {
-        self.state
-            .totp
-            .as_ref()
-            .is_some_and(|t| t.secret.starts_with(TOTP_ENC_PREFIX_ELECTRON))
-    }
-
     /// How many milliseconds until `purpose`'s next attempt is allowed;
     /// `0` means "attempt now". Matches `authlock.js`'s `throttleRetryIn`.
     pub fn throttle_retry_in(&self, purpose: &str) -> u64 {
-        let next_at = self.attempts.get(purpose).map(|a| a.next_at_ms).unwrap_or(0);
+        let next_at = self
+            .attempts
+            .get(purpose)
+            .map(|a| a.next_at_ms)
+            .unwrap_or(0);
         next_at.saturating_sub(now_ms())
     }
 
@@ -448,10 +456,10 @@ impl AuthLock {
     /// backoff per [`backoff_delay_ms`]. Matches `authlock.js`'s
     /// `recordFailure`.
     pub fn record_failure(&mut self, purpose: &str) {
-        let entry = self
-            .attempts
-            .entry(purpose.to_string())
-            .or_insert(Backoff { fails: 0, next_at_ms: 0 });
+        let entry = self.attempts.entry(purpose.to_string()).or_insert(Backoff {
+            fails: 0,
+            next_at_ms: 0,
+        });
         entry.fails += 1;
         let delay = backoff_delay_ms(entry.fails);
         if delay > 0 {
@@ -501,7 +509,9 @@ impl AuthLock {
     /// but new writes stay plaintext rather than pretending to be
     /// encrypted" comment describes for its own mirror-image case.
     fn migrate_totp_secret(&mut self) {
-        let Some(t) = self.state.totp.as_mut() else { return };
+        let Some(t) = self.state.totp.as_mut() else {
+            return;
+        };
         let is_plain =
             t.secret != TOTP_KEYRING_MARKER && !t.secret.starts_with(TOTP_ENC_PREFIX_ELECTRON);
         if is_plain && self.protector.available() && self.protector.store(&t.secret) {
@@ -558,7 +568,6 @@ fn hex_decode(s: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::totp::totp;
 
     // ---- hermetic SecretProtector fakes (see module doc comment on why
     // the real KeyringProtector never runs under `cargo test`) ----
@@ -611,8 +620,10 @@ mod tests {
     // here means every passphrase the Electron build ever hashed breaks
     // silently in the rewrite) ----
 
-    const FIXTURES_JSON: &str =
-        include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/auth_fixtures.json"));
+    const FIXTURES_JSON: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/auth_fixtures.json"
+    ));
 
     #[derive(serde::Deserialize)]
     struct ScryptFixture {
@@ -643,15 +654,29 @@ mod tests {
     #[test]
     fn scrypt_raw_matches_fixtures() {
         let fx = load_fixtures();
-        assert!(!fx.scrypt.is_empty(), "fixture file has no scrypt[] entries");
+        assert!(
+            !fx.scrypt.is_empty(),
+            "fixture file has no scrypt[] entries"
+        );
         for f in &fx.scrypt {
             let log_n = f.n.trailing_zeros() as u8;
-            assert_eq!(1u32 << log_n, f.n, "fixture N={} is not a power of two", f.n);
+            assert_eq!(
+                1u32 << log_n,
+                f.n,
+                "fixture N={} is not a power of two",
+                f.n
+            );
             let params = scrypt::Params::new(log_n, f.r, f.p).expect("fixture params are valid");
             let mut out = vec![0u8; f.dklen];
             scrypt::scrypt(f.pass.as_bytes(), f.salt.as_bytes(), &params, &mut out)
                 .expect("scrypt succeeds for fixture params");
-            assert_eq!(hex_encode(&out), f.hash, "pass={:?} salt={:?}", f.pass, f.salt);
+            assert_eq!(
+                hex_encode(&out),
+                f.hash,
+                "pass={:?} salt={:?}",
+                f.pass,
+                f.salt
+            );
         }
     }
 
@@ -665,7 +690,13 @@ mod tests {
         let fx = load_fixtures();
         for f in &fx.scrypt {
             let got = scrypt_hash(f.pass.as_bytes(), f.salt.as_bytes());
-            assert_eq!(hex_encode(&got), f.hash, "pass={:?} salt={:?}", f.pass, f.salt);
+            assert_eq!(
+                hex_encode(&got),
+                f.hash,
+                "pass={:?} salt={:?}",
+                f.pass,
+                f.salt
+            );
         }
     }
 
@@ -696,8 +727,14 @@ mod tests {
     #[test]
     fn set_passphrase_length_boundary_is_inclusive() {
         let (_dir, mut lock) = fresh_lock();
-        assert!(lock.set_passphrase("1234567").is_err(), "7 chars must still be rejected");
-        assert!(lock.set_passphrase("12345678").is_ok(), "exactly 8 chars must be accepted");
+        assert!(
+            lock.set_passphrase("1234567").is_err(),
+            "7 chars must still be rejected"
+        );
+        assert!(
+            lock.set_passphrase("12345678").is_ok(),
+            "exactly 8 chars must be accepted"
+        );
     }
 
     #[test]
@@ -739,7 +776,10 @@ mod tests {
         let first_hash = lock.state.hash.clone();
         lock.set_passphrase("hunter2-fake").unwrap();
         let second_hash = lock.state.hash.clone();
-        assert_ne!(first_hash, second_hash, "same passphrase, different salt, must differ");
+        assert_ne!(
+            first_hash, second_hash,
+            "same passphrase, different salt, must differ"
+        );
         assert!(lock.verify_passphrase("hunter2-fake"));
     }
 
@@ -770,7 +810,10 @@ mod tests {
         );
         assert_eq!(
             enrollment.uri,
-            format!("otpauth://totp/tome?secret={}&issuer=tome", enrollment.secret)
+            format!(
+                "otpauth://totp/tome?secret={}&issuer=tome",
+                enrollment.secret
+            )
         );
     }
 
@@ -779,7 +822,10 @@ mod tests {
         let (_dir, mut lock) = fresh_lock();
         let first = lock.enroll_totp().unwrap();
         let second = lock.enroll_totp().unwrap();
-        assert!(second.secret.chars().all(|c| c.is_ascii_uppercase() || ('2'..='7').contains(&c)));
+        assert!(second
+            .secret
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || ('2'..='7').contains(&c)));
         assert_ne!(second.secret, first.secret);
     }
 
@@ -788,7 +834,7 @@ mod tests {
         let (_dir, mut lock) = fresh_lock();
         let enrollment = lock.enroll_totp().unwrap();
         let raw = b32decode(&enrollment.secret);
-        let code = totp(&raw, now_ms());
+        let code = hotp(&raw, now_ms() / 30_000);
         assert!(lock.confirm_totp(&code).unwrap());
         let err = lock.enroll_totp().unwrap_err();
         assert_eq!(err.to_string(), "Active second factor present.");
@@ -818,7 +864,10 @@ mod tests {
         let real_code = hotp(&raw, step);
         // A code from 10 steps away (5 minutes) is well outside the ±1 window.
         let wrong_code = hotp(&raw, step + 10);
-        assert_ne!(real_code, wrong_code, "test secret produced a coincidental collision");
+        assert_ne!(
+            real_code, wrong_code,
+            "test secret produced a coincidental collision"
+        );
         assert!(!lock.verify_totp(&wrong_code));
         assert!(lock.confirm_totp(&real_code).unwrap());
     }
@@ -841,30 +890,17 @@ mod tests {
         assert!(!lock.verify_totp("123456"));
     }
 
-    // ---- Electron enc:v1: blobs: detect, signal re-enroll, never decrypt ----
+    // ---- Electron enc:v1: blobs: never decrypt, fail closed ----
 
     #[test]
-    fn electron_blob_fails_closed_and_signals_migration() {
+    fn electron_blob_fails_closed() {
         let (_dir, mut lock) = fresh_lock();
         lock.state.totp = Some(TotpState {
             secret: "enc:v1:not-actually-decryptable-here==".to_string(),
             active: true,
         });
         assert!(lock.totp_active()); // active flag itself is still readable
-        assert!(lock.totp_migration_needed());
         assert!(!lock.verify_totp("000000")); // fails closed, never panics/misdecodes
-    }
-
-    #[test]
-    fn plaintext_and_keyring_marker_do_not_need_migration() {
-        let (_dir, mut lock) = fresh_lock();
-        lock.state.totp = Some(TotpState { secret: "JBSWY3DP".to_string(), active: true });
-        assert!(!lock.totp_migration_needed());
-        lock.state.totp = Some(TotpState {
-            secret: TOTP_KEYRING_MARKER.to_string(),
-            active: true,
-        });
-        assert!(!lock.totp_migration_needed());
     }
 
     // ---- secret-at-rest protection + migration ----
@@ -874,16 +910,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut lock = AuthLock::load_with_protector(dir.path(), Box::new(FakeProtector::new()));
         let enrollment = lock.enroll_totp().unwrap();
-        assert_eq!(lock.state.totp.as_ref().unwrap().secret, TOTP_KEYRING_MARKER);
+        assert_eq!(
+            lock.state.totp.as_ref().unwrap().secret,
+            TOTP_KEYRING_MARKER
+        );
         // ... yet verification still works, round-tripping through the protector.
         let raw = b32decode(&enrollment.secret);
-        assert!(lock.confirm_totp(&totp(&raw, now_ms())).unwrap());
+        assert!(lock.confirm_totp(&hotp(&raw, now_ms() / 30_000)).unwrap());
     }
 
     #[test]
     fn migrate_totp_secret_upgrades_plaintext_once_protector_available() {
         let (_dir, mut lock) = fresh_lock(); // NullProtector: nothing available yet
-        lock.state.totp = Some(TotpState { secret: "PLAINBASE32SECRETXXX".to_string(), active: false });
+        lock.state.totp = Some(TotpState {
+            secret: "PLAINBASE32SECRETXXX".to_string(),
+            active: false,
+        });
         lock.migrate_totp_secret();
         assert_eq!(
             lock.state.totp.as_ref().unwrap().secret,
@@ -893,7 +935,10 @@ mod tests {
 
         lock.protector = Box::new(FakeProtector::new()); // keyring "becomes available"
         lock.migrate_totp_secret();
-        assert_eq!(lock.state.totp.as_ref().unwrap().secret, TOTP_KEYRING_MARKER);
+        assert_eq!(
+            lock.state.totp.as_ref().unwrap().secret,
+            TOTP_KEYRING_MARKER
+        );
         assert_eq!(
             lock.unprotect_secret(&lock.state.totp.as_ref().unwrap().secret),
             Some("PLAINBASE32SECRETXXX".to_string())
@@ -928,7 +973,11 @@ mod tests {
         assert_eq!(backoff_delay_ms(8), 240_000);
         assert_eq!(backoff_delay_ms(10), 960_000);
         assert_eq!(backoff_delay_ms(11), 1_800_000, "already past the cap");
-        assert_eq!(backoff_delay_ms(100), 1_800_000, "huge fail counts stay capped, never panic");
+        assert_eq!(
+            backoff_delay_ms(100),
+            1_800_000,
+            "huge fail counts stay capped, never panic"
+        );
     }
 
     #[test]
@@ -937,11 +986,18 @@ mod tests {
         for _ in 0..4 {
             lock.record_failure("test:purpose");
         }
-        assert_eq!(lock.throttle_retry_in("test:purpose"), 0, "below threshold, no backoff yet");
+        assert_eq!(
+            lock.throttle_retry_in("test:purpose"),
+            0,
+            "below threshold, no backoff yet"
+        );
 
         lock.record_failure("test:purpose"); // 5th failure crosses BACKOFF_AFTER
         let wait = lock.throttle_retry_in("test:purpose");
-        assert!(wait > 0 && wait <= 30_000, "expected ~30s backoff, got {wait}ms");
+        assert!(
+            wait > 0 && wait <= 30_000,
+            "expected ~30s backoff, got {wait}ms"
+        );
 
         lock.record_success("test:purpose");
         assert_eq!(lock.throttle_retry_in("test:purpose"), 0);
@@ -970,7 +1026,7 @@ mod tests {
             let enrollment = lock.enroll_totp().unwrap();
             secret_b32 = enrollment.secret.clone();
             let raw = b32decode(&enrollment.secret);
-            real_code = totp(&raw, now_ms());
+            real_code = hotp(&raw, now_ms() / 30_000);
             assert!(lock.confirm_totp(&real_code).unwrap());
         } // lock dropped — nothing but the file on disk survives
 
@@ -983,7 +1039,7 @@ mod tests {
         // the plaintext-fallback secret round-trips as plaintext on disk
         // (NullProtector on both ends) — a fresh TOTP code still verifies.
         let raw = b32decode(&secret_b32);
-        assert!(reloaded.verify_totp(&totp(&raw, now_ms())));
+        assert!(reloaded.verify_totp(&hotp(&raw, now_ms() / 30_000)));
     }
 
     #[test]

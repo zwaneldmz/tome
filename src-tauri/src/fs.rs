@@ -66,7 +66,9 @@ fn fmt_io_err(err: &std::io::Error, path: &str) -> String {
 /// comparison so the order is deterministic rather than dependent on
 /// whatever order the OS's `readdir` happened to return.
 pub async fn read_dir(dir: &str) -> Result<Value, String> {
-    let mut rd = tokio::fs::read_dir(dir).await.map_err(|e| fmt_io_err(&e, dir))?;
+    let mut rd = tokio::fs::read_dir(dir)
+        .await
+        .map_err(|e| fmt_io_err(&e, dir))?;
     let mut out = Vec::new();
     while let Some(entry) = rd.next_entry().await.map_err(|e| fmt_io_err(&e, dir))? {
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -96,7 +98,9 @@ pub async fn read_dir(dir: &str) -> Result<Value, String> {
 /// would reject invalid UTF-8 that Node happily "reads" as replacement
 /// characters — a real behavioral difference this preserves on purpose.
 pub async fn read_file(path: &str) -> Result<Value, String> {
-    let bytes = tokio::fs::read(path).await.map_err(|e| fmt_io_err(&e, path))?;
+    let bytes = tokio::fs::read(path)
+        .await
+        .map_err(|e| fmt_io_err(&e, path))?;
     Ok(Value::String(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
@@ -137,16 +141,10 @@ pub async fn create_file(path: &str) -> Result<Value, String> {
 // ---- fs:watch / fs:unwatch ----
 //
 // index.js keys a `Map<path, { watcher, count, timer }>` at module scope.
-// `AppState.watchers` was deliberately left as a `Mutex<HashMap<String,
-// ()>>` placeholder (see its doc comment in state.rs: "becomes the real
-// notify/notify-debouncer-mini handle when fs.rs grows a body") — but a
-// real per-path notify `Debouncer` handle plus a refcount doesn't fit that
-// `()` value type, and this slice isn't scoped to change state.rs's field
-// types (out of scope per the task brief: confine.rs/fs.rs/git.rs and the
-// ipc wrappers only). This module-level static is the "work around it
-// locally" replacement the brief asks for instead — same shape as the JS
-// Map, just living outside AppState. Flagged in this slice's report as a
-// state.rs follow-up worth considering (repurpose or drop the dead field).
+// A real per-path notify `Debouncer` handle plus a refcount doesn't fit a
+// plain `()` value type, so this module-level static is the replacement —
+// same shape as the JS Map, just living outside AppState (whose former
+// `watchers` placeholder field was dropped as dead).
 
 struct WatchEntry {
     count: u32,
@@ -290,12 +288,17 @@ mod tests {
             .iter()
             .map(|e| e["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names, vec!["apple.txt", "Banana.txt", "mango.txt", "Zebra.txt"]);
+        assert_eq!(
+            names,
+            vec!["apple.txt", "Banana.txt", "mango.txt", "Zebra.txt"]
+        );
     }
 
     #[tokio::test]
     async fn read_dir_reports_enoent_for_a_missing_directory() {
-        let err = read_dir("/definitely/does/not/exist/anywhere").await.unwrap_err();
+        let err = read_dir("/definitely/does/not/exist/anywhere")
+            .await
+            .unwrap_err();
         assert!(err.contains("ENOENT"), "expected ENOENT in: {err}");
     }
 
@@ -312,7 +315,9 @@ mod tests {
     async fn read_file_lossy_decodes_invalid_utf8_instead_of_erroring() {
         let tmp = tempdir().unwrap();
         let file = tmp.path().join("bin.dat");
-        tokio::fs::write(&file, [0x68, 0x69, 0xff, 0xfe]).await.unwrap();
+        tokio::fs::write(&file, [0x68, 0x69, 0xff, 0xfe])
+            .await
+            .unwrap();
         let v = read_file(file.to_str().unwrap()).await.unwrap();
         let s = v.as_str().unwrap();
         assert!(s.starts_with("hi"));

@@ -78,6 +78,14 @@ tome-shim = { path = "crates/tome-shim" }
 [workspace]
 members = ["crates/tome-shim"]
 
+# The conductor/flow `*Env` structs are dependency-injection seams whose
+# fields are `Arc<dyn Fn(...) + Send + Sync>` callbacks — each signature is a
+# one-off and already documented at the field site, so the `type_complexity`
+# style lint (which wants a `type` alias per field) obscures more than it
+# clarifies here. Reviewed and allowed deliberately.
+[lints.clippy]
+type_complexity = "allow"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"
 objc2 = "0.6.4"
