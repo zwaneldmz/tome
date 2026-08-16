@@ -1,0 +1,10 @@
+{
+  "GHSA-5xrq-8626-4rwp": {
+    "reason": "vitest advisory (arbitrary file read/execute when the Vitest UI/API server is listening, CVSS 9.8). Tome's only Vitest entry point is `vitest run` (package.json test script, CI); no script, workflow, or config starts --ui/--api/an inspector listener, so the vulnerable code path is never reached. Dev-only dependency, not shipped in the packaged app. Full assessment: reviews/validation/TOME-017-acceptance.md. package.json also bumps vitest past the vulnerable range (>=4.0.0 <4.1.0); this exception covers the gap until the lockfile regeneration that follows this change lands.",
+    "expires": "2026-09-10"
+  },
+  "GHSA-2v37-7h3g-55p8": {
+    "reason": "nanoid advisory (custom generators can loop indefinitely when size is zero, CVSS 5.9). Dev-only transitive dependency (vite -> postcss -> nanoid), exercised only at build time to mint CSS identifiers for the bundled renderer; the size-zero custom-generator path is never reached. Not shipped in the packaged app. Surfaces under bun audit (which, unlike npm audit, has no --omit=dev split), so it needs the same reviewed exception the old npm dev-tier carried implicitly.",
+    "expires": "2026-10-01"
+  }
+}

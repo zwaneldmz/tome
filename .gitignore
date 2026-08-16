@@ -8,7 +8,10 @@ build/icon.iconset/
 .worktrees/
 index.js
 tome-council-report.pdf
-reviews/
+reviews/*
+!reviews/validation/
+reviews/validation/*
+!reviews/validation/audit-exceptions.json
 docs/*
 !docs/AFFORDANCES-PLAN.md
 !docs/how-tome-works.html
