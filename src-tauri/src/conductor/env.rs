@@ -67,7 +67,12 @@ pub struct ConductorEnv {
     /// caller — stays the one place that knows how a delta becomes a
     /// `chat:delta` event.
     pub stream_chat: Arc<
-        dyn Fn(Option<String>, Vec<Value>, Vec<Value>, OnText) -> BoxFuture<Result<NormalizedResponse, ChatError>>
+        dyn Fn(
+                Option<String>,
+                Vec<Value>,
+                Vec<Value>,
+                OnText,
+            ) -> BoxFuture<Result<NormalizedResponse, ChatError>>
             + Send
             + Sync,
     >,
@@ -206,7 +211,10 @@ pub fn production_env(
             let app = app.clone();
             Arc::new(move || {
                 let state = app.state::<AppState>();
-                let synced = *state.folders_synced.read().expect("AppState.folders_synced lock poisoned");
+                let synced = *state
+                    .folders_synced
+                    .read()
+                    .expect("AppState.folders_synced lock poisoned");
                 if !synced {
                     return Vec::new();
                 }
@@ -226,21 +234,32 @@ pub fn production_env(
                 folders
             })
         },
-        stream_chat: Arc::new(move |system: Option<String>, messages: Vec<Value>, tools: Vec<Value>, mut on_text: OnText| {
-            let provider = provider.clone();
-            let betas = betas.clone();
-            let fallbacks = fallbacks.clone();
-            Box::pin(async move {
-                let args = sse::StreamChatArgs {
-                    system: system.as_deref(),
-                    messages: &messages,
-                    tools: &tools,
-                    betas: betas.as_deref(),
-                    fallbacks: fallbacks.as_deref(),
-                };
-                sse::stream_chat(crate::ipc::chat::http_client(), &provider, args, move |t: &str| on_text(t)).await
-            }) as BoxFuture<Result<NormalizedResponse, ChatError>>
-        }),
+        stream_chat: Arc::new(
+            move |system: Option<String>,
+                  messages: Vec<Value>,
+                  tools: Vec<Value>,
+                  mut on_text: OnText| {
+                let provider = provider.clone();
+                let betas = betas.clone();
+                let fallbacks = fallbacks.clone();
+                Box::pin(async move {
+                    let args = sse::StreamChatArgs {
+                        system: system.as_deref(),
+                        messages: &messages,
+                        tools: &tools,
+                        betas: betas.as_deref(),
+                        fallbacks: fallbacks.as_deref(),
+                    };
+                    sse::stream_chat(
+                        crate::ipc::chat::http_client(),
+                        &provider,
+                        args,
+                        move |t: &str| on_text(t),
+                    )
+                    .await
+                }) as BoxFuture<Result<NormalizedResponse, ChatError>>
+            },
+        ),
         resolve_path: {
             let app = app.clone();
             Arc::new(move |p: &Path| {
@@ -262,13 +281,15 @@ pub fn production_env(
         run_command: Arc::new(move |cwd: &str, cmd: &str| {
             let cwd = cwd.to_string();
             let cmd = cmd.to_string();
-            Box::pin(async move { run_command_impl(&cwd, &cmd).await }) as BoxFuture<Result<String, String>>
+            Box::pin(async move { run_command_impl(&cwd, &cmd).await })
+                as BoxFuture<Result<String, String>>
         }),
         gate_question: {
             let app = app.clone();
             Arc::new(move |payload: Value| {
                 let app = app.clone();
-                Box::pin(async move { gate_question_impl(&app, payload).await }) as BoxFuture<Result<String, String>>
+                Box::pin(async move { gate_question_impl(&app, payload).await })
+                    as BoxFuture<Result<String, String>>
             })
         },
     }

@@ -183,8 +183,13 @@ pub struct TranscribeRequest<'a> {
 /// nothing to clean up, same as the JS original (whose `await
 /// writeFile(...)` sits *outside* its own try/finally).
 pub async fn transcribe(req: TranscribeRequest<'_>) -> io::Result<String> {
-    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
-    let file = req.temp_dir.join(format!("tome-stt-{}-{stamp}.wav", std::process::id()));
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let file = req
+        .temp_dir
+        .join(format!("tome-stt-{}-{stamp}.wav", std::process::id()));
     tokio::fs::write(&file, req.wav).await?;
 
     let result = run_whisper(req.bin, req.model, &file, req.timeout).await;
@@ -205,11 +210,21 @@ pub async fn transcribe(req: TranscribeRequest<'_>) -> io::Result<String> {
 /// pins its exact message, so this favors trimmed stderr when present.
 async fn run_whisper(bin: &str, model: &Path, wav: &Path, timeout: Duration) -> io::Result<String> {
     let mut cmd = tokio::process::Command::new(bin);
-    cmd.arg("-m").arg(model).arg("-f").arg(wav).arg("--no-timestamps").kill_on_drop(true);
+    cmd.arg("-m")
+        .arg(model)
+        .arg("-f")
+        .arg(wav)
+        .arg("--no-timestamps")
+        .kill_on_drop(true);
 
     let output = match tokio::time::timeout(timeout, cmd.output()).await {
         Ok(res) => res?,
-        Err(_) => return Err(io::Error::new(io::ErrorKind::TimedOut, format!("{bin} timed out"))),
+        Err(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("{bin} timed out"),
+            ))
+        }
     };
 
     if !output.status.success() {
@@ -221,7 +236,9 @@ async fn run_whisper(bin: &str, model: &Path, wav: &Path, timeout: Duration) -> 
             trimmed.to_string()
         }));
     }
-    Ok(collapse_whitespace(&String::from_utf8_lossy(&output.stdout)))
+    Ok(collapse_whitespace(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 /// `String(stdout).replace(/\s+/g, ' ').trim()` — whisper prints one
@@ -279,7 +296,10 @@ mod tests {
 
     #[test]
     fn model_path_derives_the_path_under_app_data_models() {
-        assert_eq!(model_path(Path::new("/ud")), PathBuf::from("/ud/models/ggml-base.en.bin"));
+        assert_eq!(
+            model_path(Path::new("/ud")),
+            PathBuf::from("/ud/models/ggml-base.en.bin")
+        );
     }
 
     // ---- find_on_path / path_lookup ----
@@ -315,14 +335,20 @@ mod tests {
     fn find_on_path_returns_none_when_nowhere_on_path() {
         let dir = tempfile::tempdir().unwrap();
         let path_var = std::env::join_paths([dir.path()]).unwrap();
-        assert_eq!(find_on_path(&path_var, "definitely-not-a-real-binary-xyz"), None);
+        assert_eq!(
+            find_on_path(&path_var, "definitely-not-a-real-binary-xyz"),
+            None
+        );
     }
 
     // ---- whisperBin() / whisper_bin ----
 
     #[test]
     fn whisper_bin_lets_override_win() {
-        assert_eq!(whisper_bin(Some("/x/y/whisper")), Some("/x/y/whisper".to_string()));
+        assert_eq!(
+            whisper_bin(Some("/x/y/whisper")),
+            Some("/x/y/whisper".to_string())
+        );
     }
 
     #[test]
@@ -351,13 +377,20 @@ mod tests {
 
     #[test]
     fn stt_unavailable_treats_no_bin_the_same_as_a_dead_path() {
-        assert_eq!(stt_unavailable(None, Path::new("/nope/model.bin")), Some(NO_BIN.to_string()));
+        assert_eq!(
+            stt_unavailable(None, Path::new("/nope/model.bin")),
+            Some(NO_BIN.to_string())
+        );
     }
 
     #[test]
     fn stt_unavailable_gives_the_exact_download_command_when_only_the_model_is_missing() {
-        let why = stt_unavailable(Some("/bin/ls"), Path::new("/nope/models/ggml-base.en.bin")).unwrap();
-        assert!(why.contains("curl -L -o \"/nope/models/ggml-base.en.bin\""), "{why}");
+        let why =
+            stt_unavailable(Some("/bin/ls"), Path::new("/nope/models/ggml-base.en.bin")).unwrap();
+        assert!(
+            why.contains("curl -L -o \"/nope/models/ggml-base.en.bin\""),
+            "{why}"
+        );
         assert!(why.contains("mkdir -p \"/nope/models\""), "{why}");
     }
 
@@ -372,7 +405,13 @@ mod tests {
         // that this module's own PATH lookup couldn't confirm still isn't
         // treated as "definitely missing" here — a real exec's ENOENT is
         // the backstop, same as the JS original.
-        assert_eq!(stt_unavailable(Some("definitely-not-a-real-binary-xyz"), Path::new("/bin/ls")), None);
+        assert_eq!(
+            stt_unavailable(
+                Some("definitely-not-a-real-binary-xyz"),
+                Path::new("/bin/ls")
+            ),
+            None
+        );
     }
 
     // ---- binExists() / bin_exists, modelExists() / model_exists ----
@@ -422,7 +461,11 @@ mod tests {
         assert!(out.starts_with("-m /m.bin -f "), "{out}");
         assert!(out.contains("tome-stt-"), "{out}");
         assert!(out.ends_with(".wav --no-timestamps"), "{out}");
-        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0, "temp wav must be removed");
+        assert_eq!(
+            std::fs::read_dir(tmp.path()).unwrap().count(),
+            0,
+            "temp wav must be removed"
+        );
     }
 
     #[tokio::test]
@@ -440,7 +483,11 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
-        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0, "temp wav must be removed");
+        assert_eq!(
+            std::fs::read_dir(tmp.path()).unwrap().count(),
+            0,
+            "temp wav must be removed"
+        );
     }
 
     #[tokio::test]
@@ -474,7 +521,10 @@ mod tests {
         assert_eq!(&buf[12..16], b"fmt ");
         assert_eq!(u16::from_le_bytes([buf[20], buf[21]]), 1); // PCM
         assert_eq!(u16::from_le_bytes([buf[22], buf[23]]), 1); // mono
-        assert_eq!(u32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]), 16_000);
+        assert_eq!(
+            u32::from_le_bytes([buf[24], buf[25], buf[26], buf[27]]),
+            16_000
+        );
         assert_eq!(&buf[36..40], b"data");
         assert_eq!(buf.len(), 44 + 4 * 2);
         assert!(buf[44..].iter().all(|&b| b == 0));

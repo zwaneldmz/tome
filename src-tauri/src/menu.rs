@@ -107,11 +107,21 @@ fn app_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
     // selector bypasses the quit handshake entirely. This plain item
     // carries the same label/accelerator convention but is routed through
     // `window.close()` in `setup()`'s `on_menu_event`, below.
-    let quit = item(app, "quit", format!("Quit {name}").trim(), Some("CmdOrCtrl+Q"))?;
+    let quit = item(
+        app,
+        "quit",
+        format!("Quit {name}").trim(),
+        Some("CmdOrCtrl+Q"),
+    )?;
     SubmenuBuilder::new(app, name)
         .about(None)
         .separator()
-        .item(&item(app, "open-preferences", "Settings…", Some("CmdOrCtrl+,"))?)
+        .item(&item(
+            app,
+            "open-preferences",
+            "Settings…",
+            Some("CmdOrCtrl+,"),
+        )?)
         .item(&item(app, "open-onboarding", "Setup Wizard…", None)?)
         .separator()
         .services()
@@ -161,12 +171,27 @@ fn view_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
         .item(&item(app, "set-theme|system", "Match System", None)?)
         .build()?;
     SubmenuBuilder::new(app, "View")
-        .item(&item(app, "toggle-sidebar", "Toggle Sidebar", Some("CmdOrCtrl+B"))?)
+        .item(&item(
+            app,
+            "toggle-sidebar",
+            "Toggle Sidebar",
+            Some("CmdOrCtrl+B"),
+        )?)
         .item(&appearance)
         .separator()
         .item(&item(app, "quick-open", "Quick Open", Some("CmdOrCtrl+P"))?)
-        .item(&item(app, "shortcuts", "Keyboard Shortcuts", Some("CmdOrCtrl+/"))?)
-        .item(&item(app, "toggle-voice", "Voice chat", Some("CmdOrCtrl+Shift+V"))?)
+        .item(&item(
+            app,
+            "shortcuts",
+            "Keyboard Shortcuts",
+            Some("CmdOrCtrl+/"),
+        )?)
+        .item(&item(
+            app,
+            "toggle-voice",
+            "Voice chat",
+            Some("CmdOrCtrl+Shift+V"),
+        )?)
         .separator()
         .fullscreen()
         .build()
@@ -215,9 +240,9 @@ fn action_payload(raw: &str) -> Option<serde_json::Value> {
         ("new-pane", Some(kind)) => Some(serde_json::json!({ "id": "new-pane", "kind": kind })),
         ("set-theme", Some(pref)) => Some(serde_json::json!({ "id": "set-theme", "pref": pref })),
         (
-            "open-preferences" | "open-onboarding" | "toggle-sidebar" | "toggle-voice" | "quick-open"
-            | "shortcuts" | "close-pane" | "save" | "save-all" | "open-file" | "open-folder"
-            | "new-file" | "new-workspace",
+            "open-preferences" | "open-onboarding" | "toggle-sidebar" | "toggle-voice"
+            | "quick-open" | "shortcuts" | "close-pane" | "save" | "save-all" | "open-file"
+            | "open-folder" | "new-file" | "new-workspace",
             None,
         ) => Some(serde_json::json!({ "id": id })),
         _ => None,
@@ -287,8 +312,14 @@ mod tests {
 
     #[test]
     fn action_payload_reconstructs_plain_ids() {
-        assert_eq!(action_payload("close-pane"), Some(serde_json::json!({ "id": "close-pane" })));
-        assert_eq!(action_payload("save-all"), Some(serde_json::json!({ "id": "save-all" })));
+        assert_eq!(
+            action_payload("close-pane"),
+            Some(serde_json::json!({ "id": "close-pane" }))
+        );
+        assert_eq!(
+            action_payload("save-all"),
+            Some(serde_json::json!({ "id": "save-all" }))
+        );
     }
 
     #[test]

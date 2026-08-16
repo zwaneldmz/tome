@@ -168,7 +168,10 @@ mod tests {
             "core-vault",
             "onboarded-v1",
         ] {
-            assert!(!is_store_key_allowed(key, true), "{key} should be denied while locked");
+            assert!(
+                !is_store_key_allowed(key, true),
+                "{key} should be denied while locked"
+            );
         }
     }
 
@@ -186,7 +189,10 @@ mod tests {
     fn lockscreen_store_keys_stays_minimal() {
         // Every member must independently pass while locked.
         for key in LOCKSCREEN_STORE_KEYS.iter().copied() {
-            assert!(is_store_key_allowed(key, true), "{key} should pass while locked");
+            assert!(
+                is_store_key_allowed(key, true),
+                "{key} should pass while locked"
+            );
         }
     }
 }

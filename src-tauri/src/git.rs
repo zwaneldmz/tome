@@ -42,7 +42,11 @@ async fn git(dir: &str, args: &[&str]) -> Result<String, String> {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let trimmed = stderr.trim();
     if trimmed.is_empty() {
-        Err(format!("git {} exited with {}", args.join(" "), output.status))
+        Err(format!(
+            "git {} exited with {}",
+            args.join(" "),
+            output.status
+        ))
     } else {
         Err(trimmed.to_string())
     }
@@ -98,7 +102,9 @@ pub async fn info(dir: &str) -> Value {
         }))
     }
 
-    inner(dir).await.unwrap_or_else(|_| json!({ "repo": false }))
+    inner(dir)
+        .await
+        .unwrap_or_else(|_| json!({ "repo": false }))
 }
 
 /// `git:branches`. No try/catch in the original — a `git()` failure
@@ -106,7 +112,11 @@ pub async fn info(dir: &str) -> Value {
 pub async fn branches(dir: &str) -> Result<Value, String> {
     let out = git(
         dir,
-        &["branch", "--sort=-committerdate", "--format=%(refname:short)"],
+        &[
+            "branch",
+            "--sort=-committerdate",
+            "--format=%(refname:short)",
+        ],
     )
     .await?;
     let list: Vec<&str> = out.split('\n').filter(|s| !s.is_empty()).collect();
@@ -134,7 +144,8 @@ const LOG_SEP: char = '\u{1f}';
 /// "no limit"; `filter(|&n| n != 0)` reproduces that.
 pub async fn log(dir: &str, limit: Option<u32>) -> Result<Value, String> {
     let n = limit.filter(|&n| n != 0).unwrap_or(250);
-    let pretty = format!("--pretty=format:%H{LOG_SEP}%h{LOG_SEP}%an{LOG_SEP}%ad{LOG_SEP}%D{LOG_SEP}%s");
+    let pretty =
+        format!("--pretty=format:%H{LOG_SEP}%h{LOG_SEP}%an{LOG_SEP}%ad{LOG_SEP}%D{LOG_SEP}%s");
     let out = git(
         dir,
         &[
@@ -184,7 +195,12 @@ pub async fn commit(dir: &str, hash: &str) -> Result<Value, String> {
         .trim()
         .to_string();
 
-    let raw = match git(dir, &["diff", "--name-status", "-M", &format!("{hash}^"), hash]).await {
+    let raw = match git(
+        dir,
+        &["diff", "--name-status", "-M", &format!("{hash}^"), hash],
+    )
+    .await
+    {
         Ok(s) => s,
         // root commit has no parent — diff-tree against nothing instead
         Err(_) => {
@@ -373,7 +389,12 @@ mod tests {
         run(repo.path(), &["branch", "feature-a"]);
 
         let v = branches(repo.path().to_str().unwrap()).await.unwrap();
-        let list: Vec<&str> = v.as_array().unwrap().iter().map(|s| s.as_str().unwrap()).collect();
+        let list: Vec<&str> = v
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s.as_str().unwrap())
+            .collect();
         assert!(list.contains(&"main"));
         assert!(list.contains(&"feature-a"));
         assert!(list.iter().all(|s| !s.is_empty()));
@@ -473,7 +494,9 @@ mod tests {
         write_and_commit(repo.path(), "a.txt", "2\n", "second");
         let hash = head_hash(repo.path());
 
-        let v = diff(repo.path().to_str().unwrap(), &hash, "a.txt").await.unwrap();
+        let v = diff(repo.path().to_str().unwrap(), &hash, "a.txt")
+            .await
+            .unwrap();
         let text = v.as_str().unwrap();
         assert!(text.contains("-1"));
         assert!(text.contains("+2"));
@@ -485,16 +508,21 @@ mod tests {
         write_and_commit(repo.path(), "a.txt", "1\n", "root commit");
         let hash = head_hash(repo.path());
 
-        let v = diff(repo.path().to_str().unwrap(), &hash, "a.txt").await.unwrap();
+        let v = diff(repo.path().to_str().unwrap(), &hash, "a.txt")
+            .await
+            .unwrap();
         assert!(v.as_str().unwrap().contains("a.txt"));
     }
 
     #[tokio::test]
     async fn git_helper_prefers_stderr_and_never_panics_on_a_bad_dir() {
         let tmp = tempdir().unwrap();
-        let err = git(tmp.path().to_str().unwrap(), &["rev-parse", "--abbrev-ref", "HEAD"])
-            .await
-            .unwrap_err();
+        let err = git(
+            tmp.path().to_str().unwrap(),
+            &["rev-parse", "--abbrev-ref", "HEAD"],
+        )
+        .await
+        .unwrap_err();
         assert!(!err.is_empty());
     }
 
@@ -529,7 +557,9 @@ mod tests {
             .output()
             .unwrap();
         let text = String::from_utf8_lossy(&out.stdout);
-        assert!(text.lines().any(|l| l.starts_with('A') && l.contains("b.txt")));
+        assert!(text
+            .lines()
+            .any(|l| l.starts_with('A') && l.contains("b.txt")));
     }
 
     #[tokio::test]
@@ -538,7 +568,9 @@ mod tests {
         std::fs::write(repo.path().join("a.txt"), "1\n").unwrap();
         run(repo.path(), &["add", "."]);
 
-        let v = commit_create(repo.path().to_str().unwrap(), "hello").await.unwrap();
+        let v = commit_create(repo.path().to_str().unwrap(), "hello")
+            .await
+            .unwrap();
         assert_eq!(v["ok"], true);
         let hash = v["hash"].as_str().unwrap();
         assert!(!hash.is_empty() && hash.chars().all(|c| c.is_ascii_hexdigit()));
@@ -547,7 +579,9 @@ mod tests {
     #[tokio::test]
     async fn commit_create_reports_ok_false_with_no_staged_changes() {
         let repo = init_repo();
-        let v = commit_create(repo.path().to_str().unwrap(), "msg").await.unwrap();
+        let v = commit_create(repo.path().to_str().unwrap(), "msg")
+            .await
+            .unwrap();
         assert_eq!(v["ok"], false);
         assert!(!v["error"].as_str().unwrap().is_empty());
     }

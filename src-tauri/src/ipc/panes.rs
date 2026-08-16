@@ -93,7 +93,9 @@ pub async fn ws_sync(
         .write()
         .expect("ws_sync: AppState.folders_synced lock poisoned") = true;
 
-    state.airgap.reapply_repo_consents(|p| confine::confined_real_path(&state, p).ok());
+    state
+        .airgap
+        .reapply_repo_consents(|p| confine::confined_real_path(&state, p).ok());
     recompile_all_proxies(&state);
 
     Ok(serde_json::json!({}))
@@ -160,7 +162,11 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        state.proxies.lock().unwrap().insert("pty-1".to_string(), proxy.clone());
+        state
+            .proxies
+            .lock()
+            .unwrap()
+            .insert("pty-1".to_string(), proxy.clone());
 
         assert_eq!(
             connect_status(proxy.port(), echo_port).await,
@@ -181,11 +187,15 @@ mod tests {
     }
 
     async fn spawn_test_echo_server() -> (u16, tokio::task::AbortHandle) {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind echo server");
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind echo server");
         let port = listener.local_addr().unwrap().port();
         let task = tokio::spawn(async move {
             loop {
-                let Ok((mut sock, _)) = listener.accept().await else { break };
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    break;
+                };
                 tokio::spawn(async move {
                     let mut buf = [0u8; 64];
                     let _ = sock.read(&mut buf).await;
@@ -199,18 +209,30 @@ mod tests {
     /// Sends a raw CONNECT through the pane proxy at `proxy_port` for
     /// `127.0.0.1:<upstream_port>` and returns just the status code.
     async fn connect_status(proxy_port: u16, upstream_port: u16) -> u16 {
-        let mut stream = TcpStream::connect(("127.0.0.1", proxy_port)).await.expect("connect to proxy");
+        let mut stream = TcpStream::connect(("127.0.0.1", proxy_port))
+            .await
+            .expect("connect to proxy");
         let req = format!("CONNECT 127.0.0.1:{upstream_port} HTTP/1.1\r\nHost: x\r\n\r\n");
-        stream.write_all(req.as_bytes()).await.expect("write CONNECT");
+        stream
+            .write_all(req.as_bytes())
+            .await
+            .expect("write CONNECT");
         let mut head = Vec::new();
         let mut byte = [0u8; 1];
         loop {
-            stream.read_exact(&mut byte).await.expect("read CONNECT response");
+            stream
+                .read_exact(&mut byte)
+                .await
+                .expect("read CONNECT response");
             head.push(byte[0]);
             if head.ends_with(b"\r\n\r\n") {
                 break;
             }
         }
-        String::from_utf8_lossy(&head).split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0)
+        String::from_utf8_lossy(&head)
+            .split_whitespace()
+            .nth(1)
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0)
     }
 }

@@ -135,30 +135,52 @@ pub fn spawn_process(req: SpawnRequest) -> SpawnOutcome {
         Err(e) => return SpawnOutcome::Failed(e),
     };
     let pid = child.id().unwrap_or(0) as i32;
-    let stdout = child.stdout.take().map(|s| Box::new(s) as Box<dyn AsyncRead + Unpin + Send>);
-    let stderr = child.stderr.take().map(|s| Box::new(s) as Box<dyn AsyncRead + Unpin + Send>);
+    let stdout = child
+        .stdout
+        .take()
+        .map(|s| Box::new(s) as Box<dyn AsyncRead + Unpin + Send>);
+    let stderr = child
+        .stderr
+        .take()
+        .map(|s| Box::new(s) as Box<dyn AsyncRead + Unpin + Send>);
 
     let (tx, rx) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
         let outcome = match child.wait().await {
             Ok(status) => exit_outcome_of(status),
-            Err(_) => ExitOutcome { code: None, signal: None },
+            Err(_) => ExitOutcome {
+                code: None,
+                signal: None,
+            },
         };
         let _ = tx.send(outcome);
     });
 
-    let kill: Arc<dyn Fn(i32) -> io::Result<()> + Send + Sync> = Arc::new(move |sig| signal_pid(pid, sig));
-    SpawnOutcome::Started(Spawned { pid, stdout, stderr, kill, exit: rx })
+    let kill: Arc<dyn Fn(i32) -> io::Result<()> + Send + Sync> =
+        Arc::new(move |sig| signal_pid(pid, sig));
+    SpawnOutcome::Started(Spawned {
+        pid,
+        stdout,
+        stderr,
+        kill,
+        exit: rx,
+    })
 }
 
 #[cfg(unix)]
 fn exit_outcome_of(status: std::process::ExitStatus) -> ExitOutcome {
     use std::os::unix::process::ExitStatusExt;
-    ExitOutcome { code: status.code(), signal: status.signal() }
+    ExitOutcome {
+        code: status.code(),
+        signal: status.signal(),
+    }
 }
 #[cfg(not(unix))]
 fn exit_outcome_of(status: std::process::ExitStatus) -> ExitOutcome {
-    ExitOutcome { code: status.code(), signal: None }
+    ExitOutcome {
+        code: status.code(),
+        signal: None,
+    }
 }
 
 #[cfg(test)]
@@ -190,7 +212,9 @@ mod tests {
             cwd: std::env::temp_dir(),
             env: vec![],
         });
-        let SpawnOutcome::Started(spawned) = outcome else { panic!("expected Started") };
+        let SpawnOutcome::Started(spawned) = outcome else {
+            panic!("expected Started")
+        };
         let exit = tokio::time::timeout(std::time::Duration::from_secs(5), spawned.exit)
             .await
             .expect("cat must exit promptly once stdin is closed")
@@ -204,7 +228,8 @@ mod tests {
         // an agent CLI's own tool calls would be) and then sleeps. Killing
         // the NEGATIVE pid (the process group) must take the grandchild
         // down too — the whole reason .process_group(0) matters.
-        let ticks = std::env::temp_dir().join(format!("tome-spawn-pg-test-{}.txt", std::process::id()));
+        let ticks =
+            std::env::temp_dir().join(format!("tome-spawn-pg-test-{}.txt", std::process::id()));
         let _ = std::fs::remove_file(&ticks);
         let script = format!(
             "sh -c 'while :; do echo t >> {p}; sleep 0.02; done' & exec sleep 30",
@@ -216,11 +241,19 @@ mod tests {
             cwd: std::env::temp_dir(),
             env: vec![],
         });
-        let SpawnOutcome::Started(spawned) = outcome else { panic!("expected Started") };
+        let SpawnOutcome::Started(spawned) = outcome else {
+            panic!("expected Started")
+        };
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while std::fs::read_to_string(&ticks).unwrap_or_default().is_empty() {
-            assert!(std::time::Instant::now() < deadline, "grandchild never started ticking");
+        while std::fs::read_to_string(&ticks)
+            .unwrap_or_default()
+            .is_empty()
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "grandchild never started ticking"
+            );
             tokio::time::sleep(std::time::Duration::from_millis(15)).await;
         }
 
@@ -232,7 +265,10 @@ mod tests {
         let settled = std::fs::read_to_string(&ticks).unwrap_or_default().len();
         // A tiny scheduling slack is fine; a grandchild that outlived the
         // kill would keep appending far more than that.
-        assert!(settled - after_kill < 10, "grandchild kept ticking after the process group was killed");
+        assert!(
+            settled - after_kill < 10,
+            "grandchild kept ticking after the process group was killed"
+        );
         let _ = std::fs::remove_file(&ticks);
     }
 

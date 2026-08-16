@@ -182,7 +182,10 @@ pub const CHANNEL_OF_COMMAND: &[(&str, &str)] = &[
     ("airgap_enroll_totp", "airgap:enrollTotp"),
     ("airgap_confirm_totp", "airgap:confirmTotp"),
     ("airgap_read_repo_allowlist", "airgap:readRepoAllowlist"),
-    ("airgap_consent_repo_allowlist", "airgap:consentRepoAllowlist"),
+    (
+        "airgap_consent_repo_allowlist",
+        "airgap:consentRepoAllowlist",
+    ),
     ("airgap_revoke_repo_allowlist", "airgap:revokeRepoAllowlist"),
     ("agents_list", "agents:list"),
     ("agents_customs", "agents:customs"),
@@ -324,7 +327,10 @@ mod tests {
         // language server — both were the original TOME-003 bypass and
         // must stay gated.
         for channel in ["ws:sync", "lsp:didOpen", "panes:sync", "conductor:allowRun"] {
-            assert!(!OPEN_ON.contains(&channel), "{channel} must not be in OPEN_ON");
+            assert!(
+                !OPEN_ON.contains(&channel),
+                "{channel} must not be in OPEN_ON"
+            );
         }
     }
 
@@ -391,7 +397,10 @@ mod tests {
     #[test]
     fn blocked_passes_every_open_channel_even_while_locked() {
         for channel in OPEN_CHANNELS {
-            assert!(!blocked(channel, true), "{channel} should stay open while locked");
+            assert!(
+                !blocked(channel, true),
+                "{channel} should stay open while locked"
+            );
         }
     }
 

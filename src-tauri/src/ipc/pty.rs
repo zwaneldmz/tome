@@ -90,7 +90,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::agent_spawn::{self, AgentEntry};
 use crate::ipc::airgap::{close_pane_and_proxy, create_gapped_pane_proxy};
 use crate::ipc::auth::ceil_seconds;
-use crate::{agent_env, airgap, brain, custom_agents, events, eventlog, lock_gate, login_env, pty_authority, state::AppState, store};
+use crate::{
+    agent_env, airgap, brain, custom_agents, eventlog, events, lock_gate, login_env, pty_authority,
+    state::AppState, store,
+};
 
 /// Wire shape of `pty:create`'s options object. `tome-ipc.js`'s
 /// `pty.create: (opts) => { const ch = new Channel(); ...; return
@@ -174,7 +177,10 @@ enum GappedSpawnDecision {
     /// OS-unconditional so `#[cfg(test)]` can exercise both branches on
     /// any host; the literal and the const are byte-identical on the one
     /// OS where either is ever actually used).
-    Sandbox { cmd: &'static str, args: Vec<String> },
+    Sandbox {
+        cmd: &'static str,
+        args: Vec<String>,
+    },
     /// Linux: `airgap::linux`'s fallback-ladder verdict for THIS host —
     /// `Bwrap`/`SelfUnshare` (real enforcement, argv still to be built —
     /// see [`build_linux_wrap_argv`]) or `Refuse { reason }` (bwrap absent
@@ -264,7 +270,9 @@ fn current_linux_sandbox_strategy() -> airgap::linux::SandboxStrategy {
 /// instead of printing a plausible-looking message that never applies.
 #[cfg(not(target_os = "linux"))]
 fn current_linux_sandbox_strategy() -> airgap::linux::SandboxStrategy {
-    airgap::linux::SandboxStrategy::Refuse { reason: String::new() }
+    airgap::linux::SandboxStrategy::Refuse {
+        reason: String::new(),
+    }
 }
 
 /// Builds the bwrap/self-unshare argv for whichever non-refusing rung
@@ -285,7 +293,9 @@ fn build_linux_wrap_argv(
 ) -> Result<Vec<String>, String> {
     match strategy {
         airgap::linux::SandboxStrategy::Bwrap => Ok(airgap::linux::build_bwrap_argv(spec)),
-        airgap::linux::SandboxStrategy::SelfUnshare => Ok(airgap::linux::build_self_unshare_argv(spec)),
+        airgap::linux::SandboxStrategy::SelfUnshare => {
+            Ok(airgap::linux::build_self_unshare_argv(spec))
+        }
         airgap::linux::SandboxStrategy::Refuse { reason } => Err(reason.clone()),
     }
 }
@@ -352,16 +362,21 @@ fn login_shell_argv(shell: &str, agent_cmd: Option<&str>) -> Vec<String> {
 /// from).
 fn resolve_shim_path() -> Result<PathBuf, String> {
     let exe = tauri::utils::platform::current_exe().map_err(|e| {
-        format!("resolve tome-shim sidecar: could not determine this process's own binary path: {e}")
+        format!(
+            "resolve tome-shim sidecar: could not determine this process's own binary path: {e}"
+        )
     })?;
     let dir = exe.parent().ok_or_else(|| {
-        "resolve tome-shim sidecar: this process's own binary path has no parent directory".to_string()
+        "resolve tome-shim sidecar: this process's own binary path has no parent directory"
+            .to_string()
     })?;
     if tauri::is_dev() {
         Ok(shim_path_in(dir, None))
     } else {
         let triple = tauri::utils::platform::target_triple().map_err(|e| {
-            format!("resolve tome-shim sidecar: could not determine this platform's target triple: {e}")
+            format!(
+                "resolve tome-shim sidecar: could not determine this platform's target triple: {e}"
+            )
         })?;
         Ok(shim_path_in(dir, Some(&triple)))
     }
@@ -520,18 +535,24 @@ pub async fn pty_create(
     // `!== false` in the JS original: an absent key (`Value::Null`) and
     // anything else but the literal `false` all mean "gap by default".
     let policy_default = airgap_default != json!(false);
-    let effective_gapped = pty_authority::resolve_gapping(opts.airgap.unwrap_or(false), policy_default);
+    let effective_gapped =
+        pty_authority::resolve_gapping(opts.airgap.unwrap_or(false), policy_default);
 
     // ---- TOME-001 re-auth ceremony (before resolving cwd — matches
     // createPty's own order) ----
     if !effective_gapped {
         let auth_configured = {
             let guard = state.auth.lock().expect("AppState.auth lock poisoned");
-            guard.as_ref().map(|a| a.status().configured).unwrap_or(false)
+            guard
+                .as_ref()
+                .map(|a| a.status().configured)
+                .unwrap_or(false)
         };
         if pty_authority::unrestricted_spawn_needs_reauth(effective_gapped, auth_configured) {
             let mut guard = state.auth.lock().expect("AppState.auth lock poisoned");
-            let auth = guard.as_mut().ok_or_else(|| "auth: not initialized".to_string())?;
+            let auth = guard
+                .as_mut()
+                .ok_or_else(|| "auth: not initialized".to_string())?;
             let wait = auth.throttle_retry_in("pty:unrestricted");
             if wait > 0 {
                 return Ok(json!({
@@ -540,18 +561,23 @@ pub async fn pty_create(
                 }));
             }
             let payload_supplied = opts.auth.is_some();
-            let verified = payload_supplied
-                && {
-                    let payload = opts.auth.as_ref().expect("payload_supplied just checked Some");
-                    if auth.totp_active() {
-                        payload.get("code").and_then(Value::as_str).is_some_and(|c| auth.verify_totp(c))
-                    } else {
-                        payload
-                            .get("passphrase")
-                            .and_then(Value::as_str)
-                            .is_some_and(|p| auth.verify_passphrase(p))
-                    }
-                };
+            let verified = payload_supplied && {
+                let payload = opts
+                    .auth
+                    .as_ref()
+                    .expect("payload_supplied just checked Some");
+                if auth.totp_active() {
+                    payload
+                        .get("code")
+                        .and_then(Value::as_str)
+                        .is_some_and(|c| auth.verify_totp(c))
+                } else {
+                    payload
+                        .get("passphrase")
+                        .and_then(Value::as_str)
+                        .is_some_and(|p| auth.verify_passphrase(p))
+                }
+            };
             match evaluate_reauth(payload_supplied, verified) {
                 ReauthOutcome::NeedsCredentials => {
                     return Ok(json!({"reauth": true, "error": Value::Null}));
@@ -595,10 +621,14 @@ pub async fn pty_create(
             current_linux_sandbox_strategy(),
         ) {
             GappedSpawnDecision::Sandbox { cmd, args } => {
-                let proxy =
-                    create_gapped_pane_proxy(&app, &state, &opts.id, None).await.map_err(|e| e.to_string())?;
+                let proxy = create_gapped_pane_proxy(&app, &state, &opts.id, None)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 proxy_port = Some(proxy.port());
-                sandbox = Some(SandboxWrap::Prefix { cmd: cmd.to_string(), args });
+                sandbox = Some(SandboxWrap::Prefix {
+                    cmd: cmd.to_string(),
+                    args,
+                });
             }
             GappedSpawnDecision::Linux(strategy) => {
                 // Rung 3: refuse loudly with an actionable message BEFORE
@@ -636,9 +666,10 @@ pub async fn pty_create(
                 }
                 let shim_path = resolve_shim_path()?;
 
-                let proxy = create_gapped_pane_proxy(&app, &state, &opts.id, Some(sock_path.clone()))
-                    .await
-                    .map_err(|e| e.to_string())?;
+                let proxy =
+                    create_gapped_pane_proxy(&app, &state, &opts.id, Some(sock_path.clone()))
+                        .await
+                        .map_err(|e| e.to_string())?;
                 proxy_port = Some(proxy.port());
 
                 // Cached (`tokio::sync::OnceCell`) — see `login_env.rs`'s
@@ -699,7 +730,10 @@ pub async fn pty_create(
                             ("paneId", json!(opts.id)),
                             ("kind", json!(opts.kind)),
                             ("gapped", json!(true)),
-                            ("reason", json!("gapped panes are only supported on macOS and Linux")),
+                            (
+                                "reason",
+                                json!("gapped panes are only supported on macOS and Linux"),
+                            ),
                         ],
                         None,
                     ),
@@ -714,7 +748,11 @@ pub async fn pty_create(
 
     let login = login_env::login_env().await;
     let process_env: HashMap<String, String> = std::env::vars().collect();
-    let secrets = if is_agent { login.secrets.clone() } else { HashMap::new() };
+    let secrets = if is_agent {
+        login.secrets.clone()
+    } else {
+        HashMap::new()
+    };
     // `if (ws) { env.TOME_BRAIN = await brain.ensureBrain(ws); ... }` —
     // unconditional on is_agent/gapped, matching buildAgentEnv's own order
     // (see PtyCreateOpts's doc comment on `ws`).
@@ -727,11 +765,28 @@ pub async fn pty_create(
         }
         None => (None, None),
     };
-    let extras = agent_env::AgentEnvExtras { is_agent, secrets, brain_path, core_vault_root, proxy_port };
+    let extras = agent_env::AgentEnvExtras {
+        is_agent,
+        secrets,
+        brain_path,
+        core_vault_root,
+        proxy_port,
+    };
     let env = pane_env(&process_env, &login.path, &extras);
 
-    let cmd = build_pty_command(&login.shell, agent_cmd.as_deref(), &spawn_cwd, &env, sandbox.as_ref());
-    let size = PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 };
+    let cmd = build_pty_command(
+        &login.shell,
+        agent_cmd.as_deref(),
+        &spawn_cwd,
+        &env,
+        sandbox.as_ref(),
+    );
+    let size = PtySize {
+        rows: 24,
+        cols: 80,
+        pixel_width: 0,
+        pixel_height: 0,
+    };
 
     let exit_id = opts.id.clone();
     let exit_app = app.clone();
@@ -748,15 +803,22 @@ pub async fn pty_create(
         std::sync::Arc::new(move |data: &str| tap_conductor.record(&tap_id, data));
     let spawn_result = state
         .pty
-        .spawn_raw(opts.id.clone(), cmd, size, on_data, Some(tap), move |exit_code| {
-            let _ = exit_app.emit("pty:exit", json!({"id": exit_id, "exitCode": exit_code}));
-            let exit_state = exit_app.state::<AppState>();
-            // Mirrors index.js's `p.onExit(({ exitCode }) => { ...;
-            // conductor.markExited(id); airgap.closePane(id); ... })` —
-            // markExited BEFORE closePane, same order.
-            exit_state.conductor.mark_exited(&exit_id);
-            close_pane_and_proxy(&exit_app, &exit_state, &exit_id);
-        })
+        .spawn_raw(
+            opts.id.clone(),
+            cmd,
+            size,
+            on_data,
+            Some(tap),
+            move |exit_code| {
+                let _ = exit_app.emit("pty:exit", json!({"id": exit_id, "exitCode": exit_code}));
+                let exit_state = exit_app.state::<AppState>();
+                // Mirrors index.js's `p.onExit(({ exitCode }) => { ...;
+                // conductor.markExited(id); airgap.closePane(id); ... })` —
+                // markExited BEFORE closePane, same order.
+                exit_state.conductor.mark_exited(&exit_id);
+                close_pane_and_proxy(&exit_app, &exit_state, &exit_id);
+            },
+        )
         .await;
 
     if let Err(err) = spawn_result {
@@ -775,7 +837,12 @@ pub async fn pty_create(
     // interception point, and adding one is a `pty.rs` (Phase 2) reader-loop
     // change outside this slice's safe blast radius — left as a follow-up
     // (see `conductor::state`'s module doc comment).
-    state.conductor.register(&opts.id, &opts.kind, &spawn_cwd.to_string_lossy(), effective_gapped);
+    state.conductor.register(
+        &opts.id,
+        &opts.kind,
+        &spawn_cwd.to_string_lossy(),
+        effective_gapped,
+    );
     Ok(json!({}))
 }
 
@@ -822,7 +889,11 @@ pub async fn pty_resize(
 /// already-gone pane id is a safe no-op throughout, same as the Electron
 /// original's optional chaining.
 #[tauri::command]
-pub async fn pty_kill(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<Value, String> {
+pub async fn pty_kill(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "pty:kill")?;
     state.pty.kill(&id).await;
     // Mirrors index.js's `ptys.get(id)?.kill(); ptys.delete(id);
@@ -852,7 +923,9 @@ fn is_agent_kind(agents: &[AgentEntry], kind: &str) -> bool {
 /// comment) specifically so this half is unit-testable hermetically, with
 /// no real home directory touched.
 fn resolve_core_vault_root(core_vault_store_value: Option<&str>) -> Option<String> {
-    brain::core_info(core_vault_store_value).configured_root().map(str::to_string)
+    brain::core_info(core_vault_store_value)
+        .configured_root()
+        .map(str::to_string)
 }
 
 /// Resolves `TOME_BRAIN`/`TOME_CORE_VAULT` for a workspace-scoped pane —
@@ -873,11 +946,18 @@ fn resolve_core_vault_root(core_vault_store_value: Option<&str>) -> Option<Strin
 /// `brain::ensure_brain`'s signature, out of scope for this fix). The
 /// `TOME_CORE_VAULT` half has no such coupling and IS unit-tested — see
 /// [`resolve_core_vault_root`].
-fn resolve_brain_env(ws: &str, dir: &Path, locked: bool) -> Result<(Option<String>, Option<String>), String> {
+fn resolve_brain_env(
+    ws: &str,
+    dir: &Path,
+    locked: bool,
+) -> Result<(Option<String>, Option<String>), String> {
     let brain_path = brain::ensure_brain(ws)?.to_string_lossy().into_owned();
     let core_vault = store::get(dir, "core-vault", locked);
     let core_root = core_vault.as_str().map(str::to_string);
-    Ok((Some(brain_path), resolve_core_vault_root(core_root.as_deref())))
+    Ok((
+        Some(brain_path),
+        resolve_core_vault_root(core_root.as_deref()),
+    ))
 }
 
 /// The env every pane (agent or plain terminal, gapped or not) is spawned
@@ -893,10 +973,16 @@ fn resolve_brain_env(ws: &str, dir: &Path, locked: bool) -> Result<(Option<Strin
 /// reads it — without the in-place mutation; see `login_env.rs`'s module
 /// doc comment for why this port returns data instead of mutating global
 /// process state.
-fn pane_env(process_env: &HashMap<String, String>, login_path: &str, extras: &agent_env::AgentEnvExtras) -> Vec<(String, String)> {
+fn pane_env(
+    process_env: &HashMap<String, String>,
+    login_path: &str,
+    extras: &agent_env::AgentEnvExtras,
+) -> Vec<(String, String)> {
     let mut base = process_env.clone();
     base.insert("PATH".to_string(), login_path.to_string());
-    agent_env::compose_agent_env(&base, extras).into_iter().collect()
+    agent_env::compose_agent_env(&base, extras)
+        .into_iter()
+        .collect()
 }
 
 #[cfg(test)]
@@ -959,7 +1045,10 @@ mod tests {
     fn is_agent_kind_true_for_every_builtin() {
         let agents = builtins_only();
         for kind in agent_spawn::AGENTS {
-            assert!(is_agent_kind(&agents, kind), "{kind} should be an agent kind");
+            assert!(
+                is_agent_kind(&agents, kind),
+                "{kind} should be an agent kind"
+            );
         }
     }
 
@@ -1002,7 +1091,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir(tmp.path().join("sub")).unwrap();
         let root_str = tmp.path().to_str().unwrap();
-        assert_eq!(resolve_core_vault_root(Some(root_str)), Some(root_str.to_string()));
+        assert_eq!(
+            resolve_core_vault_root(Some(root_str)),
+            Some(root_str.to_string())
+        );
     }
 
     #[test]
@@ -1013,7 +1105,10 @@ mod tests {
     #[test]
     fn resolve_core_vault_root_is_none_for_an_empty_or_unreadable_root() {
         assert_eq!(resolve_core_vault_root(Some("")), None);
-        assert_eq!(resolve_core_vault_root(Some("/definitely/does/not/exist/core-vault-xyz")), None);
+        assert_eq!(
+            resolve_core_vault_root(Some("/definitely/does/not/exist/core-vault-xyz")),
+            None
+        );
     }
 
     // ================= pane_env — the login-shell PATH override + layering ================
@@ -1024,16 +1119,30 @@ mod tests {
         process_env.insert("PATH".to_string(), "/usr/bin:/bin".to_string()); // launchd's bare PATH
         process_env.insert("HOME".to_string(), "/Users/tester".to_string());
         let harvested = "/usr/bin:/bin:/opt/homebrew/bin:/Users/tester/.local/bin";
-        let env = pane_env(&process_env, harvested, &agent_env::AgentEnvExtras::default());
-        let path = env.iter().find(|(k, _)| k == "PATH").map(|(_, v)| v.as_str());
+        let env = pane_env(
+            &process_env,
+            harvested,
+            &agent_env::AgentEnvExtras::default(),
+        );
+        let path = env
+            .iter()
+            .find(|(k, _)| k == "PATH")
+            .map(|(_, v)| v.as_str());
         assert_eq!(path, Some(harvested));
     }
 
     #[test]
     fn pane_env_never_carries_a_provider_secret_for_a_plain_terminal() {
         let mut process_env = HashMap::new();
-        process_env.insert("ANTHROPIC_API_KEY".to_string(), "sk-ant-should-not-leak".to_string());
-        let env = pane_env(&process_env, "/usr/bin", &agent_env::AgentEnvExtras::default());
+        process_env.insert(
+            "ANTHROPIC_API_KEY".to_string(),
+            "sk-ant-should-not-leak".to_string(),
+        );
+        let env = pane_env(
+            &process_env,
+            "/usr/bin",
+            &agent_env::AgentEnvExtras::default(),
+        );
         assert!(
             env.iter().all(|(k, _)| k != "ANTHROPIC_API_KEY"),
             "pane_env with is_agent:false must never carry a provider credential"
@@ -1044,26 +1153,48 @@ mod tests {
     fn pane_env_carries_secrets_only_when_is_agent_is_set() {
         let mut secrets = HashMap::new();
         secrets.insert("ANTHROPIC_API_KEY".to_string(), "sk-ant-x".to_string());
-        let extras = agent_env::AgentEnvExtras { is_agent: true, secrets, ..Default::default() };
+        let extras = agent_env::AgentEnvExtras {
+            is_agent: true,
+            secrets,
+            ..Default::default()
+        };
         let env = pane_env(&HashMap::new(), "/usr/bin", &extras);
-        assert_eq!(env.iter().find(|(k, _)| k == "ANTHROPIC_API_KEY").map(|(_, v)| v.as_str()), Some("sk-ant-x"));
+        assert_eq!(
+            env.iter()
+                .find(|(k, _)| k == "ANTHROPIC_API_KEY")
+                .map(|(_, v)| v.as_str()),
+            Some("sk-ant-x")
+        );
     }
 
     #[test]
     fn pane_env_carries_proxy_vars_only_when_gapped() {
-        let extras = agent_env::AgentEnvExtras { proxy_port: Some(54321), ..Default::default() };
+        let extras = agent_env::AgentEnvExtras {
+            proxy_port: Some(54321),
+            ..Default::default()
+        };
         let env = pane_env(&HashMap::new(), "/usr/bin", &extras);
         assert_eq!(
-            env.iter().find(|(k, _)| k == "HTTP_PROXY").map(|(_, v)| v.as_str()),
+            env.iter()
+                .find(|(k, _)| k == "HTTP_PROXY")
+                .map(|(_, v)| v.as_str()),
             Some("http://127.0.0.1:54321")
         );
-        let ungapped = pane_env(&HashMap::new(), "/usr/bin", &agent_env::AgentEnvExtras::default());
+        let ungapped = pane_env(
+            &HashMap::new(),
+            "/usr/bin",
+            &agent_env::AgentEnvExtras::default(),
+        );
         assert!(ungapped.iter().all(|(k, _)| k != "HTTP_PROXY"));
     }
 
     #[test]
     fn pane_env_still_sets_the_fixed_term_pair() {
-        let env = pane_env(&HashMap::new(), "/usr/bin", &agent_env::AgentEnvExtras::default());
+        let env = pane_env(
+            &HashMap::new(),
+            "/usr/bin",
+            &agent_env::AgentEnvExtras::default(),
+        );
         let get = |k: &str| env.iter().find(|(key, _)| key == k).map(|(_, v)| v.clone());
         assert_eq!(get("TERM"), Some("xterm-256color".to_string()));
         assert_eq!(get("COLORTERM"), Some("truecolor".to_string()));
@@ -1072,14 +1203,18 @@ mod tests {
     // ================= resolve_gapped_spawn — TOME-001's three-way OS rule ================
 
     fn refuse_strategy() -> airgap::linux::SandboxStrategy {
-        airgap::linux::SandboxStrategy::Refuse { reason: "install bubblewrap".to_string() }
+        airgap::linux::SandboxStrategy::Refuse {
+            reason: "install bubblewrap".to_string(),
+        }
     }
 
     #[test]
     fn resolve_gapped_spawn_wraps_in_sandbox_exec_on_macos_regardless_of_linux_strategy() {
-        for linux_strategy in
-            [airgap::linux::SandboxStrategy::Bwrap, airgap::linux::SandboxStrategy::SelfUnshare, refuse_strategy()]
-        {
+        for linux_strategy in [
+            airgap::linux::SandboxStrategy::Bwrap,
+            airgap::linux::SandboxStrategy::SelfUnshare,
+            refuse_strategy(),
+        ] {
             match resolve_gapped_spawn(HostOs::MacOs, "(version 1)".to_string(), linux_strategy) {
                 GappedSpawnDecision::Sandbox { cmd, args } => {
                     assert_eq!(cmd, "/usr/bin/sandbox-exec");
@@ -1095,11 +1230,16 @@ mod tests {
 
     #[test]
     fn resolve_gapped_spawn_passes_the_linux_strategy_through_unchanged_on_linux() {
-        for linux_strategy in
-            [airgap::linux::SandboxStrategy::Bwrap, airgap::linux::SandboxStrategy::SelfUnshare, refuse_strategy()]
-        {
-            let decision =
-                resolve_gapped_spawn(HostOs::Linux, "(version 1)".to_string(), linux_strategy.clone());
+        for linux_strategy in [
+            airgap::linux::SandboxStrategy::Bwrap,
+            airgap::linux::SandboxStrategy::SelfUnshare,
+            refuse_strategy(),
+        ] {
+            let decision = resolve_gapped_spawn(
+                HostOs::Linux,
+                "(version 1)".to_string(),
+                linux_strategy.clone(),
+            );
             assert!(
                 matches!(decision, GappedSpawnDecision::Linux(ref s) if *s == linux_strategy),
                 "expected Linux({linux_strategy:?}) passthrough"
@@ -1117,7 +1257,11 @@ mod tests {
         // OS this app doesn't ship a Linux sandbox for — HostOs::Other
         // never reads linux_strategy at all.
         assert!(matches!(
-            resolve_gapped_spawn(HostOs::Other, "(version 1)".to_string(), airgap::linux::SandboxStrategy::Bwrap),
+            resolve_gapped_spawn(
+                HostOs::Other,
+                "(version 1)".to_string(),
+                airgap::linux::SandboxStrategy::Bwrap
+            ),
             GappedSpawnDecision::RefuseUnsupportedOs
         ));
     }
@@ -1131,7 +1275,12 @@ mod tests {
             host_socket_path: PathBuf::from("/run/user/1000/tome/pane-pty-1.sock"),
             app_config_dir: PathBuf::from("/home/tester/.config/tome"),
             shim_path: PathBuf::from("/opt/tome/tome-shim"),
-            inner_argv: vec!["/bin/zsh".to_string(), "-l".to_string(), "-c".to_string(), "claude".to_string()],
+            inner_argv: vec![
+                "/bin/zsh".to_string(),
+                "-l".to_string(),
+                "-c".to_string(),
+                "claude".to_string(),
+            ],
             headless: false,
         }
     }
@@ -1157,22 +1306,35 @@ mod tests {
     #[test]
     fn build_linux_wrap_argv_refuse_returns_the_reason_as_an_error_rather_than_panicking() {
         let spec = sample_linux_spec();
-        let strategy = airgap::linux::SandboxStrategy::Refuse { reason: "install bubblewrap".to_string() };
-        assert_eq!(build_linux_wrap_argv(&strategy, &spec), Err("install bubblewrap".to_string()));
+        let strategy = airgap::linux::SandboxStrategy::Refuse {
+            reason: "install bubblewrap".to_string(),
+        };
+        assert_eq!(
+            build_linux_wrap_argv(&strategy, &spec),
+            Err("install bubblewrap".to_string())
+        );
     }
 
     // ================= login_shell_argv =================
 
     #[test]
     fn login_shell_argv_is_a_bare_login_shell_with_no_agent_cmd() {
-        assert_eq!(login_shell_argv("/bin/zsh", None), vec!["/bin/zsh".to_string(), "-l".to_string()]);
+        assert_eq!(
+            login_shell_argv("/bin/zsh", None),
+            vec!["/bin/zsh".to_string(), "-l".to_string()]
+        );
     }
 
     #[test]
     fn login_shell_argv_runs_the_agent_command_via_dash_c() {
         assert_eq!(
             login_shell_argv("/bin/zsh", Some("claude")),
-            vec!["/bin/zsh".to_string(), "-l".to_string(), "-c".to_string(), "claude".to_string()]
+            vec![
+                "/bin/zsh".to_string(),
+                "-l".to_string(),
+                "-c".to_string(),
+                "claude".to_string()
+            ]
         );
     }
 
@@ -1180,7 +1342,10 @@ mod tests {
 
     #[test]
     fn shim_path_in_dev_mode_has_no_target_triple_suffix() {
-        assert_eq!(shim_path_in(Path::new("/app/target/debug"), None), PathBuf::from("/app/target/debug/tome-shim"));
+        assert_eq!(
+            shim_path_in(Path::new("/app/target/debug"), None),
+            PathBuf::from("/app/target/debug/tome-shim")
+        );
     }
 
     #[test]
@@ -1196,7 +1361,11 @@ mod tests {
     #[test]
     fn build_pty_command_is_a_bare_login_shell_for_a_terminal_pane() {
         let cmd = build_pty_command("/bin/sh", None, Path::new("/tmp"), &[], None);
-        let argv: Vec<String> = cmd.get_argv().iter().map(|s| s.to_string_lossy().into_owned()).collect();
+        let argv: Vec<String> = cmd
+            .get_argv()
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(argv, vec!["/bin/sh".to_string(), "-l".to_string()]);
         assert_eq!(cmd.get_cwd().unwrap().to_string_lossy(), "/tmp");
     }
@@ -1204,8 +1373,20 @@ mod tests {
     #[test]
     fn build_pty_command_runs_the_agent_command_via_dash_c() {
         let cmd = build_pty_command("/bin/zsh", Some("claude"), Path::new("/work"), &[], None);
-        let argv: Vec<String> = cmd.get_argv().iter().map(|s| s.to_string_lossy().into_owned()).collect();
-        assert_eq!(argv, vec!["/bin/zsh".to_string(), "-l".to_string(), "-c".to_string(), "claude".to_string()]);
+        let argv: Vec<String> = cmd
+            .get_argv()
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            argv,
+            vec![
+                "/bin/zsh".to_string(),
+                "-l".to_string(),
+                "-c".to_string(),
+                "claude".to_string()
+            ]
+        );
     }
 
     #[test]
@@ -1214,8 +1395,18 @@ mod tests {
             cmd: "/usr/bin/sandbox-exec".to_string(),
             args: vec!["-p".to_string(), "PROFILE".to_string()],
         };
-        let cmd = build_pty_command("/bin/zsh", Some("claude"), Path::new("/work"), &[], Some(&sandbox));
-        let argv: Vec<String> = cmd.get_argv().iter().map(|s| s.to_string_lossy().into_owned()).collect();
+        let cmd = build_pty_command(
+            "/bin/zsh",
+            Some("claude"),
+            Path::new("/work"),
+            &[],
+            Some(&sandbox),
+        );
+        let argv: Vec<String> = cmd
+            .get_argv()
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(
             argv,
             vec![
@@ -1247,14 +1438,27 @@ mod tests {
         let sandbox = SandboxWrap::Full { argv: argv.clone() };
         // Deliberately mismatched shell/agent_cmd — must be completely
         // ignored.
-        let cmd = build_pty_command("/bin/NEVER-USED", Some("also-never-used"), Path::new("/work"), &[], Some(&sandbox));
-        let got: Vec<String> = cmd.get_argv().iter().map(|s| s.to_string_lossy().into_owned()).collect();
+        let cmd = build_pty_command(
+            "/bin/NEVER-USED",
+            Some("also-never-used"),
+            Path::new("/work"),
+            &[],
+            Some(&sandbox),
+        );
+        let got: Vec<String> = cmd
+            .get_argv()
+            .iter()
+            .map(|s| s.to_string_lossy().into_owned())
+            .collect();
         assert_eq!(got, argv);
     }
 
     #[test]
     fn build_pty_command_env_is_exactly_what_was_given_not_merged_with_this_process() {
-        let env = vec![("PATH".to_string(), "/usr/bin".to_string()), ("HOME".to_string(), "/home/x".to_string())];
+        let env = vec![
+            ("PATH".to_string(), "/usr/bin".to_string()),
+            ("HOME".to_string(), "/home/x".to_string()),
+        ];
         let cmd = build_pty_command("/bin/sh", None, Path::new("/tmp"), &env, None);
         assert_eq!(cmd.get_env("PATH").unwrap().to_string_lossy(), "/usr/bin");
         assert_eq!(cmd.get_env("HOME").unwrap().to_string_lossy(), "/home/x");
@@ -1269,17 +1473,26 @@ mod tests {
 
     #[test]
     fn evaluate_reauth_needs_credentials_when_nothing_was_supplied() {
-        assert!(matches!(evaluate_reauth(false, false), ReauthOutcome::NeedsCredentials));
+        assert!(matches!(
+            evaluate_reauth(false, false),
+            ReauthOutcome::NeedsCredentials
+        ));
     }
 
     #[test]
     fn evaluate_reauth_rejects_a_supplied_but_wrong_credential() {
-        assert!(matches!(evaluate_reauth(true, false), ReauthOutcome::Rejected));
+        assert!(matches!(
+            evaluate_reauth(true, false),
+            ReauthOutcome::Rejected
+        ));
     }
 
     #[test]
     fn evaluate_reauth_accepts_a_verified_credential() {
-        assert!(matches!(evaluate_reauth(true, true), ReauthOutcome::Verified));
+        assert!(matches!(
+            evaluate_reauth(true, true),
+            ReauthOutcome::Verified
+        ));
     }
 
     // ================= pty_authority integration sanity (already pinned in

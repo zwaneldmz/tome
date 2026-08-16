@@ -21,18 +21,36 @@ use crate::{lock_gate, lsp, state::AppState};
 /// already use over this same Tauri `invoke` transport); this command
 /// still runs to completion and returns `Ok` either way.
 #[tauri::command]
-pub async fn lsp_did_open(app: AppHandle, state: State<'_, AppState>, path: String, text: String) -> Result<Value, String> {
+pub async fn lsp_did_open(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    text: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "lsp:didOpen")?;
-    let folders = state.open_folders.read().expect("AppState.open_folders lock poisoned").clone();
+    let folders = state
+        .open_folders
+        .read()
+        .expect("AppState.open_folders lock poisoned")
+        .clone();
     lsp::did_open(&app, &path, &text, &folders).await;
     Ok(json!({}))
 }
 
 /// `lsp:didChange` (`{ path, text }`).
 #[tauri::command]
-pub async fn lsp_did_change(app: AppHandle, state: State<'_, AppState>, path: String, text: String) -> Result<Value, String> {
+pub async fn lsp_did_change(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+    text: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "lsp:didChange")?;
-    let folders = state.open_folders.read().expect("AppState.open_folders lock poisoned").clone();
+    let folders = state
+        .open_folders
+        .read()
+        .expect("AppState.open_folders lock poisoned")
+        .clone();
     lsp::did_change(&app, &path, &text, &folders).await;
     Ok(json!({}))
 }
@@ -44,9 +62,17 @@ pub async fn lsp_did_change(app: AppHandle, state: State<'_, AppState>, path: St
 /// object before it crosses the Tauri `invoke` boundary, so this
 /// command's signature is a plain named `path` argument like the others.
 #[tauri::command]
-pub async fn lsp_did_close(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<Value, String> {
+pub async fn lsp_did_close(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "lsp:didClose")?;
-    let folders = state.open_folders.read().expect("AppState.open_folders lock poisoned").clone();
+    let folders = state
+        .open_folders
+        .read()
+        .expect("AppState.open_folders lock poisoned")
+        .clone();
     lsp::did_close(&app, &path, &folders).await;
     Ok(json!({}))
 }
@@ -61,11 +87,17 @@ pub async fn lsp_hover(
     character: u64,
 ) -> Result<Value, String> {
     lock_gate::guard(&state, "lsp:hover")?;
-    let folders = state.open_folders.read().expect("AppState.open_folders lock poisoned").clone();
-    Ok(match lsp::hover(&app, &path, line, character, &folders).await {
-        Some(text) => Value::String(text),
-        None => Value::Null,
-    })
+    let folders = state
+        .open_folders
+        .read()
+        .expect("AppState.open_folders lock poisoned")
+        .clone();
+    Ok(
+        match lsp::hover(&app, &path, line, character, &folders).await {
+            Some(text) => Value::String(text),
+            None => Value::Null,
+        },
+    )
 }
 
 /// `lsp:definition` (`{ path, line, character }`) -> `{ path, line,
@@ -79,9 +111,17 @@ pub async fn lsp_definition(
     character: u64,
 ) -> Result<Value, String> {
     lock_gate::guard(&state, "lsp:definition")?;
-    let folders = state.open_folders.read().expect("AppState.open_folders lock poisoned").clone();
-    Ok(match lsp::definition(&app, &path, line, character, &folders).await {
-        Some(loc) => json!({ "path": loc.path.to_string_lossy(), "line": loc.line, "character": loc.character }),
-        None => Value::Null,
-    })
+    let folders = state
+        .open_folders
+        .read()
+        .expect("AppState.open_folders lock poisoned")
+        .clone();
+    Ok(
+        match lsp::definition(&app, &path, line, character, &folders).await {
+            Some(loc) => {
+                json!({ "path": loc.path.to_string_lossy(), "line": loc.line, "character": loc.character })
+            }
+            None => Value::Null,
+        },
+    )
 }

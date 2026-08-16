@@ -155,7 +155,13 @@ pub fn parse_custom_provider(value: &Value) -> Option<CustomProvider> {
         Some("anthropic") => Wire::Anthropic,
         _ => Wire::OpenAi,
     };
-    Some(CustomProvider { label, wire, base_url, api_key, model })
+    Some(CustomProvider {
+        label,
+        wire,
+        base_url,
+        api_key,
+        model,
+    })
 }
 
 /// Requesty routes Claude via vertex/bedrock; bare `anthropic/*` model ids
@@ -181,7 +187,9 @@ fn claude_entry() -> &'static ProviderEntry {
 pub fn active_provider_id(stored: Option<&str>) -> &'static str {
     match stored {
         Some(CUSTOM_ID) => CUSTOM_ID,
-        Some(id) => provider_entry(id).map(|e| e.id).unwrap_or(DEFAULT_CHAT_PROVIDER),
+        Some(id) => provider_entry(id)
+            .map(|e| e.id)
+            .unwrap_or(DEFAULT_CHAT_PROVIDER),
         None => DEFAULT_CHAT_PROVIDER,
     }
 }
@@ -356,12 +364,15 @@ pub fn resolve_chat_provider(
     let id = active_provider_id(stored_provider);
     if id == CUSTOM_ID {
         let Some(c) = custom else {
-            return ProviderResolution::KeyMissing { entry: custom_missing_entry(), id: id.to_string() };
+            return ProviderResolution::KeyMissing {
+                entry: custom_missing_entry(),
+                id: id.to_string(),
+            };
         };
         return ProviderResolution::Ready(resolve_custom(c));
     }
-    let entry =
-        provider_entry(id).expect("active_provider_id only returns a static CHAT_PROVIDERS id here");
+    let entry = provider_entry(id)
+        .expect("active_provider_id only returns a static CHAT_PROVIDERS id here");
     let Some(api_key) =
         truthy_lookup(secrets, entry.key_env).or_else(|| truthy_lookup(env, entry.key_env))
     else {
@@ -498,7 +509,13 @@ mod tests {
     #[test]
     fn store_provider_and_login_shell_key_resolves_that_provider() {
         let secrets = map(&[("ZHIPU_API_KEY", "z-key")]);
-        let res = resolve_chat_provider(&HashMap::new(), &secrets, Some("glm"), Some("glm-custom"), None);
+        let res = resolve_chat_provider(
+            &HashMap::new(),
+            &secrets,
+            Some("glm"),
+            Some("glm-custom"),
+            None,
+        );
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready, got {res:?}")
         };
@@ -572,7 +589,8 @@ mod tests {
     #[test]
     fn a_stored_model_override_is_trimmed() {
         let secrets = map(&[("MOONSHOT_API_KEY", "m-key")]);
-        let res = resolve_chat_provider(&HashMap::new(), &secrets, None, Some("  custom-id  "), None);
+        let res =
+            resolve_chat_provider(&HashMap::new(), &secrets, None, Some("  custom-id  "), None);
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready, got {res:?}")
         };
@@ -613,7 +631,10 @@ mod tests {
     #[test]
     fn chat_providers_has_exactly_the_five_builtins_in_that_order() {
         let ids: Vec<&str> = CHAT_PROVIDERS.iter().map(|p| p.id).collect();
-        assert_eq!(ids, vec!["kimi", "glm", "claude", "deepseek", "deepseek-flash"]);
+        assert_eq!(
+            ids,
+            vec!["kimi", "glm", "claude", "deepseek", "deepseek-flash"]
+        );
     }
 
     #[test]
@@ -670,7 +691,13 @@ mod tests {
             api_key: "k".to_string(),
             model: "local-model".to_string(),
         };
-        let res = resolve_chat_provider(&HashMap::new(), &HashMap::new(), Some("custom"), None, Some(&custom));
+        let res = resolve_chat_provider(
+            &HashMap::new(),
+            &HashMap::new(),
+            Some("custom"),
+            None,
+            Some(&custom),
+        );
         let ProviderResolution::Ready(p) = res else {
             panic!("expected Ready")
         };
@@ -683,7 +710,8 @@ mod tests {
 
     #[test]
     fn stored_custom_without_a_configured_entry_is_key_missing() {
-        let res = resolve_chat_provider(&HashMap::new(), &HashMap::new(), Some("custom"), None, None);
+        let res =
+            resolve_chat_provider(&HashMap::new(), &HashMap::new(), Some("custom"), None, None);
         let ProviderResolution::KeyMissing { entry, id } = res else {
             panic!("expected KeyMissing")
         };

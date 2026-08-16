@@ -114,7 +114,12 @@ fn is_safe_model(s: &str) -> bool {
 /// still `eprintln!` it at the point they fall back to the CLI default,
 /// preserving the operator-visible "this is your only trace of the
 /// substitution" behaviour the JS comment calls load-bearing.
-fn vet_model_against(models: &[&str], cmd: &str, model: &str, from: &str) -> Result<String, String> {
+fn vet_model_against(
+    models: &[&str],
+    cmd: &str,
+    model: &str,
+    from: &str,
+) -> Result<String, String> {
     match models.iter().find(|&&m| m == model) {
         None => Err(format!(
             r#"{from}: ignoring model "{model}" for {cmd} — not an allowlisted alias; spawning on the CLI default"#
@@ -186,7 +191,11 @@ impl AgentEntry {
 /// line is `list`'s own copies (the entry's `bin`, its already-vetted
 /// `args`, the allowlist's model alias), never a byte the caller handed
 /// in.
-pub fn build_agent_spawn_from(list: &[AgentEntry], kind: &str, model: Option<&str>) -> Option<String> {
+pub fn build_agent_spawn_from(
+    list: &[AgentEntry],
+    kind: &str,
+    model: Option<&str>,
+) -> Option<String> {
     let entry = list.iter().find(|e| e.id == kind)?;
     // The entry's own bin, never the caller's kind string — for built-ins
     // they spell the same word, and for customs the bin is what
@@ -241,7 +250,10 @@ pub fn build_agent_spawn_from(list: &[AgentEntry], kind: &str, model: Option<&st
 /// emits for built-ins, so both spellings of the list agree exactly (see
 /// `tests::the_wrapper_and_the_generalized_form_agree` below).
 pub fn build_agent_spawn(kind: &str, model: Option<&str>) -> Option<String> {
-    let builtins: Vec<AgentEntry> = AGENTS.iter().map(|&name| AgentEntry::builtin(name)).collect();
+    let builtins: Vec<AgentEntry> = AGENTS
+        .iter()
+        .map(|&name| AgentEntry::builtin(name))
+        .collect();
     build_agent_spawn_from(&builtins, kind, model)
 }
 
@@ -296,7 +308,11 @@ fn headless_template(cmd: &str, brief: &str, model: Option<String>) -> Option<He
 /// has no headless template (see `headless_template`) or the brief isn't
 /// usable. `model`/`brief` non-string JS inputs have no port — see this
 /// module's top doc comment.
-pub fn build_headless_spawn(kind: &str, model: Option<&str>, brief: Option<&str>) -> Option<HeadlessSpawn> {
+pub fn build_headless_spawn(
+    kind: &str,
+    model: Option<&str>,
+    brief: Option<&str>,
+) -> Option<HeadlessSpawn> {
     if !AGENTS.contains(&kind) {
         return None;
     }
@@ -337,7 +353,10 @@ mod tests {
 
     #[test]
     fn no_model_pinned_returns_the_bare_agent_command() {
-        assert_eq!(build_agent_spawn("claude", None), Some("claude".to_string()));
+        assert_eq!(
+            build_agent_spawn("claude", None),
+            Some("claude".to_string())
+        );
     }
 
     #[test]
@@ -345,7 +364,10 @@ mod tests {
         // The editor deletes the key rather than writing '', but a
         // hand-edited flow.json can spell the default either way — both
         // mean "the CLI's own".
-        assert_eq!(build_agent_spawn("claude", Some("")), Some("claude".to_string()));
+        assert_eq!(
+            build_agent_spawn("claude", Some("")),
+            Some("claude".to_string())
+        );
     }
 
     // ---- build_agent_spawn — allowlisted model ----
@@ -369,7 +391,10 @@ mod tests {
         // a usable command line, or the editor would offer a model that
         // silently spawns the default.
         for &(kind, models) in AGENT_MODELS {
-            assert!(AGENTS.contains(&kind), "a models list for an unspawnable kind {kind} is dead config");
+            assert!(
+                AGENTS.contains(&kind),
+                "a models list for an unspawnable kind {kind} is dead config"
+            );
             for &model in models {
                 assert_eq!(
                     build_agent_spawn(kind, Some(model)),
@@ -401,7 +426,10 @@ mod tests {
 
     #[test]
     fn off_allowlist_model_spawns_the_default() {
-        assert_eq!(build_agent_spawn("claude", Some("gpt-5")), Some("claude".to_string()));
+        assert_eq!(
+            build_agent_spawn("claude", Some("gpt-5")),
+            Some("claude".to_string())
+        );
     }
 
     #[test]
@@ -413,12 +441,15 @@ mod tests {
             "`id`",
             "haiku --dangerously-skip-permissions", // argument injection
             "--dangerously-skip-permissions",
-            "-e", // a lone flag
+            "-e",              // a lone flag
             "../../../bin/sh", // path traversal to another binary
-            "HAIKU", // the guard is lower-case only; near-misses are still misses
+            "HAIKU",           // the guard is lower-case only; near-misses are still misses
             "haiku ",
         ] {
-            assert_eq!(build_agent_spawn("claude", Some(model)), Some("claude".to_string()));
+            assert_eq!(
+                build_agent_spawn("claude", Some(model)),
+                Some("claude".to_string())
+            );
         }
     }
 
@@ -443,10 +474,20 @@ mod tests {
 
     #[test]
     fn the_wrapper_and_the_generalized_form_agree() {
-        let builtins: Vec<AgentEntry> = AGENTS.iter().map(|&name| AgentEntry::builtin(name)).collect();
+        let builtins: Vec<AgentEntry> = AGENTS
+            .iter()
+            .map(|&name| AgentEntry::builtin(name))
+            .collect();
         for &kind in AGENTS {
-            assert_eq!(build_agent_spawn_from(&builtins, kind, None), build_agent_spawn(kind, None));
-            if let Some(&model) = AGENT_MODELS.iter().find(|(k, _)| *k == kind).and_then(|(_, m)| m.first()) {
+            assert_eq!(
+                build_agent_spawn_from(&builtins, kind, None),
+                build_agent_spawn(kind, None)
+            );
+            if let Some(&model) = AGENT_MODELS
+                .iter()
+                .find(|(k, _)| *k == kind)
+                .and_then(|(_, m)| m.first())
+            {
                 assert_eq!(
                     build_agent_spawn_from(&builtins, kind, Some(model)),
                     build_agent_spawn(kind, Some(model))
@@ -510,7 +551,12 @@ mod tests {
             build_headless_spawn("claude", Some("haiku"), Some(BRIEF)),
             Some(HeadlessSpawn {
                 cmd: "claude".to_string(),
-                args: vec!["-p".to_string(), BRIEF.to_string(), "--model".to_string(), "haiku".to_string()],
+                args: vec![
+                    "-p".to_string(),
+                    BRIEF.to_string(),
+                    "--model".to_string(),
+                    "haiku".to_string()
+                ],
             })
         );
     }
@@ -521,7 +567,8 @@ mod tests {
         // Every one of these is a fine prompt and a catastrophe in a
         // shell string — the whole point of the argv array is that they
         // stay one element, unaltered.
-        let nasty = "read $(whoami); then `id`; \"quoted\" 'single' | tee /tmp/x & rm -rf ~\nline two";
+        let nasty =
+            "read $(whoami); then `id`; \"quoted\" 'single' | tee /tmp/x & rm -rf ~\nline two";
         let result = build_headless_spawn("claude", None, Some(nasty)).unwrap();
         assert_eq!(result.args, vec!["-p".to_string(), nasty.to_string()]);
         assert_eq!(result.args[1], nasty); // byte for byte, not escaped or flattened
@@ -533,11 +580,20 @@ mod tests {
         // would be ignored for a pane must be ignored for a background
         // node, or the two spawn paths disagree about what a flow file
         // means.
-        for model in ["gpt-5", "--dangerously-skip-permissions", "HAIKU", "haiku ", "$(id)"] {
+        for model in [
+            "gpt-5",
+            "--dangerously-skip-permissions",
+            "HAIKU",
+            "haiku ",
+            "$(id)",
+        ] {
             let result = build_headless_spawn("claude", Some(model), Some(BRIEF)).unwrap();
             assert_eq!(result.args, vec!["-p".to_string(), BRIEF.to_string()]); // no --model at all
-            // …and the pane path drops the identical value.
-            assert_eq!(build_agent_spawn("claude", Some(model)), Some("claude".to_string()));
+                                                                                // …and the pane path drops the identical value.
+            assert_eq!(
+                build_agent_spawn("claude", Some(model)),
+                Some("claude".to_string())
+            );
         }
     }
 
@@ -592,6 +648,9 @@ mod tests {
     fn a_vetted_custom_agent_reaches_the_command_line_through_the_generalized_builder() {
         let raw = serde_json::json!({ "id": "aider", "label": "Aider", "bin": "aider" });
         let agent = vet_custom_agent(&raw).unwrap();
-        assert_eq!(build_agent_spawn_from(&[agent], "aider", None), Some("aider".to_string()));
+        assert_eq!(
+            build_agent_spawn_from(&[agent], "aider", None),
+            Some("aider".to_string())
+        );
     }
 }

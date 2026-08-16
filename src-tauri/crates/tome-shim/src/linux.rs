@@ -341,8 +341,12 @@ fn spawn_bridge(listener: TcpListener, sock_path: PathBuf) {
 /// only half-closes (shuts down its write side, keeps reading) doesn't
 /// leave this bridge connection dangling forever.
 fn shovel_bidirectional(tcp: TcpStream, unix: UnixStream) {
-    let Ok(tcp_reader) = tcp.try_clone() else { return };
-    let Ok(unix_writer) = unix.try_clone() else { return };
+    let Ok(tcp_reader) = tcp.try_clone() else {
+        return;
+    };
+    let Ok(unix_writer) = unix.try_clone() else {
+        return;
+    };
     let mut tcp_writer = tcp;
     let mut unix_reader = unix;
 
@@ -409,9 +413,18 @@ const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
 /// call site): one direct `syscall(2)` invocation, no allocation, no
 /// locking.
 fn drop_all_capabilities() -> io::Result<()> {
-    let header = CapUserHeader { version: LINUX_CAPABILITY_VERSION_3, pid: 0 };
+    let header = CapUserHeader {
+        version: LINUX_CAPABILITY_VERSION_3,
+        pid: 0,
+    };
     let data = [CapUserData::default(); 2];
-    let ret = unsafe { libc::syscall(libc::SYS_capset, &header as *const CapUserHeader, data.as_ptr()) };
+    let ret = unsafe {
+        libc::syscall(
+            libc::SYS_capset,
+            &header as *const CapUserHeader,
+            data.as_ptr(),
+        )
+    };
     if ret != 0 {
         return Err(io::Error::last_os_error());
     }
@@ -453,7 +466,11 @@ extern "C" fn forward_to_child(sig: libc::c_int) {
 /// whole pane over a `sigaction(2)` failure that should never realistically
 /// happen.
 fn install_signal_forwarding() -> io::Result<()> {
-    let action = SigAction::new(SigHandler::Handler(forward_to_child), SaFlags::empty(), SigSet::empty());
+    let action = SigAction::new(
+        SigHandler::Handler(forward_to_child),
+        SaFlags::empty(),
+        SigSet::empty(),
+    );
     unsafe {
         signal::sigaction(Signal::SIGTERM, &action).map_err(io::Error::from)?;
         signal::sigaction(Signal::SIGINT, &action).map_err(io::Error::from)?;

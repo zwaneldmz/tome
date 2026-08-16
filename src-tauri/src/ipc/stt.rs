@@ -27,7 +27,9 @@ use crate::{lock_gate, state::AppState, store, stt};
 /// value (not a raw env lookup) so it stays a pure, directly testable
 /// function.
 fn whisper_bin_override() -> Option<String> {
-    std::env::var("TOME_WHISPER_BIN").ok().filter(|v| !v.is_empty())
+    std::env::var("TOME_WHISPER_BIN")
+        .ok()
+        .filter(|v| !v.is_empty())
 }
 
 /// JS falsy check narrowed to what `store::get(dir, "voice-warmup", _)`
@@ -102,9 +104,10 @@ pub async fn stt_warmup(app: AppHandle, state: State<'_, AppState>) -> Result<Va
     };
     let locked = *state.locked.read().unwrap();
     let dir_for_store = dir.clone();
-    let enabled = tokio::task::spawn_blocking(move || store::get(&dir_for_store, "voice-warmup", locked))
-        .await
-        .unwrap_or(Value::Null);
+    let enabled =
+        tokio::task::spawn_blocking(move || store::get(&dir_for_store, "voice-warmup", locked))
+            .await
+            .unwrap_or(Value::Null);
     if !warmup_enabled(&enabled) {
         return Ok(json!({ "skipped": true }));
     }

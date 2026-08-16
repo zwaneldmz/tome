@@ -19,13 +19,21 @@ use super::{cancel_run, kill_all, snapshot_all, start_run, Runner};
 // ---- fixtures ----
 
 fn workspace() -> PathBuf {
-    let root = tempfile::Builder::new().prefix("tome-runs-").tempdir().unwrap().keep();
+    let root = tempfile::Builder::new()
+        .prefix("tome-runs-")
+        .tempdir()
+        .unwrap()
+        .keep();
     std::fs::create_dir_all(root.join(".tome").join("flows")).unwrap();
     root
 }
 
 fn tmp_outside() -> PathBuf {
-    tempfile::Builder::new().prefix("tome-runs-outside-").tempdir().unwrap().keep()
+    tempfile::Builder::new()
+        .prefix("tome-runs-outside-")
+        .tempdir()
+        .unwrap()
+        .keep()
 }
 
 fn flow_doc(name: &str, ids: &[&str], pairs: &[(&str, &str)]) -> Value {
@@ -44,7 +52,10 @@ fn flow_doc(name: &str, ids: &[&str], pairs: &[(&str, &str)]) -> Value {
 
 fn write_flow(root: &Path, doc: &Value) -> String {
     let name = doc["name"].as_str().unwrap();
-    let path = root.join(".tome").join("flows").join(format!("{name}.flow.json"));
+    let path = root
+        .join(".tome")
+        .join("flows")
+        .join(format!("{name}.flow.json"));
     std::fs::write(&path, serde_json::to_string_pretty(doc).unwrap()).unwrap();
     path.to_string_lossy().into_owned()
 }
@@ -58,7 +69,12 @@ fn statuses_of(run: &Value) -> std::collections::BTreeMap<String, String> {
         .as_array()
         .unwrap()
         .iter()
-        .map(|n| (n["id"].as_str().unwrap().to_string(), n["status"].as_str().unwrap().to_string()))
+        .map(|n| {
+            (
+                n["id"].as_str().unwrap().to_string(),
+                n["status"].as_str().unwrap().to_string(),
+            )
+        })
         .collect()
 }
 
@@ -91,15 +107,43 @@ fn scripted_spawn(
     seen: Arc<std::sync::Mutex<Vec<SeenSpawn>>>,
 ) -> Arc<dyn Fn(spawn::SpawnRequest) -> spawn::SpawnOutcome + Send + Sync> {
     Arc::new(move |req: spawn::SpawnRequest| {
-        seen.lock().unwrap().push(SeenSpawn { cmd: req.cmd.clone(), args: req.args.clone(), cwd: req.cwd.clone(), env: req.env.clone() });
-        let brief = req.args.iter().position(|a| a == "-p").and_then(|i| req.args.get(i + 1)).cloned().unwrap_or_default();
-        let who = brief.strip_prefix("You are \"").and_then(|s| s.split('"').next()).unwrap_or("?").to_string();
-        let script = scripts.get(&who).cloned().unwrap_or_else(|| "exit 0".to_string());
-        spawn::spawn_process(spawn::SpawnRequest { cmd: "/bin/sh".to_string(), args: vec!["-c".to_string(), script], cwd: req.cwd, env: req.env })
+        seen.lock().unwrap().push(SeenSpawn {
+            cmd: req.cmd.clone(),
+            args: req.args.clone(),
+            cwd: req.cwd.clone(),
+            env: req.env.clone(),
+        });
+        let brief = req
+            .args
+            .iter()
+            .position(|a| a == "-p")
+            .and_then(|i| req.args.get(i + 1))
+            .cloned()
+            .unwrap_or_default();
+        let who = brief
+            .strip_prefix("You are \"")
+            .and_then(|s| s.split('"').next())
+            .unwrap_or("?")
+            .to_string();
+        let script = scripts
+            .get(&who)
+            .cloned()
+            .unwrap_or_else(|| "exit 0".to_string());
+        spawn::spawn_process(spawn::SpawnRequest {
+            cmd: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), script],
+            cwd: req.cwd,
+            env: req.env,
+        })
     })
 }
 
-fn build_env(r: &Recorders, scripts: HashMap<String, String>, sandbox: Option<env::SandboxWrap>, gapped_default: bool) -> env::RunnerEnv {
+fn build_env(
+    r: &Recorders,
+    scripts: HashMap<String, String>,
+    sandbox: Option<env::SandboxWrap>,
+    gapped_default: bool,
+) -> env::RunnerEnv {
     let events = r.events.clone();
     let pushes = r.pushes.clone();
     let closed = r.closed.clone();
@@ -108,21 +152,27 @@ fn build_env(r: &Recorders, scripts: HashMap<String, String>, sandbox: Option<en
 
     env::RunnerEnv {
         can_open_file: Arc::new(|_p: &Path| true),
-        build_agent_env: Arc::new(move |pane_id: String, gapped: bool, _inner_argv: Vec<String>| {
-            build_calls.lock().unwrap().push((pane_id.clone(), gapped));
-            // Mirrors the one branch of the real builder that matters
-            // here: no gap, no sandbox wrap — without it a test could
-            // only ever pin "the runner applies a wrap it was handed",
-            // never "the runner asked to be gapped".
-            let sandbox = if gapped { sandbox.clone() } else { None };
-            Box::pin(async move {
-                let mut vars: Vec<(String, String)> = std::env::vars().collect();
-                vars.push(("TOME_TEST_PANE".to_string(), pane_id));
-                Ok::<env::BuiltEnv, String>(env::BuiltEnv { env: vars, sandbox })
-            }) as env::BoxFuture<Result<env::BuiltEnv, String>>
+        build_agent_env: Arc::new(
+            move |pane_id: String, gapped: bool, _inner_argv: Vec<String>| {
+                build_calls.lock().unwrap().push((pane_id.clone(), gapped));
+                // Mirrors the one branch of the real builder that matters
+                // here: no gap, no sandbox wrap — without it a test could
+                // only ever pin "the runner applies a wrap it was handed",
+                // never "the runner asked to be gapped".
+                let sandbox = if gapped { sandbox.clone() } else { None };
+                Box::pin(async move {
+                    let mut vars: Vec<(String, String)> = std::env::vars().collect();
+                    vars.push(("TOME_TEST_PANE".to_string(), pane_id));
+                    Ok::<env::BuiltEnv, String>(env::BuiltEnv { env: vars, sandbox })
+                }) as env::BoxFuture<Result<env::BuiltEnv, String>>
+            },
+        ),
+        close_agent_env: Arc::new(move |pane_id: &str| {
+            closed.lock().unwrap().push(pane_id.to_string())
         }),
-        close_agent_env: Arc::new(move |pane_id: &str| closed.lock().unwrap().push(pane_id.to_string())),
-        airgap_default: Arc::new(move || Box::pin(async move { gapped_default }) as env::BoxFuture<bool>),
+        airgap_default: Arc::new(move || {
+            Box::pin(async move { gapped_default }) as env::BoxFuture<bool>
+        }),
         log_event: Arc::new(move |kind: &str, fields: Vec<(String, Value)>| {
             let mut obj = serde_json::Map::new();
             obj.insert("kind".to_string(), json!(kind));
@@ -150,24 +200,26 @@ fn fake_child_spawn() -> (
     Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<spawn::ExitOutcome>>>>,
 ) {
     let kills = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let exit_tx: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<spawn::ExitOutcome>>>> = Arc::new(std::sync::Mutex::new(None));
+    let exit_tx: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<spawn::ExitOutcome>>>> =
+        Arc::new(std::sync::Mutex::new(None));
     let kills2 = kills.clone();
     let exit_tx2 = exit_tx.clone();
-    let f: Arc<dyn Fn(spawn::SpawnRequest) -> spawn::SpawnOutcome + Send + Sync> = Arc::new(move |_req| {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        *exit_tx2.lock().unwrap() = Some(tx);
-        let kills3 = kills2.clone();
-        spawn::SpawnOutcome::Started(spawn::Spawned {
-            pid: 0x4000_0000,
-            stdout: None,
-            stderr: None,
-            kill: Arc::new(move |sig: i32| {
-                kills3.lock().unwrap().push(sig);
-                Ok(())
-            }),
-            exit: rx,
-        })
-    });
+    let f: Arc<dyn Fn(spawn::SpawnRequest) -> spawn::SpawnOutcome + Send + Sync> =
+        Arc::new(move |_req| {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            *exit_tx2.lock().unwrap() = Some(tx);
+            let kills3 = kills2.clone();
+            spawn::SpawnOutcome::Started(spawn::Spawned {
+                pid: 0x4000_0000,
+                stdout: None,
+                stderr: None,
+                kill: Arc::new(move |sig: i32| {
+                    kills3.lock().unwrap().push(sig);
+                    Ok(())
+                }),
+                exit: rx,
+            })
+        });
     (f, kills, exit_tx)
 }
 
@@ -179,12 +231,20 @@ async fn settled(runs: &Runner, id: &str, timeout_ms: u64) -> Value {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
     loop {
         let snap = snapshot_all(runs);
-        if let Some(run) = snap.as_array().unwrap().iter().find(|r| r["id"] == json!(id)) {
+        if let Some(run) = snap
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == json!(id))
+        {
             if run["status"] != json!("running") {
                 return run.clone();
             }
         }
-        assert!(tokio::time::Instant::now() <= deadline, "run never settled: {id}");
+        assert!(
+            tokio::time::Instant::now() <= deadline,
+            "run never settled: {id}"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(15)).await;
     }
 }
@@ -195,10 +255,18 @@ async fn appears(runs: &Runner, flow: &str, timeout_ms: u64) -> String {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
     loop {
         let snap = snapshot_all(runs);
-        if let Some(run) = snap.as_array().unwrap().iter().find(|r| r["flow"] == json!(flow)) {
+        if let Some(run) = snap
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["flow"] == json!(flow))
+        {
             return run["id"].as_str().unwrap().to_string();
         }
-        assert!(tokio::time::Instant::now() <= deadline, "run never appeared: {flow}");
+        assert!(
+            tokio::time::Instant::now() <= deadline,
+            "run never appeared: {flow}"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
 }
@@ -214,7 +282,10 @@ async fn refuses_a_path_outside_the_open_workspace_folders() {
     let runs = new_runs();
     let mut e = build_env(&Recorders::default(), HashMap::new(), None, true);
     e.can_open_file = Arc::new(|_p| false);
-    assert_eq!(start_run(runs, e, path).await, json!({"error": "flow is outside the open workspace folders"}));
+    assert_eq!(
+        start_run(runs, e, path).await,
+        json!({"error": "flow is outside the open workspace folders"})
+    );
 }
 
 #[tokio::test]
@@ -229,11 +300,17 @@ async fn refuses_a_file_that_is_not_a_flow() {
 
     std::fs::write(&bad, "not json at all").unwrap();
     let result = start_run(runs.clone(), e.clone(), bad.to_string_lossy().into_owned()).await;
-    assert!(result["error"].as_str().unwrap().contains("could not read flow"));
+    assert!(result["error"]
+        .as_str()
+        .unwrap()
+        .contains("could not read flow"));
 
     let missing = root.join("nope.flow.json").to_string_lossy().into_owned();
     let result = start_run(runs, e, missing).await;
-    assert!(result["error"].as_str().unwrap().contains("could not read flow"));
+    assert!(result["error"]
+        .as_str()
+        .unwrap()
+        .contains("could not read flow"));
 }
 
 #[tokio::test]
@@ -246,7 +323,10 @@ async fn refuses_a_name_that_could_not_be_a_folder_including_a_non_string() {
     let runs = new_runs();
     let e = build_env(&Recorders::default(), HashMap::new(), None, true);
     let result = start_run(runs.clone(), e.clone(), path.to_string_lossy().into_owned()).await;
-    assert!(result["error"].as_str().unwrap().contains("can't be used as a folder name"));
+    assert!(result["error"]
+        .as_str()
+        .unwrap()
+        .contains("can't be used as a folder name"));
 
     // A non-string name would otherwise reach the folder join and panic
     // rather than coming back as a refusal.
@@ -263,10 +343,19 @@ async fn refuses_an_empty_flow_and_a_cyclic_one() {
     let e = build_env(&Recorders::default(), HashMap::new(), None, true);
 
     let empty = write_flow(&root, &flow_doc("empty", &[], &[]));
-    assert_eq!(start_run(runs.clone(), e.clone(), empty).await, json!({"error": "this flow has no nodes"}));
+    assert_eq!(
+        start_run(runs.clone(), e.clone(), empty).await,
+        json!({"error": "this flow has no nodes"})
+    );
 
-    let cyclic = write_flow(&root, &flow_doc("cyclic", &["n1", "n2"], &[("n1", "n2"), ("n2", "n1")]));
-    assert_eq!(start_run(runs, e, cyclic).await, json!({"error": "flow has a cycle — cannot run"}));
+    let cyclic = write_flow(
+        &root,
+        &flow_doc("cyclic", &["n1", "n2"], &[("n1", "n2"), ("n2", "n1")]),
+    );
+    assert_eq!(
+        start_run(runs, e, cyclic).await,
+        json!({"error": "flow has a cycle — cannot run"})
+    );
 }
 
 #[tokio::test]
@@ -294,7 +383,11 @@ async fn refuses_the_whole_run_naming_the_node_with_no_headless_template() {
     let err = result["error"].as_str().unwrap();
     assert!(err.contains("Summarizer"));
     assert!(err.contains("Run in terminals"));
-    assert!(snapshot_all(&runs).as_array().unwrap().iter().all(|r| r["flow"] != json!("mixed")));
+    assert!(snapshot_all(&runs)
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|r| r["flow"] != json!("mixed")));
 }
 
 // ---- symlinked paths are confined by real location, not just lexical
@@ -307,12 +400,23 @@ async fn refuses_a_flow_reached_through_a_symlinked_tome_flows_directory() {
     std::fs::remove_dir_all(root.join(".tome").join("flows")).unwrap();
     std::os::unix::fs::symlink(&outside, root.join(".tome").join("flows")).unwrap();
     let path = root.join(".tome").join("flows").join("escape.flow.json");
-    std::fs::write(&path, serde_json::to_string(&flow_doc("escape", &["n1"], &[])).unwrap()).unwrap();
+    std::fs::write(
+        &path,
+        serde_json::to_string(&flow_doc("escape", &["n1"], &[])).unwrap(),
+    )
+    .unwrap();
     let runs = new_runs();
     let e = build_env(&Recorders::default(), HashMap::new(), None, true);
     let result = start_run(runs.clone(), e, path.to_string_lossy().into_owned()).await;
-    assert_eq!(result, json!({"error": "flow is outside the open workspace folders"}));
-    assert!(snapshot_all(&runs).as_array().unwrap().iter().all(|r| r["flow"] != json!("escape")));
+    assert_eq!(
+        result,
+        json!({"error": "flow is outside the open workspace folders"})
+    );
+    assert!(snapshot_all(&runs)
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|r| r["flow"] != json!("escape")));
 }
 
 #[tokio::test]
@@ -326,8 +430,15 @@ async fn refuses_to_create_a_run_directory_through_a_pre_existing_symlinked_ance
     scripts.insert("n1".to_string(), "exit 0".to_string());
     let e = build_env(&Recorders::default(), scripts, None, true);
     let result = start_run(runs.clone(), e, path).await;
-    assert!(result["error"].as_str().unwrap().contains("could not create the run folder"));
-    assert!(snapshot_all(&runs).as_array().unwrap().iter().all(|r| r["flow"] != json!("planted")));
+    assert!(result["error"]
+        .as_str()
+        .unwrap()
+        .contains("could not create the run folder"));
+    assert!(snapshot_all(&runs)
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|r| r["flow"] != json!("planted")));
     assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0);
 }
 
@@ -356,7 +467,10 @@ async fn spawns_an_argv_array_with_the_composed_brief_as_one_element_cwd_at_flow
     assert!(seen[0].args[1].contains(".tome/flows/shape/n1-out.md"));
     assert_eq!(seen[0].args.len(), 2);
     assert_eq!(seen[0].cwd, root);
-    assert!(seen[0].env.iter().any(|(k, v)| k == "TOME_TEST_PANE" && v == &format!("run:{id}:n1")));
+    assert!(seen[0]
+        .env
+        .iter()
+        .any(|(k, v)| k == "TOME_TEST_PANE" && v == &format!("run:{id}:n1")));
 }
 
 #[tokio::test]
@@ -390,7 +504,10 @@ async fn wraps_the_whole_command_line_in_the_sandbox_exactly_as_a_gapped_pane_do
     let recorders = Recorders::default();
     let mut scripts = HashMap::new();
     scripts.insert("n1".to_string(), "exit 0".to_string());
-    let sandbox = env::SandboxWrap::Prefix { cmd: "/usr/bin/sandbox-exec".to_string(), args: vec!["-p".to_string(), "(profile…)".to_string()] };
+    let sandbox = env::SandboxWrap::Prefix {
+        cmd: "/usr/bin/sandbox-exec".to_string(),
+        args: vec!["-p".to_string(), "(profile…)".to_string()],
+    };
     let e = build_env(&recorders, scripts, Some(sandbox), true);
     let path = write_flow(&root, &flow_doc("gapped", &["n1"], &[]));
     let runs = new_runs();
@@ -400,9 +517,20 @@ async fn wraps_the_whole_command_line_in_the_sandbox_exactly_as_a_gapped_pane_do
 
     let seen = recorders.spawn_seen.lock().unwrap();
     assert_eq!(seen[0].cmd, "/usr/bin/sandbox-exec");
-    assert_eq!(seen[0].args[0..4], ["-p".to_string(), "(profile…)".to_string(), "claude".to_string(), "-p".to_string()]);
+    assert_eq!(
+        seen[0].args[0..4],
+        [
+            "-p".to_string(),
+            "(profile…)".to_string(),
+            "claude".to_string(),
+            "-p".to_string()
+        ]
+    );
     // The wrap is the consequence; the ASK is the thing worth pinning.
-    assert_eq!(*recorders.build_env_calls.lock().unwrap(), vec![(format!("run:{id}:n1"), true)]);
+    assert_eq!(
+        *recorders.build_env_calls.lock().unwrap(),
+        vec![(format!("run:{id}:n1"), true)]
+    );
 }
 
 #[tokio::test]
@@ -411,7 +539,10 @@ async fn runs_ungapped_with_no_sandbox_wrap_at_all_when_the_air_gap_default_is_o
     let recorders = Recorders::default();
     let mut scripts = HashMap::new();
     scripts.insert("n1".to_string(), "exit 0".to_string());
-    let sandbox = env::SandboxWrap::Prefix { cmd: "/usr/bin/sandbox-exec".to_string(), args: vec!["-p".to_string(), "(profile…)".to_string()] };
+    let sandbox = env::SandboxWrap::Prefix {
+        cmd: "/usr/bin/sandbox-exec".to_string(),
+        args: vec!["-p".to_string(), "(profile…)".to_string()],
+    };
     let e = build_env(&recorders, scripts, Some(sandbox), false);
     let path = write_flow(&root, &flow_doc("ungapped", &["n1"], &[]));
     let runs = new_runs();
@@ -419,7 +550,10 @@ async fn runs_ungapped_with_no_sandbox_wrap_at_all_when_the_air_gap_default_is_o
     let id = result["id"].as_str().unwrap().to_string();
     let run = settled(&runs, &id, 8000).await;
 
-    assert_eq!(*recorders.build_env_calls.lock().unwrap(), vec![(format!("run:{id}:n1"), false)]);
+    assert_eq!(
+        *recorders.build_env_calls.lock().unwrap(),
+        vec![(format!("run:{id}:n1"), false)]
+    );
     let seen = recorders.spawn_seen.lock().unwrap();
     assert_eq!(seen[0].cmd, "claude");
     assert_eq!(seen[0].args[0], "-p");
@@ -442,7 +576,10 @@ async fn gives_every_node_its_own_air_gap_pane_id_and_closes_it_when_the_node_ex
     assert_eq!(closed, vec![format!("run:{id}:n1"), format!("run:{id}:n2")]);
     let mut calls = recorders.build_env_calls.lock().unwrap().clone();
     calls.sort();
-    let mut expected = vec![(format!("run:{id}:n1"), true), (format!("run:{id}:n2"), true)];
+    let mut expected = vec![
+        (format!("run:{id}:n1"), true),
+        (format!("run:{id}:n2"), true),
+    ];
     expected.sort();
     assert_eq!(calls, expected);
     assert_eq!(run["airgap"], json!(true));
@@ -456,13 +593,17 @@ async fn gives_every_node_its_own_air_gap_pane_id_and_closes_it_when_the_node_ex
 async fn starts_a_node_only_after_every_upstream_exited_0() {
     let root = workspace();
     let order_file = root.join("order.txt");
-    let step = |n: &str| format!("echo {n}-start >> order.txt; sleep 0.1; echo {n}-end >> order.txt");
+    let step =
+        |n: &str| format!("echo {n}-start >> order.txt; sleep 0.1; echo {n}-end >> order.txt");
     let mut scripts = HashMap::new();
     for n in ["n1", "n2", "n3"] {
         scripts.insert(n.to_string(), step(n));
     }
     let e = build_env(&Recorders::default(), scripts, None, true);
-    let path = write_flow(&root, &flow_doc("chain", &["n1", "n2", "n3"], &[("n1", "n2"), ("n2", "n3")]));
+    let path = write_flow(
+        &root,
+        &flow_doc("chain", &["n1", "n2", "n3"], &[("n1", "n2"), ("n2", "n3")]),
+    );
     let runs = new_runs();
     let result = start_run(runs.clone(), e, path).await;
     let id = result["id"].as_str().unwrap().to_string();
@@ -470,7 +611,10 @@ async fn starts_a_node_only_after_every_upstream_exited_0() {
     assert_eq!(run["status"], json!("done"));
     let text = std::fs::read_to_string(&order_file).unwrap();
     let lines: Vec<&str> = text.trim().split('\n').collect();
-    assert_eq!(lines, vec!["n1-start", "n1-end", "n2-start", "n2-end", "n3-start", "n3-end"]);
+    assert_eq!(
+        lines,
+        vec!["n1-start", "n1-end", "n2-start", "n2-end", "n3-start", "n3-end"]
+    );
 }
 
 #[tokio::test]
@@ -486,10 +630,22 @@ async fn runs_a_layer_in_parallel_but_never_more_than_two_nodes_at_once() {
     let result = start_run(runs.clone(), e, path).await;
     let id = result["id"].as_str().unwrap().to_string();
 
-    let live = snapshot_all(&runs).as_array().unwrap().iter().find(|r| r["id"] == json!(id)).unwrap().clone();
+    let live = snapshot_all(&runs)
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == json!(id))
+        .unwrap()
+        .clone();
     let live_statuses = statuses_of(&live);
-    assert_eq!(live_statuses.values().filter(|s| *s == "running").count(), 2);
-    assert_eq!(live_statuses.values().filter(|s| *s == "pending").count(), 2);
+    assert_eq!(
+        live_statuses.values().filter(|s| *s == "running").count(),
+        2
+    );
+    assert_eq!(
+        live_statuses.values().filter(|s| *s == "pending").count(),
+        2
+    );
 
     let run = settled(&runs, &id, 8000).await;
     assert!(statuses_of(&run).values().all(|s| s == "done"));
@@ -508,7 +664,14 @@ async fn marks_the_failure_skips_its_descendants_and_leaves_a_sibling_branch_alo
     scripts.insert("n3".to_string(), "echo n3-ran >> ran.txt".to_string());
     scripts.insert("n4".to_string(), "echo fine".to_string());
     let e = build_env(&Recorders::default(), scripts, None, true);
-    let path = write_flow(&root, &flow_doc("failing", &["n1", "n2", "n3", "n4"], &[("n1", "n2"), ("n2", "n3")]));
+    let path = write_flow(
+        &root,
+        &flow_doc(
+            "failing",
+            &["n1", "n2", "n3", "n4"],
+            &[("n1", "n2"), ("n2", "n3")],
+        ),
+    );
     let runs = new_runs();
     let result = start_run(runs.clone(), e, path).await;
     let id = result["id"].as_str().unwrap().to_string();
@@ -520,12 +683,22 @@ async fn marks_the_failure_skips_its_descendants_and_leaves_a_sibling_branch_alo
     assert_eq!(st["n3"], "skipped");
     assert_eq!(st["n4"], "done");
     assert_eq!(run["status"], json!("failed"));
-    let n2 = run["nodes"].as_array().unwrap().iter().find(|n| n["id"] == json!("n2")).unwrap();
+    let n2 = run["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == json!("n2"))
+        .unwrap();
     assert_eq!(n2["exit"], json!(3));
     // The skipped node never ran — the file its script would have written
     // is the only proof that matters.
     assert!(!root.join("ran.txt").exists());
-    let n3 = run["nodes"].as_array().unwrap().iter().find(|n| n["id"] == json!("n3")).unwrap();
+    let n3 = run["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == json!("n3"))
+        .unwrap();
     assert_eq!(n3["started"], Value::Null);
     assert_eq!(n3["ended"], Value::Null);
     assert_eq!(n3["exit"], Value::Null);
@@ -537,7 +710,8 @@ async fn keeps_scheduling_when_a_node_fails_before_its_process_ever_exists() {
     let root = workspace();
     let mut e = build_env(&Recorders::default(), HashMap::new(), None, true);
     e.build_agent_env = Arc::new(|_pane_id: String, _gapped: bool, _argv: Vec<String>| {
-        Box::pin(async move { Err::<env::BuiltEnv, String>("proxy port exhausted".to_string()) }) as env::BoxFuture<Result<env::BuiltEnv, String>>
+        Box::pin(async move { Err::<env::BuiltEnv, String>("proxy port exhausted".to_string()) })
+            as env::BoxFuture<Result<env::BuiltEnv, String>>
     });
     e.spawn = Arc::new(|_req| panic!("nothing may be spawned without an environment"));
     let path = write_flow(&root, &flow_doc("no-env", &["n1", "n2"], &[("n1", "n2")]));
@@ -550,7 +724,9 @@ async fn keeps_scheduling_when_a_node_fails_before_its_process_ever_exists() {
     assert_eq!(st["n2"], "skipped");
     assert_eq!(run["status"], json!("failed"));
     let log = run["nodes"][0]["log"].as_str().unwrap();
-    assert!(std::fs::read_to_string(log).unwrap().contains("proxy port exhausted"));
+    assert!(std::fs::read_to_string(log)
+        .unwrap()
+        .contains("proxy port exhausted"));
 }
 
 #[tokio::test]
@@ -558,7 +734,12 @@ async fn records_a_missing_cli_as_a_failed_node_instead_of_taking_the_run_down()
     let root = workspace();
     let mut e = build_env(&Recorders::default(), HashMap::new(), None, false);
     e.spawn = Arc::new(|req: spawn::SpawnRequest| {
-        spawn::spawn_process(spawn::SpawnRequest { cmd: "/definitely/not/installed-xyz".to_string(), args: vec![], cwd: req.cwd, env: req.env })
+        spawn::spawn_process(spawn::SpawnRequest {
+            cmd: "/definitely/not/installed-xyz".to_string(),
+            args: vec![],
+            cwd: req.cwd,
+            env: req.env,
+        })
     });
     let path = write_flow(&root, &flow_doc("missing", &["n1"], &[]));
     let runs = new_runs();
@@ -577,7 +758,10 @@ async fn records_a_missing_cli_as_a_failed_node_instead_of_taking_the_run_down()
         if body.contains("ENOENT") {
             break;
         }
-        assert!(std::time::Instant::now() <= deadline, "log never recorded ENOENT: {body:?}");
+        assert!(
+            std::time::Instant::now() <= deadline,
+            "log never recorded ENOENT: {body:?}"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(15)).await;
     }
 }
@@ -637,7 +821,10 @@ async fn cancel_escalates_to_sigkill_when_a_node_ignores_sigterm() {
     assert_eq!(*kills.lock().unwrap(), vec![spawn::SIGTERM, spawn::SIGKILL]);
 
     let tx = exit_tx.lock().unwrap().take().unwrap();
-    let _ = tx.send(spawn::ExitOutcome { code: None, signal: Some(spawn::SIGKILL) });
+    let _ = tx.send(spawn::ExitOutcome {
+        code: None,
+        signal: Some(spawn::SIGKILL),
+    });
     let run = settled(&runs, &id, 4000).await;
     assert_eq!(statuses_of(&run)["n1"], "canceled");
     assert_eq!(run["status"], json!("canceled"));
@@ -659,7 +846,10 @@ async fn cancel_never_sigkills_a_node_that_exited_inside_the_grace_period() {
     assert_eq!(*kills.lock().unwrap(), vec![spawn::SIGTERM]);
     // Obeyed, well inside the grace.
     let tx = exit_tx.lock().unwrap().take().unwrap();
-    let _ = tx.send(spawn::ExitOutcome { code: None, signal: Some(spawn::SIGTERM) });
+    let _ = tx.send(spawn::ExitOutcome {
+        code: None,
+        signal: Some(spawn::SIGTERM),
+    });
     let run = settled(&runs, &id, 4000).await;
     assert_eq!(run["status"], json!("canceled"));
 
@@ -682,10 +872,15 @@ async fn never_spawns_into_a_run_cancelled_while_its_air_gap_was_still_coming_up
             let gate = gate2.clone();
             Box::pin(async move {
                 gate.notified().await;
-                Ok::<env::BuiltEnv, String>(env::BuiltEnv { env: vec![], sandbox: None })
+                Ok::<env::BuiltEnv, String>(env::BuiltEnv {
+                    env: vec![],
+                    sandbox: None,
+                })
             }) as env::BoxFuture<Result<env::BuiltEnv, String>>
         }),
-        close_agent_env: Arc::new(move |pane_id: &str| closed2.lock().unwrap().push(pane_id.to_string())),
+        close_agent_env: Arc::new(move |pane_id: &str| {
+            closed2.lock().unwrap().push(pane_id.to_string())
+        }),
         airgap_default: Arc::new(|| Box::pin(async { true }) as env::BoxFuture<bool>),
         log_event: Arc::new(|_k, _f| {}),
         push: Arc::new(|_v| {}),
@@ -699,7 +894,13 @@ async fn never_spawns_into_a_run_cancelled_while_its_air_gap_was_still_coming_up
 
     // The node is up as far as every reader is concerned — its proxy is
     // not.
-    let live = snapshot_all(&runs).as_array().unwrap().iter().find(|r| r["id"] == json!(id)).unwrap().clone();
+    let live = snapshot_all(&runs)
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == json!(id))
+        .unwrap()
+        .clone();
     let st = statuses_of(&live);
     assert_eq!(st["n1"], "running");
     assert_eq!(st["n2"], "pending");
@@ -730,9 +931,18 @@ async fn cancel_is_a_no_op_on_a_finished_run_and_an_error_on_an_unknown_one() {
     let run = settled(&runs, &id, 8000).await;
     assert_eq!(run["status"], json!("done"));
     assert_eq!(cancel_run(&runs, &e, &id), json!({"ok": true})); // already over — not an error
-    let still = snapshot_all(&runs).as_array().unwrap().iter().find(|r| r["id"] == json!(id)).unwrap().clone();
+    let still = snapshot_all(&runs)
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == json!(id))
+        .unwrap()
+        .clone();
     assert_eq!(still["status"], json!("done"));
-    assert_eq!(cancel_run(&runs, &e, "no-such-run"), json!({"error": "no such run"}));
+    assert_eq!(
+        cancel_run(&runs, &e, "no-such-run"),
+        json!({"error": "no such run"})
+    );
 }
 
 // ======================================================================
@@ -771,7 +981,10 @@ async fn run_json_is_rewritten_on_every_transition_and_matches_the_final_snapsho
     scripts.insert("n1".to_string(), "echo hello-from-n1".to_string());
     scripts.insert("n2".to_string(), "echo hello-from-n2 >&2".to_string());
     let e = build_env(&Recorders::default(), scripts, None, true);
-    let path = write_flow(&root, &flow_doc("bookkeeping", &["n1", "n2"], &[("n1", "n2")]));
+    let path = write_flow(
+        &root,
+        &flow_doc("bookkeeping", &["n1", "n2"], &[("n1", "n2")]),
+    );
     let runs = new_runs();
     let result = start_run(runs.clone(), e, path).await;
     let id = result["id"].as_str().unwrap().to_string();
@@ -794,11 +1007,26 @@ async fn run_json_is_rewritten_on_every_transition_and_matches_the_final_snapsho
     assert_eq!(on_disk["id"], json!(id));
     assert_eq!(on_disk["flow"], json!("bookkeeping"));
     assert_eq!(on_disk["layers"], json!([["n1"], ["n2"]]));
-    let parents: Vec<Value> = on_disk["nodes"].as_array().unwrap().iter().map(|n| n["parents"].clone()).collect();
+    let parents: Vec<Value> = on_disk["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["parents"].clone())
+        .collect();
     assert_eq!(parents, vec![json!([]), json!(["n1"])]);
-    let exits: Vec<Value> = on_disk["nodes"].as_array().unwrap().iter().map(|n| n["exit"].clone()).collect();
+    let exits: Vec<Value> = on_disk["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["exit"].clone())
+        .collect();
     assert_eq!(exits, vec![json!(0), json!(0)]);
-    let expected_dir = root.join(".tome").join("flows").join("bookkeeping").join("runs").join(&id);
+    let expected_dir = root
+        .join(".tome")
+        .join("flows")
+        .join("bookkeeping")
+        .join("runs")
+        .join(&id);
     assert_eq!(run["dir"], json!(expected_dir.to_string_lossy()));
 }
 
@@ -806,7 +1034,10 @@ async fn run_json_is_rewritten_on_every_transition_and_matches_the_final_snapsho
 async fn captures_stdout_and_stderr_in_one_log_per_node() {
     let root = workspace();
     let mut scripts = HashMap::new();
-    scripts.insert("n1".to_string(), "echo to-stdout; echo to-stderr >&2; exit 0".to_string());
+    scripts.insert(
+        "n1".to_string(),
+        "echo to-stdout; echo to-stderr >&2; exit 0".to_string(),
+    );
     let e = build_env(&Recorders::default(), scripts, None, true);
     let path = write_flow(&root, &flow_doc("logs", &["n1"], &[]));
     let runs = new_runs();
@@ -826,11 +1057,21 @@ async fn captures_stdout_and_stderr_in_one_log_per_node() {
 async fn refuses_a_hand_edited_node_id_shaped_like_a_traversal_before_any_run_is_created() {
     let root = workspace();
     let e = build_env(&Recorders::default(), HashMap::new(), None, true);
-    let path = write_flow(&root, &flow_doc("traversal", &["../../../escaped", "n2"], &[]));
+    let path = write_flow(
+        &root,
+        &flow_doc("traversal", &["../../../escaped", "n2"], &[]),
+    );
     let runs = new_runs();
     let result = start_run(runs.clone(), e, path).await;
-    assert!(result["error"].as_str().unwrap().contains("can't be used in a handoff path"));
-    assert!(snapshot_all(&runs).as_array().unwrap().iter().all(|r| r["flow"] != json!("traversal")));
+    assert!(result["error"]
+        .as_str()
+        .unwrap()
+        .contains("can't be used in a handoff path"));
+    assert!(snapshot_all(&runs)
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|r| r["flow"] != json!("traversal")));
 }
 
 #[tokio::test]
@@ -870,12 +1111,29 @@ async fn event_log_records_the_run_and_every_node_transition_identifiers_only() 
     settled(&runs, &id, 8000).await;
 
     let events = recorders.events.lock().unwrap();
-    let logged: Vec<&Value> = events.iter().filter(|e| e["kind"] == json!("flow-run")).collect();
-    assert!(logged.iter().all(|e| e["run"] == json!(id) && e["flow"] == json!("audited")));
-    let agents: Vec<Value> = logged.iter().filter(|e| e["event"] == json!("node")).map(|e| e["agent"].clone()).collect();
+    let logged: Vec<&Value> = events
+        .iter()
+        .filter(|e| e["kind"] == json!("flow-run"))
+        .collect();
+    assert!(logged
+        .iter()
+        .all(|e| e["run"] == json!(id) && e["flow"] == json!("audited")));
+    let agents: Vec<Value> = logged
+        .iter()
+        .filter(|e| e["event"] == json!("node"))
+        .map(|e| e["agent"].clone())
+        .collect();
     assert_eq!(agents, vec![json!("claude"); 4]);
-    let sequence: Vec<(Value, Value, Value)> =
-        logged.iter().map(|e| (e["event"].clone(), e.get("node").cloned().unwrap_or(Value::Null), e["status"].clone())).collect();
+    let sequence: Vec<(Value, Value, Value)> = logged
+        .iter()
+        .map(|e| {
+            (
+                e["event"].clone(),
+                e.get("node").cloned().unwrap_or(Value::Null),
+                e["status"].clone(),
+            )
+        })
+        .collect();
     assert_eq!(
         sequence,
         vec![
@@ -905,7 +1163,9 @@ async fn logs_the_cancellation_itself_not_just_the_fallout() {
     cancel_run(&runs, &e, &id);
     settled(&runs, &id, 8000).await;
     let events = recorders.events.lock().unwrap();
-    assert!(events.iter().any(|e| e["kind"] == json!("flow-run") && e["event"] == json!("cancel")));
+    assert!(events
+        .iter()
+        .any(|e| e["kind"] == json!("flow-run") && e["event"] == json!("cancel")));
 }
 
 // ======================================================================
@@ -931,19 +1191,49 @@ async fn runs_changed_sends_the_full_snapshot_array_on_every_transition() {
         // One per transition and no more: the run starting, each node
         // going running then done, and the run settling.
         assert_eq!(pushes.len(), 6);
-        let first_run = pushes[0].as_array().unwrap().iter().find(|r| r["id"] == json!(id)).unwrap();
+        let first_run = pushes[0]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == json!(id))
+            .unwrap();
         let mut first_view = vec![first_run["status"].as_str().unwrap().to_string()];
-        first_view.extend(first_run["nodes"].as_array().unwrap().iter().map(|n| n["status"].as_str().unwrap().to_string()));
-        assert_eq!(first_view, vec!["running".to_string(), "pending".to_string(), "pending".to_string()]);
+        first_view.extend(
+            first_run["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n["status"].as_str().unwrap().to_string()),
+        );
+        assert_eq!(
+            first_view,
+            vec![
+                "running".to_string(),
+                "pending".to_string(),
+                "pending".to_string()
+            ]
+        );
         assert_eq!(*pushes.last().unwrap(), snapshot_all(&runs));
     }
 
     // …and every payload is the WHOLE array, not the run that moved.
-    let two = start_run(runs.clone(), e, write_flow(&root, &flow_doc("pushed-again", &["n1"], &[]))).await;
+    let two = start_run(
+        runs.clone(),
+        e,
+        write_flow(&root, &flow_doc("pushed-again", &["n1"], &[])),
+    )
+    .await;
     let two_id = two["id"].as_str().unwrap().to_string();
     settled(&runs, &two_id, 8000).await;
     let pushes = recorders.pushes.lock().unwrap();
-    let ids_in_last: Vec<&str> = pushes.last().unwrap().as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap()).collect();
+    let ids_in_last: Vec<&str> = pushes
+        .last()
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
     assert!(ids_in_last.contains(&id.as_str()));
     assert!(ids_in_last.contains(&two_id.as_str()));
     assert_eq!(*pushes.last().unwrap(), snapshot_all(&runs));
@@ -994,7 +1284,10 @@ async fn concurrent_pump_calls_never_double_launch_a_shared_fan_in_node() {
 
         let plan = crate::flow::run_plan::run_plan(
             &["n1".to_string(), "n2".to_string(), "n3".to_string()],
-            &[("n1".to_string(), "n3".to_string()), ("n2".to_string(), "n3".to_string())],
+            &[
+                ("n1".to_string(), "n3".to_string()),
+                ("n2".to_string(), "n3".to_string()),
+            ],
         )
         .unwrap();
         let mut statuses = HashMap::new();
@@ -1007,7 +1300,11 @@ async fn concurrent_pump_calls_never_double_launch_a_shared_fan_in_node() {
             kind: "claude".to_string(),
             model: None,
             status: status.to_string(),
-            started: if status == "pending" { None } else { Some("2026-01-01T00:00:00.000Z".to_string()) },
+            started: if status == "pending" {
+                None
+            } else {
+                Some("2026-01-01T00:00:00.000Z".to_string())
+            },
             ended: None,
             exit: None,
             log: root.join(format!("{id}.log")),
@@ -1030,7 +1327,11 @@ async fn concurrent_pump_calls_never_double_launch_a_shared_fan_in_node() {
             canceling: false,
             plan,
             statuses,
-            nodes: vec![node("n1", "done"), node("n2", "done"), node("n3", "pending")],
+            nodes: vec![
+                node("n1", "done"),
+                node("n2", "done"),
+                node("n3", "pending"),
+            ],
             write_tx,
             scheduling_lock: Arc::new(tokio::sync::Mutex::new(())),
         };
@@ -1083,7 +1384,10 @@ async fn a_real_fan_in_node_runs_exactly_once_even_when_both_parents_finish_toge
     scripts.insert("n2".to_string(), "exit 0".to_string());
     scripts.insert("n3".to_string(), "echo n3-ran >> fanin.txt".to_string());
     let e = build_env(&Recorders::default(), scripts, None, true);
-    let path = write_flow(&root, &flow_doc("fanin", &["n1", "n2", "n3"], &[("n1", "n3"), ("n2", "n3")]));
+    let path = write_flow(
+        &root,
+        &flow_doc("fanin", &["n1", "n2", "n3"], &[("n1", "n3"), ("n2", "n3")]),
+    );
     let runs = new_runs();
     let result = start_run(runs.clone(), e, path).await;
     let id = result["id"].as_str().unwrap().to_string();
@@ -1097,7 +1401,11 @@ async fn a_real_fan_in_node_runs_exactly_once_even_when_both_parents_finish_toge
     // path, corrupt/interleave the file — either way the count below
     // would not be 1).
     let text = std::fs::read_to_string(root.join("fanin.txt")).unwrap();
-    assert_eq!(text.lines().count(), 1, "fan-in node must not have run twice: {text:?}");
+    assert_eq!(
+        text.lines().count(),
+        1,
+        "fan-in node must not have run twice: {text:?}"
+    );
 }
 
 #[tokio::test]

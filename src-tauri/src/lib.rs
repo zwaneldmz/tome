@@ -7,8 +7,8 @@ mod chat;
 mod conductor;
 mod confine;
 mod custom_agents;
-mod events;
 mod eventlog;
+mod events;
 mod flow;
 mod fs;
 mod git;
@@ -32,8 +32,8 @@ mod linux_sandbox_integration_tests;
 mod lock_gate;
 mod login_env;
 mod lsp;
-mod menu;
 mod mentor;
+mod menu;
 mod migrate;
 mod protocol;
 mod pty;
@@ -202,7 +202,9 @@ fn boot_auth_and_airgap<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let state = app.state::<AppState>();
     *state.locked.write().expect("AppState.locked lock poisoned") = locked;
     *state.auth.lock().expect("AppState.auth lock poisoned") = Some(auth);
-    state.airgap.load_repo_consents(&dir.join("airgap-repo-consents.json"));
+    state
+        .airgap
+        .load_repo_consents(&dir.join("airgap-repo-consents.json"));
 }
 
 /// Shuts down every live pane proxy (loopback listener + any established
@@ -217,10 +219,20 @@ fn boot_auth_and_airgap<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 /// comment: the window is on its way down, and a locked/closing app has
 /// nowhere left to deliver the event.
 fn shutdown_all_proxies(state: &AppState) {
-    for (_, (_, timer)) in state.relock_timers.lock().expect("AppState.relock_timers lock poisoned").drain() {
+    for (_, (_, timer)) in state
+        .relock_timers
+        .lock()
+        .expect("AppState.relock_timers lock poisoned")
+        .drain()
+    {
         timer.abort();
     }
-    for (_, proxy) in state.proxies.lock().expect("AppState.proxies lock poisoned").drain() {
+    for (_, proxy) in state
+        .proxies
+        .lock()
+        .expect("AppState.proxies lock poisoned")
+        .drain()
+    {
         proxy.shutdown();
     }
     state.airgap.close_all();
@@ -455,13 +467,13 @@ pub fn run() {
                             serde_json::json!({ "id": label, "name": label }),
                         );
                     }
-                    WindowEvent::Destroyed => {
+                    WindowEvent::Destroyed
                         // Mirrors `child.on('closed', () =>
                         // popoutApproved.delete(child.id))` — a stale armed
                         // label must not outlive its window (labels are
                         // counter-unique, so reuse is impossible, but the
                         // set would grow without bound otherwise).
-                        if label.starts_with("popout") {
+                        if label.starts_with("popout") => {
                             let state = window.app_handle().state::<AppState>();
                             state
                                 .popout_approved
@@ -469,7 +481,6 @@ pub fn run() {
                                 .expect("AppState.popout_approved lock poisoned")
                                 .remove(&label);
                         }
-                    }
                     _ => {}
                 }
                 return;
@@ -489,8 +500,9 @@ pub fn run() {
                 // `setTimeout(() => app.quit(), 1500)`. `app_quit_ready`
                 // (ipc::app) notifies this early when the renderer finishes
                 // its persistence beat first.
-                let _ = tokio::time::timeout(Duration::from_millis(1500), state.quit_ready.notified())
-                    .await;
+                let _ =
+                    tokio::time::timeout(Duration::from_millis(1500), state.quit_ready.notified())
+                        .await;
                 // Extend index.js's exit cleanup: pane proxies are children
                 // of no window (see `shutdown_all_proxies`'s doc comment) —
                 // without this, a proxy from a spawn that never got a

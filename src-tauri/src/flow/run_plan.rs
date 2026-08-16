@@ -55,17 +55,27 @@ const BLOCKING: [&str; 3] = ["failed", "canceled", "skipped"];
 /// and the runner refuses the whole run before this is ever called.
 pub fn layers(node_ids: &[String], edges: &[(String, String)]) -> Option<Vec<Vec<String>>> {
     let mut indegree: HashMap<&str, usize> = node_ids.iter().map(|id| (id.as_str(), 0)).collect();
-    let mut outgoing: HashMap<&str, Vec<&str>> = node_ids.iter().map(|id| (id.as_str(), Vec::new())).collect();
+    let mut outgoing: HashMap<&str, Vec<&str>> = node_ids
+        .iter()
+        .map(|id| (id.as_str(), Vec::new()))
+        .collect();
     for (from, to) in edges {
         if !outgoing.contains_key(from.as_str()) || !indegree.contains_key(to.as_str()) {
             continue;
         }
-        outgoing.get_mut(from.as_str()).expect("checked above").push(to.as_str());
+        outgoing
+            .get_mut(from.as_str())
+            .expect("checked above")
+            .push(to.as_str());
         *indegree.get_mut(to.as_str()).expect("checked above") += 1;
     }
 
     let mut out: Vec<Vec<String>> = Vec::new();
-    let mut frontier: Vec<&str> = node_ids.iter().filter(|id| indegree[id.as_str()] == 0).map(|s| s.as_str()).collect();
+    let mut frontier: Vec<&str> = node_ids
+        .iter()
+        .filter(|id| indegree[id.as_str()] == 0)
+        .map(|s| s.as_str())
+        .collect();
     let mut placed = 0usize;
     while !frontier.is_empty() {
         placed += frontier.len();
@@ -100,7 +110,8 @@ pub struct RunPlan {
 
 pub fn run_plan(node_ids: &[String], edges: &[(String, String)]) -> Option<RunPlan> {
     let ls = layers(node_ids, edges)?;
-    let mut parents: HashMap<String, Vec<String>> = node_ids.iter().map(|id| (id.clone(), Vec::new())).collect();
+    let mut parents: HashMap<String, Vec<String>> =
+        node_ids.iter().map(|id| (id.clone(), Vec::new())).collect();
     for (from, to) in edges {
         if !parents.contains_key(to) || !parents.contains_key(from) {
             continue; // dangling, as above
@@ -113,7 +124,11 @@ pub fn run_plan(node_ids: &[String], edges: &[(String, String)]) -> Option<RunPl
         }
     }
     let order = ls.iter().flatten().cloned().collect();
-    Some(RunPlan { layers: ls, order, parents })
+    Some(RunPlan {
+        layers: ls,
+        order,
+        parents,
+    })
 }
 
 /// What the runner should do next, given where every node currently stands.
@@ -140,7 +155,10 @@ pub fn next_actions(plan: &RunPlan, state: &HashMap<String, String>) -> NextActi
                 continue;
             }
             let parents = plan.parents.get(id).map(Vec::as_slice).unwrap_or(&[]);
-            if parents.iter().any(|p| doomed.contains(p) || BLOCKING.contains(&status(p))) {
+            if parents
+                .iter()
+                .any(|p| doomed.contains(p) || BLOCKING.contains(&status(p)))
+            {
                 doomed.insert(id.clone());
                 skip.push(id.clone());
             }
@@ -150,7 +168,11 @@ pub fn next_actions(plan: &RunPlan, state: &HashMap<String, String>) -> NextActi
     // Pass two: everything whose parents are all done, in layer order, up
     // to the cap. `running` counts the whole run, not this layer.
     let mut start: Vec<String> = Vec::new();
-    let running = plan.order.iter().filter(|id| status(id) == "running").count();
+    let running = plan
+        .order
+        .iter()
+        .filter(|id| status(id) == "running")
+        .count();
     'layers: for layer in &plan.layers {
         for id in layer {
             if running + start.len() >= CONCURRENCY_CAP {
@@ -197,7 +219,9 @@ pub struct RunLike {
 /// counts.
 #[allow(dead_code)]
 pub fn running_count(runs: &[Option<RunLike>]) -> usize {
-    runs.iter().filter(|r| matches!(r, Some(v) if v.status == "running")).count()
+    runs.iter()
+        .filter(|r| matches!(r, Some(v) if v.status == "running"))
+        .count()
 }
 
 /// Days-since-1970-01-01 <-> proleptic-Gregorian civil date — Howard
@@ -243,7 +267,12 @@ fn parse_iso8601_ms(s: &str) -> Option<i64> {
     let minute: i64 = s.get(14..16)?.parse().ok()?;
     let second: i64 = s.get(17..19)?.parse().ok()?;
     let millis: i64 = s.get(20..23)?.parse().ok()?;
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 59 {
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
         return None;
     }
     let days = civil::days_from_civil(year, month, day);
@@ -256,7 +285,9 @@ fn parse_iso8601_ms(s: &str) -> Option<i64> {
 /// give 0 rather than a negative/garbage value.
 #[allow(dead_code)]
 pub fn elapsed_ms(started: Option<&str>, ended: Option<&str>, now_ms: i64) -> i64 {
-    let Some(from) = started.and_then(parse_iso8601_ms) else { return 0 };
+    let Some(from) = started.and_then(parse_iso8601_ms) else {
+        return 0;
+    };
     let to = ended.and_then(parse_iso8601_ms).unwrap_or(now_ms);
     (to - from).max(0)
 }
@@ -283,12 +314,18 @@ mod tests {
     fn graph(ids: &[&str], pairs: &[(&str, &str)]) -> (Vec<String>, Vec<(String, String)>) {
         (
             ids.iter().map(|s| s.to_string()).collect(),
-            pairs.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect(),
+            pairs
+                .iter()
+                .map(|(a, b)| (a.to_string(), b.to_string()))
+                .collect(),
         )
     }
 
     fn statuses(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-        pairs.iter().map(|(id, s)| (id.to_string(), s.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(id, s)| (id.to_string(), s.to_string()))
+            .collect()
     }
 
     // ---- layers ----
@@ -296,43 +333,82 @@ mod tests {
     #[test]
     fn layers_puts_every_node_with_no_unmet_dependency_in_layer_0() {
         let (ids, edges) = graph(&["n1", "n2", "n3"], &[]);
-        assert_eq!(layers(&ids, &edges), Some(vec![vec!["n1".into(), "n2".into(), "n3".into()]]));
+        assert_eq!(
+            layers(&ids, &edges),
+            Some(vec![vec!["n1".into(), "n2".into(), "n3".into()]])
+        );
     }
 
     #[test]
     fn layers_is_one_node_per_layer_for_a_chain() {
         let (ids, edges) = graph(&["n1", "n2", "n3"], &[("n1", "n2"), ("n2", "n3")]);
-        assert_eq!(layers(&ids, &edges), Some(vec![vec!["n1".into()], vec!["n2".into()], vec!["n3".into()]]));
+        assert_eq!(
+            layers(&ids, &edges),
+            Some(vec![
+                vec!["n1".into()],
+                vec!["n2".into()],
+                vec!["n3".into()]
+            ])
+        );
     }
 
     #[test]
     fn layers_groups_a_fan_out_and_rejoins_on_the_fan_in() {
-        let (ids, edges) = graph(&["n1", "n2", "n3", "n4"], &[("n1", "n2"), ("n1", "n3"), ("n2", "n4"), ("n3", "n4")]);
-        assert_eq!(layers(&ids, &edges), Some(vec![vec!["n1".into()], vec!["n2".into(), "n3".into()], vec!["n4".into()]]));
+        let (ids, edges) = graph(
+            &["n1", "n2", "n3", "n4"],
+            &[("n1", "n2"), ("n1", "n3"), ("n2", "n4"), ("n3", "n4")],
+        );
+        assert_eq!(
+            layers(&ids, &edges),
+            Some(vec![
+                vec!["n1".into()],
+                vec!["n2".into(), "n3".into()],
+                vec!["n4".into()]
+            ])
+        );
     }
 
     #[test]
     fn layers_holds_a_node_back_until_its_last_dependency_lands() {
-        let (ids, edges) = graph(&["n1", "n2", "n3"], &[("n1", "n2"), ("n1", "n3"), ("n2", "n3")]);
-        assert_eq!(layers(&ids, &edges), Some(vec![vec!["n1".into()], vec!["n2".into()], vec!["n3".into()]]));
+        let (ids, edges) = graph(
+            &["n1", "n2", "n3"],
+            &[("n1", "n2"), ("n1", "n3"), ("n2", "n3")],
+        );
+        assert_eq!(
+            layers(&ids, &edges),
+            Some(vec![
+                vec!["n1".into()],
+                vec!["n2".into()],
+                vec!["n3".into()]
+            ])
+        );
     }
 
     #[test]
     fn layers_starts_disconnected_nodes_immediately_alongside_the_roots() {
         let (ids, edges) = graph(&["n1", "n2", "n3"], &[("n1", "n3")]);
-        assert_eq!(layers(&ids, &edges), Some(vec![vec!["n1".into(), "n2".into()], vec!["n3".into()]]));
+        assert_eq!(
+            layers(&ids, &edges),
+            Some(vec![vec!["n1".into(), "n2".into()], vec!["n3".into()]])
+        );
     }
 
     #[test]
     fn layers_counts_two_edges_between_the_same_pair_as_one_dependency() {
         let (ids, edges) = graph(&["n1", "n2"], &[("n1", "n2"), ("n1", "n2")]);
-        assert_eq!(layers(&ids, &edges), Some(vec![vec!["n1".into()], vec!["n2".into()]]));
+        assert_eq!(
+            layers(&ids, &edges),
+            Some(vec![vec!["n1".into()], vec!["n2".into()]])
+        );
     }
 
     #[test]
     fn layers_ignores_a_dangling_edge_instead_of_losing_the_node_it_names() {
         let (ids, edges) = graph(&["n1", "n2"], &[("ghost", "n2"), ("n1", "nowhere")]);
-        assert_eq!(layers(&ids, &edges), Some(vec![vec!["n1".into(), "n2".into()]]));
+        assert_eq!(
+            layers(&ids, &edges),
+            Some(vec![vec!["n1".into(), "n2".into()]])
+        );
     }
 
     #[test]
@@ -341,7 +417,10 @@ mod tests {
         assert_eq!(layers(&ids, &edges), None);
         let (ids, edges) = graph(&["n1"], &[("n1", "n1")]);
         assert_eq!(layers(&ids, &edges), None);
-        let (ids, edges) = graph(&["n1", "n2", "n3"], &[("n1", "n2"), ("n2", "n3"), ("n3", "n2")]);
+        let (ids, edges) = graph(
+            &["n1", "n2", "n3"],
+            &[("n1", "n2"), ("n2", "n3"), ("n3", "n2")],
+        );
         assert_eq!(layers(&ids, &edges), None);
     }
 
@@ -357,8 +436,17 @@ mod tests {
     fn run_plan_carries_layers_flat_order_and_each_nodes_parents() {
         let (ids, edges) = graph(&["n1", "n2", "n3"], &[("n1", "n3"), ("n2", "n3")]);
         let plan = run_plan(&ids, &edges).unwrap();
-        assert_eq!(plan.layers, vec![vec!["n1".to_string(), "n2".to_string()], vec!["n3".to_string()]]);
-        assert_eq!(plan.order, vec!["n1".to_string(), "n2".to_string(), "n3".to_string()]);
+        assert_eq!(
+            plan.layers,
+            vec![
+                vec!["n1".to_string(), "n2".to_string()],
+                vec!["n3".to_string()]
+            ]
+        );
+        assert_eq!(
+            plan.order,
+            vec!["n1".to_string(), "n2".to_string(), "n3".to_string()]
+        );
         assert_eq!(plan.parents["n3"], vec!["n1".to_string(), "n2".to_string()]);
         assert_eq!(plan.parents["n1"], Vec::<String>::new());
     }
@@ -392,8 +480,15 @@ mod tests {
     fn next_actions_counts_nodes_already_running_against_the_cap() {
         let (ids, edges) = graph(&["n1", "n2", "n3", "n4"], &[]);
         let plan = run_plan(&ids, &edges).unwrap();
-        assert_eq!(next_actions(&plan, &statuses(&[("n1", "running")])).start, vec!["n2".to_string()]);
-        assert!(next_actions(&plan, &statuses(&[("n1", "running"), ("n2", "running")])).start.is_empty());
+        assert_eq!(
+            next_actions(&plan, &statuses(&[("n1", "running")])).start,
+            vec!["n2".to_string()]
+        );
+        assert!(
+            next_actions(&plan, &statuses(&[("n1", "running"), ("n2", "running")]))
+                .start
+                .is_empty()
+        );
     }
 
     #[test]
@@ -408,7 +503,11 @@ mod tests {
     fn next_actions_holds_a_node_until_every_parent_is_done() {
         let (ids, edges) = graph(&["n1", "n2", "n3"], &[("n1", "n3"), ("n2", "n3")]);
         let plan = run_plan(&ids, &edges).unwrap();
-        assert!(next_actions(&plan, &statuses(&[("n1", "done"), ("n2", "running")])).start.is_empty());
+        assert!(
+            next_actions(&plan, &statuses(&[("n1", "done"), ("n2", "running")]))
+                .start
+                .is_empty()
+        );
         assert_eq!(
             next_actions(&plan, &statuses(&[("n1", "done"), ("n2", "done")])).start,
             vec!["n3".to_string()]
@@ -429,14 +528,20 @@ mod tests {
     fn next_actions_treats_a_missing_status_as_pending() {
         let (ids, edges) = graph(&["n1", "n2"], &[("n1", "n2")]);
         let plan = run_plan(&ids, &edges).unwrap();
-        assert_eq!(next_actions(&plan, &HashMap::new()).start, vec!["n1".to_string()]);
+        assert_eq!(
+            next_actions(&plan, &HashMap::new()).start,
+            vec!["n1".to_string()]
+        );
     }
 
     // ---- next_actions — a failure writes off everything downstream ----
 
     #[test]
     fn next_actions_skips_the_whole_descendant_cone_in_one_call() {
-        let (ids, edges) = graph(&["n1", "n2", "n3", "n4"], &[("n1", "n2"), ("n2", "n3"), ("n3", "n4")]);
+        let (ids, edges) = graph(
+            &["n1", "n2", "n3", "n4"],
+            &[("n1", "n2"), ("n2", "n3"), ("n3", "n4")],
+        );
         let plan = run_plan(&ids, &edges).unwrap();
         let na = next_actions(&plan, &statuses(&[("n1", "done"), ("n2", "failed")]));
         assert_eq!(na.skip, vec!["n3".to_string(), "n4".to_string()]);
@@ -456,7 +561,10 @@ mod tests {
     fn next_actions_writes_off_a_fan_in_when_only_one_parent_failed() {
         let (ids, edges) = graph(&["n1", "n2", "n3"], &[("n1", "n3"), ("n2", "n3")]);
         let plan = run_plan(&ids, &edges).unwrap();
-        assert_eq!(next_actions(&plan, &statuses(&[("n1", "done"), ("n2", "failed")])).skip, vec!["n3".to_string()]);
+        assert_eq!(
+            next_actions(&plan, &statuses(&[("n1", "done"), ("n2", "failed")])).skip,
+            vec!["n3".to_string()]
+        );
     }
 
     #[test]
@@ -477,14 +585,19 @@ mod tests {
     fn next_actions_writes_nothing_off_while_the_failing_branch_still_runs() {
         let (ids, edges) = graph(&["n1", "n2"], &[("n1", "n2")]);
         let plan = run_plan(&ids, &edges).unwrap();
-        assert!(next_actions(&plan, &statuses(&[("n1", "running")])).skip.is_empty());
+        assert!(next_actions(&plan, &statuses(&[("n1", "running")]))
+            .skip
+            .is_empty());
     }
 
     #[test]
     fn next_actions_reports_skips_even_when_the_cap_has_no_room_to_start() {
         let (ids, edges) = graph(&["n1", "n2", "n3", "n4"], &[("n1", "n4")]);
         let plan = run_plan(&ids, &edges).unwrap();
-        let na = next_actions(&plan, &statuses(&[("n1", "failed"), ("n2", "running"), ("n3", "running")]));
+        let na = next_actions(
+            &plan,
+            &statuses(&[("n1", "failed"), ("n2", "running"), ("n3", "running")]),
+        );
         assert_eq!(na.skip, vec!["n4".to_string()]);
         assert!(na.start.is_empty());
     }
@@ -493,32 +606,63 @@ mod tests {
 
     #[test]
     fn run_status_is_running_while_anything_is_pending_or_running() {
-        assert_eq!(run_status(&statuses(&[("n1", "running"), ("n2", "pending")])), "running");
-        assert_eq!(run_status(&statuses(&[("n1", "done"), ("n2", "pending")])), "running");
+        assert_eq!(
+            run_status(&statuses(&[("n1", "running"), ("n2", "pending")])),
+            "running"
+        );
+        assert_eq!(
+            run_status(&statuses(&[("n1", "done"), ("n2", "pending")])),
+            "running"
+        );
     }
 
     #[test]
     fn run_status_is_done_only_when_every_node_is_done() {
-        assert_eq!(run_status(&statuses(&[("n1", "done"), ("n2", "done")])), "done");
+        assert_eq!(
+            run_status(&statuses(&[("n1", "done"), ("n2", "done")])),
+            "done"
+        );
     }
 
     #[test]
     fn run_status_is_failed_when_a_node_failed() {
-        assert_eq!(run_status(&statuses(&[("n1", "done"), ("n2", "failed"), ("n3", "skipped")])), "failed");
+        assert_eq!(
+            run_status(&statuses(&[
+                ("n1", "done"),
+                ("n2", "failed"),
+                ("n3", "skipped")
+            ])),
+            "failed"
+        );
     }
 
     #[test]
     fn run_status_reports_cancellation_ahead_of_the_failure_cancelling_caused() {
-        assert_eq!(run_status(&statuses(&[("n1", "canceled"), ("n2", "skipped")])), "canceled");
-        assert_eq!(run_status(&statuses(&[("n1", "failed"), ("n2", "canceled")])), "canceled");
+        assert_eq!(
+            run_status(&statuses(&[("n1", "canceled"), ("n2", "skipped")])),
+            "canceled"
+        );
+        assert_eq!(
+            run_status(&statuses(&[("n1", "failed"), ("n2", "canceled")])),
+            "canceled"
+        );
     }
 
     // ---- running_count ----
 
     #[test]
     fn running_count_counts_the_live_runs_and_nothing_else() {
-        let live = |s: &str| Some(RunLike { status: s.to_string() });
-        let runs = vec![live("running"), live("done"), live("failed"), live("running")];
+        let live = |s: &str| {
+            Some(RunLike {
+                status: s.to_string(),
+            })
+        };
+        let runs = vec![
+            live("running"),
+            live("done"),
+            live("failed"),
+            live("running"),
+        ];
         assert_eq!(running_count(&runs), 2);
         assert_eq!(running_count(&[live("done")]), 0);
     }
@@ -526,7 +670,16 @@ mod tests {
     #[test]
     fn running_count_survives_an_empty_list_and_a_hole_in_one() {
         assert_eq!(running_count(&[]), 0);
-        assert_eq!(running_count(&[None, None, Some(RunLike { status: "running".to_string() })]), 1);
+        assert_eq!(
+            running_count(&[
+                None,
+                None,
+                Some(RunLike {
+                    status: "running".to_string()
+                })
+            ]),
+            1
+        );
     }
 
     // ---- run_pane_id ----
@@ -545,13 +698,23 @@ mod tests {
     #[test]
     fn elapsed_ms_ticks_against_now_while_a_run_is_live() {
         let now = parse_iso8601_ms("2026-08-09T10:00:09.000Z").unwrap();
-        assert_eq!(elapsed_ms(Some("2026-08-09T10:00:00.000Z"), None, now), 9000);
+        assert_eq!(
+            elapsed_ms(Some("2026-08-09T10:00:00.000Z"), None, now),
+            9000
+        );
     }
 
     #[test]
     fn elapsed_ms_freezes_at_ended_once_settled() {
         let now = parse_iso8601_ms("2026-08-09T12:00:00.000Z").unwrap();
-        assert_eq!(elapsed_ms(Some("2026-08-09T10:00:00.000Z"), Some("2026-08-09T10:01:30.000Z"), now), 90_000);
+        assert_eq!(
+            elapsed_ms(
+                Some("2026-08-09T10:00:00.000Z"),
+                Some("2026-08-09T10:01:30.000Z"),
+                now
+            ),
+            90_000
+        );
     }
 
     #[test]
@@ -576,7 +739,13 @@ mod tests {
         // Same reference instants eventlog.rs's own format_iso8601 test
         // cross-checks, run through this module's independent inverse.
         assert_eq!(parse_iso8601_ms("1970-01-01T00:00:00.000Z"), Some(0));
-        assert_eq!(parse_iso8601_ms("2000-02-29T00:00:00.000Z"), Some(951_782_400_000));
-        assert_eq!(parse_iso8601_ms("2024-02-29T23:59:59.000Z"), Some(1_709_251_199_000));
+        assert_eq!(
+            parse_iso8601_ms("2000-02-29T00:00:00.000Z"),
+            Some(951_782_400_000)
+        );
+        assert_eq!(
+            parse_iso8601_ms("2024-02-29T23:59:59.000Z"),
+            Some(1_709_251_199_000)
+        );
     }
 }

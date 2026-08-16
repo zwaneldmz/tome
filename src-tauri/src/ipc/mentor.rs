@@ -12,8 +12,8 @@
 use serde_json::{json, Value};
 use tauri::{AppHandle, State};
 
-use crate::state::AppState;
 use crate::lock_gate;
+use crate::state::AppState;
 
 /// `mentor:answer` — complete the gate with the given `id`. Returns
 /// `{ ok: bool }`, where `false` means there was no pending gate with that
@@ -44,7 +44,9 @@ pub async fn mentor_judge(
 ) -> Result<Value, String> {
     lock_gate::guard(&state, "mentor:judge")?;
     let system = "You grade whether a developer's explanation shows real understanding of a code change. Reply with EXACTLY the word PASS, or FAIL: followed by one short sentence of what they missed. Nothing else.";
-    let messages = vec![json!({ "role": "user", "content": format!("The change:\n{context}\n\nTheir explanation:\n{answer}") })];
+    let messages = vec![
+        json!({ "role": "user", "content": format!("The change:\n{context}\n\nTheir explanation:\n{answer}") }),
+    ];
     let text = crate::ipc::chat::complete_once(&app, &state, &messages, system).await?;
     let trimmed = text.trim();
     let pass = trimmed.to_ascii_uppercase().starts_with("PASS");

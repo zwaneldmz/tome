@@ -207,13 +207,19 @@ mod tests {
         let d = make_dirs();
         let dir = d.root.join("sub");
         fs::create_dir(&dir).unwrap();
-        assert_eq!(resolve_spawn_cwd(dir.to_str(), &[d.root.clone()], &d.home), dir);
+        assert_eq!(
+            resolve_spawn_cwd(dir.to_str(), std::slice::from_ref(&d.root), &d.home),
+            dir
+        );
     }
 
     #[test]
     fn accepts_the_root_itself() {
         let d = make_dirs();
-        assert_eq!(resolve_spawn_cwd(d.root.to_str(), &[d.root.clone()], &d.home), d.root);
+        assert_eq!(
+            resolve_spawn_cwd(d.root.to_str(), std::slice::from_ref(&d.root), &d.home),
+            d.root
+        );
     }
 
     #[test]
@@ -221,19 +227,28 @@ mod tests {
         let d = make_dirs();
         let dir = d.home.join("projects").join("x");
         fs::create_dir_all(&dir).unwrap();
-        assert_eq!(resolve_spawn_cwd(dir.to_str(), &[d.root.clone()], &d.home), dir);
+        assert_eq!(
+            resolve_spawn_cwd(dir.to_str(), std::slice::from_ref(&d.root), &d.home),
+            dir
+        );
     }
 
     #[test]
     fn accepts_home_itself() {
         let d = make_dirs();
-        assert_eq!(resolve_spawn_cwd(d.home.to_str(), &[d.root.clone()], &d.home), d.home);
+        assert_eq!(
+            resolve_spawn_cwd(d.home.to_str(), std::slice::from_ref(&d.root), &d.home),
+            d.home
+        );
     }
 
     #[test]
     fn falls_back_to_home_for_a_directory_outside_every_root_and_outside_home() {
         let d = make_dirs();
-        assert_eq!(resolve_spawn_cwd(d.sibling.to_str(), &[d.root.clone()], &d.home), d.home);
+        assert_eq!(
+            resolve_spawn_cwd(d.sibling.to_str(), std::slice::from_ref(&d.root), &d.home),
+            d.home
+        );
     }
 
     #[test]
@@ -246,14 +261,20 @@ mod tests {
         let d = make_dirs();
         let evil = PathBuf::from(format!("{}-evil", d.root.display()));
         fs::create_dir(&evil).unwrap();
-        assert_eq!(resolve_spawn_cwd(evil.to_str(), &[d.root.clone()], &d.home), d.home);
+        assert_eq!(
+            resolve_spawn_cwd(evil.to_str(), std::slice::from_ref(&d.root), &d.home),
+            d.home
+        );
     }
 
     #[test]
     fn falls_back_to_home_for_a_path_that_does_not_exist() {
         let d = make_dirs();
         let never = d.root.join("never-created");
-        assert_eq!(resolve_spawn_cwd(never.to_str(), &[d.root.clone()], &d.home), d.home);
+        assert_eq!(
+            resolve_spawn_cwd(never.to_str(), std::slice::from_ref(&d.root), &d.home),
+            d.home
+        );
     }
 
     #[test]
@@ -261,14 +282,23 @@ mod tests {
         let d = make_dirs();
         let file = d.root.join("a.txt");
         fs::write(&file, "x").unwrap();
-        assert_eq!(resolve_spawn_cwd(file.to_str(), &[d.root.clone()], &d.home), d.home);
+        assert_eq!(
+            resolve_spawn_cwd(file.to_str(), std::slice::from_ref(&d.root), &d.home),
+            d.home
+        );
     }
 
     #[test]
     fn falls_back_to_home_for_none_or_empty_cwd_without_panicking() {
         let d = make_dirs();
-        assert_eq!(resolve_spawn_cwd(None, &[d.root.clone()], &d.home), d.home);
-        assert_eq!(resolve_spawn_cwd(Some(""), &[d.root.clone()], &d.home), d.home);
+        assert_eq!(
+            resolve_spawn_cwd(None, std::slice::from_ref(&d.root), &d.home),
+            d.home
+        );
+        assert_eq!(
+            resolve_spawn_cwd(Some(""), std::slice::from_ref(&d.root), &d.home),
+            d.home
+        );
     }
 
     #[test]
@@ -286,7 +316,10 @@ mod tests {
         let other = other_guard.path().canonicalize().unwrap();
         let dir = other.join("sub");
         fs::create_dir(&dir).unwrap();
-        assert_eq!(resolve_spawn_cwd(dir.to_str(), &[d.root.clone(), other.clone()], &d.home), dir);
+        assert_eq!(
+            resolve_spawn_cwd(dir.to_str(), &[d.root.clone(), other.clone()], &d.home),
+            dir
+        );
     }
 
     // ---- unrestricted_spawn_needs_reauth ----

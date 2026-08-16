@@ -40,7 +40,11 @@ pub async fn git_log(
 }
 
 #[tauri::command]
-pub async fn git_commit(state: State<'_, AppState>, dir: String, hash: String) -> Result<Value, String> {
+pub async fn git_commit(
+    state: State<'_, AppState>,
+    dir: String,
+    hash: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "git:commit")?;
     crate::git::commit(&dir, &hash).await
 }
@@ -83,7 +87,11 @@ pub async fn git_commit_create(
 }
 
 #[tauri::command]
-pub async fn git_push(app: AppHandle, state: State<'_, AppState>, dir: String) -> Result<Value, String> {
+pub async fn git_push(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    dir: String,
+) -> Result<Value, String> {
     lock_gate::guard(&state, "git:push")?;
     events::log_event(
         &app,

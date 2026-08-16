@@ -61,7 +61,10 @@ pub fn seatbelt_profile(app_data_dir: &Path) -> String {
         "(allow default)".to_string(),
         "(deny network-outbound)".to_string(),
         "(allow network-outbound (remote ip \"localhost:*\"))".to_string(),
-        format!("(deny file-write* (subpath \"{}\"))", app_data_dir.display()),
+        format!(
+            "(deny file-write* (subpath \"{}\"))",
+            app_data_dir.display()
+        ),
         format!("(deny file-read* (literal \"{}\"))", auth_file.display()),
     ]
     .join("\n")
@@ -105,7 +108,10 @@ mod tests {
         assert_eq!(lines[0], "(version 1)");
         assert_eq!(lines[1], "(allow default)");
         assert_eq!(lines[2], "(deny network-outbound)");
-        assert_eq!(lines[3], "(allow network-outbound (remote ip \"localhost:*\"))");
+        assert_eq!(
+            lines[3],
+            "(allow network-outbound (remote ip \"localhost:*\"))"
+        );
         assert!(lines[4].starts_with("(deny file-write* (subpath "));
         assert!(lines[5].starts_with("(deny file-read* (literal "));
     }

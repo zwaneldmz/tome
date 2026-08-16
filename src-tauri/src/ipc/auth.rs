@@ -45,8 +45,13 @@ pub async fn auth_status(state: State<'_, AppState>) -> Result<Value, String> {
         let guard = state.auth.lock().expect("AppState.auth lock poisoned");
         guard.as_ref().map(|a| a.status())
     };
-    let (configured, totp) = status.map(|s| (s.configured, s.totp)).unwrap_or((false, false));
-    let unlocked = *state.auth_unlocked.read().expect("AppState.auth_unlocked lock poisoned");
+    let (configured, totp) = status
+        .map(|s| (s.configured, s.totp))
+        .unwrap_or((false, false));
+    let unlocked = *state
+        .auth_unlocked
+        .read()
+        .expect("AppState.auth_unlocked lock poisoned");
     Ok(json!({
         "configured": configured,
         "totp": totp,
@@ -71,7 +76,9 @@ pub async fn auth_login(
 ) -> Result<Value, String> {
     lock_gate::guard(&state, "auth:login")?;
     let mut guard = state.auth.lock().expect("AppState.auth lock poisoned");
-    let auth = guard.as_mut().ok_or_else(|| "auth: not initialized".to_string())?;
+    let auth = guard
+        .as_mut()
+        .ok_or_else(|| "auth: not initialized".to_string())?;
 
     let wait = auth.throttle_retry_in("auth:login");
     if wait > 0 {
@@ -85,7 +92,11 @@ pub async fn auth_login(
     let totp_ok = !auth.totp_active() || code.as_deref().is_some_and(|c| auth.verify_totp(c));
     if !pass_ok || !totp_ok {
         auth.record_failure("auth:login");
-        let error = if pass_ok { "Wrong 2FA code." } else { "Wrong passphrase." };
+        let error = if pass_ok {
+            "Wrong 2FA code."
+        } else {
+            "Wrong passphrase."
+        };
         return Ok(json!({"ok": false, "error": error}));
     }
     auth.record_success("auth:login");
@@ -127,7 +138,10 @@ pub async fn auth_touchid(state: State<'_, AppState>) -> Result<Value, String> {
 /// sibling command with the identical `authlock.markUnlocked()` call in
 /// its JS original — reuses this instead of re-deriving the two writes.
 pub(crate) fn mark_unlocked(state: &AppState) {
-    *state.auth_unlocked.write().expect("AppState.auth_unlocked lock poisoned") = true;
+    *state
+        .auth_unlocked
+        .write()
+        .expect("AppState.auth_unlocked lock poisoned") = true;
     *state.locked.write().expect("AppState.locked lock poisoned") = false;
 }
 

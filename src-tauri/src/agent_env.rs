@@ -47,7 +47,16 @@ use std::collections::HashMap;
 
 /// Exact-match keys `build_agent_base_env` copies through unconditionally.
 pub const AGENT_ENV_ALLOWLIST: &[&str] = &[
-    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TZ", "TMPDIR", "TERM", "COLORTERM",
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "TZ",
+    "TMPDIR",
+    "TERM",
+    "COLORTERM",
 ];
 
 /// Whole families of locale/desktop-integration variables rather than one
@@ -64,7 +73,10 @@ const AGENT_ENV_PREFIXES: &[&str] = &["LC_", "XDG_"];
 pub fn build_agent_base_env(process_env: &HashMap<String, String>) -> HashMap<String, String> {
     process_env
         .iter()
-        .filter(|(k, _)| AGENT_ENV_ALLOWLIST.contains(&k.as_str()) || AGENT_ENV_PREFIXES.iter().any(|p| k.starts_with(p)))
+        .filter(|(k, _)| {
+            AGENT_ENV_ALLOWLIST.contains(&k.as_str())
+                || AGENT_ENV_PREFIXES.iter().any(|p| k.starts_with(p))
+        })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect()
 }
@@ -131,7 +143,13 @@ pub struct AgentEnvExtras {
     pub proxy_port: Option<u16>,
 }
 
-const PROXY_VAR_NAMES: &[&str] = &["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY"];
+const PROXY_VAR_NAMES: &[&str] = &[
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "ALL_PROXY",
+];
 
 /// Ports the environment-LAYERING half of `index.js`'s `buildAgentEnv` —
 /// the pure composition, once every value it would otherwise `await` is
@@ -143,7 +161,10 @@ const PROXY_VAR_NAMES: &[&str] = &["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "h
 /// terminal type must match what it was actually created with), then
 /// provider secrets for agent panes only, then the brain vars, then the
 /// proxy vars for gapped panes only.
-pub fn compose_agent_env(process_env: &HashMap<String, String>, extras: &AgentEnvExtras) -> HashMap<String, String> {
+pub fn compose_agent_env(
+    process_env: &HashMap<String, String>,
+    extras: &AgentEnvExtras,
+) -> HashMap<String, String> {
     let mut env = build_agent_base_env(process_env);
     env.insert("TERM".to_string(), "xterm-256color".to_string());
     env.insert("COLORTERM".to_string(), "truecolor".to_string());
@@ -213,8 +234,23 @@ mod tests {
     fn keeps_path_home_and_the_other_exact_allowlisted_keys() {
         let sentinel = sentinel_env();
         let result = build_agent_base_env(&sentinel);
-        for key in ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TZ", "TMPDIR", "TERM", "COLORTERM"] {
-            assert_eq!(result.get(key), sentinel.get(key), "{key} should survive unchanged");
+        for key in [
+            "PATH",
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "SHELL",
+            "LANG",
+            "TZ",
+            "TMPDIR",
+            "TERM",
+            "COLORTERM",
+        ] {
+            assert_eq!(
+                result.get(key),
+                sentinel.get(key),
+                "{key} should survive unchanged"
+            );
         }
     }
 
@@ -223,7 +259,11 @@ mod tests {
         let sentinel = sentinel_env();
         let result = build_agent_base_env(&sentinel);
         for key in ["LC_ALL", "LC_CTYPE", "XDG_CONFIG_HOME", "XDG_DATA_HOME"] {
-            assert_eq!(result.get(key), sentinel.get(key), "{key} should survive unchanged");
+            assert_eq!(
+                result.get(key),
+                sentinel.get(key),
+                "{key} should survive unchanged"
+            );
         }
     }
 
@@ -240,16 +280,20 @@ mod tests {
             "NPM_TOKEN",
             "DIGITALOCEAN_TOKEN",
         ] {
-            assert!(!result.contains_key(key), "{key} must not survive the base env spread");
+            assert!(
+                !result.contains_key(key),
+                "{key} must not survive the base env spread"
+            );
         }
     }
 
     #[test]
     fn does_not_prefix_match_a_key_that_merely_contains_lc_or_xdg_mid_string() {
-        let env: HashMap<String, String> = [("MYLC_FOO", "x"), ("FOO_XDG_BAR", "y"), ("PATH", "/bin")]
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
+        let env: HashMap<String, String> =
+            [("MYLC_FOO", "x"), ("FOO_XDG_BAR", "y"), ("PATH", "/bin")]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
         let result = build_agent_base_env(&env);
         assert!(!result.contains_key("MYLC_FOO"));
         assert!(!result.contains_key("FOO_XDG_BAR"));
@@ -273,7 +317,18 @@ mod tests {
     fn the_allowlist_itself_contains_exactly_the_documented_exact_match_keys() {
         let mut got: Vec<&str> = AGENT_ENV_ALLOWLIST.to_vec();
         got.sort_unstable();
-        let mut want = vec!["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TZ", "TMPDIR", "TERM", "COLORTERM"];
+        let mut want = vec![
+            "PATH",
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "SHELL",
+            "LANG",
+            "TZ",
+            "TMPDIR",
+            "TERM",
+            "COLORTERM",
+        ];
         want.sort_unstable();
         assert_eq!(got, want);
     }
@@ -309,10 +364,14 @@ mod tests {
     // ---- compose_agent_env ----
 
     fn base_process_env() -> HashMap<String, String> {
-        [("PATH", "/usr/bin"), ("HOME", "/Users/tester"), ("TOME_SHOT", "/leak.png")]
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect()
+        [
+            ("PATH", "/usr/bin"),
+            ("HOME", "/Users/tester"),
+            ("TOME_SHOT", "/leak.png"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
     }
 
     #[test]
@@ -331,13 +390,24 @@ mod tests {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
 
-        let terminal_extras = AgentEnvExtras { is_agent: false, secrets: secrets.clone(), ..Default::default() };
+        let terminal_extras = AgentEnvExtras {
+            is_agent: false,
+            secrets: secrets.clone(),
+            ..Default::default()
+        };
         let terminal_env = compose_agent_env(&base_process_env(), &terminal_extras);
         assert!(!terminal_env.contains_key("ANTHROPIC_API_KEY"));
 
-        let agent_extras = AgentEnvExtras { is_agent: true, secrets, ..Default::default() };
+        let agent_extras = AgentEnvExtras {
+            is_agent: true,
+            secrets,
+            ..Default::default()
+        };
         let agent_env = compose_agent_env(&base_process_env(), &agent_extras);
-        assert_eq!(agent_env.get("ANTHROPIC_API_KEY"), Some(&"sk-ant-x".to_string()));
+        assert_eq!(
+            agent_env.get("ANTHROPIC_API_KEY"),
+            Some(&"sk-ant-x".to_string())
+        );
     }
 
     #[test]
@@ -354,32 +424,71 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(with_ws.get("TOME_BRAIN"), Some(&"/Users/tester/Tome/Brains/proj".to_string()));
-        assert_eq!(with_ws.get("TOME_CORE_VAULT"), Some(&"/Users/tester/Tome/Brains/core".to_string()));
+        assert_eq!(
+            with_ws.get("TOME_BRAIN"),
+            Some(&"/Users/tester/Tome/Brains/proj".to_string())
+        );
+        assert_eq!(
+            with_ws.get("TOME_CORE_VAULT"),
+            Some(&"/Users/tester/Tome/Brains/core".to_string())
+        );
     }
 
     #[test]
     fn sets_every_proxy_var_only_for_a_gapped_pane_with_a_port() {
         let ungapped = compose_agent_env(&base_process_env(), &AgentEnvExtras::default());
-        for name in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "NO_PROXY", "no_proxy"] {
-            assert!(!ungapped.contains_key(name), "{name} must be absent for an ungapped pane");
+        for name in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "no_proxy",
+        ] {
+            assert!(
+                !ungapped.contains_key(name),
+                "{name} must be absent for an ungapped pane"
+            );
         }
 
         let gapped = compose_agent_env(
             &base_process_env(),
-            &AgentEnvExtras { proxy_port: Some(54321), ..Default::default() },
+            &AgentEnvExtras {
+                proxy_port: Some(54321),
+                ..Default::default()
+            },
         );
-        for name in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY"] {
-            assert_eq!(gapped.get(name), Some(&"http://127.0.0.1:54321".to_string()), "{name}");
+        for name in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "ALL_PROXY",
+        ] {
+            assert_eq!(
+                gapped.get(name),
+                Some(&"http://127.0.0.1:54321".to_string()),
+                "{name}"
+            );
         }
-        assert_eq!(gapped.get("NO_PROXY"), Some(&"localhost,127.0.0.1".to_string()));
-        assert_eq!(gapped.get("no_proxy"), Some(&"localhost,127.0.0.1".to_string()));
+        assert_eq!(
+            gapped.get("NO_PROXY"),
+            Some(&"localhost,127.0.0.1".to_string())
+        );
+        assert_eq!(
+            gapped.get("no_proxy"),
+            Some(&"localhost,127.0.0.1".to_string())
+        );
     }
 
     #[test]
     fn the_base_allowlist_still_applies_inside_compose() {
         let env = compose_agent_env(&base_process_env(), &AgentEnvExtras::default());
-        assert!(!env.contains_key("TOME_SHOT"), "compose_agent_env must not widen the base allowlist");
+        assert!(
+            !env.contains_key("TOME_SHOT"),
+            "compose_agent_env must not widen the base allowlist"
+        );
         assert_eq!(env.get("PATH"), Some(&"/usr/bin".to_string()));
     }
 }

@@ -45,7 +45,10 @@ use tauri::{AppHandle, Emitter};
 /// `~/Tome/Brains` — see the module doc comment for why this is its own
 /// copy rather than a shared helper.
 fn brains_root() -> PathBuf {
-    std::env::home_dir().unwrap_or_default().join("Tome").join("Brains")
+    std::env::home_dir()
+        .unwrap_or_default()
+        .join("Tome")
+        .join("Brains")
 }
 
 /// Ports `safe(ws)`: workspace names are free renderer text, not vetted
@@ -59,7 +62,13 @@ fn brains_root() -> PathBuf {
 fn sanitize_ws(ws: &str) -> String {
     let cleaned: String = ws
         .chars()
-        .map(|c| if matches!(c, '/' | '\\' | ':' | '.') { '_' } else { c })
+        .map(|c| {
+            if matches!(c, '/' | '\\' | ':' | '.') {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     if cleaned.is_empty() {
         "workspace".to_string()
@@ -111,7 +120,9 @@ struct Frontmatter {
 
 fn frontmatter_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^---\r?\n([\s\S]*?)\r?\n---").expect("frontmatter_re: valid pattern"))
+    RE.get_or_init(|| {
+        Regex::new(r"^---\r?\n([\s\S]*?)\r?\n---").expect("frontmatter_re: valid pattern")
+    })
 }
 
 fn tags_re() -> &'static Regex {
@@ -150,7 +161,9 @@ fn parse_frontmatter(raw: &str) -> Frontmatter {
             body: raw.to_string(),
         };
     };
-    let whole = fm.get(0).expect("capture group 0 is always present on a match");
+    let whole = fm
+        .get(0)
+        .expect("capture group 0 is always present on a match");
     let block = fm.get(1).map(|m| m.as_str()).unwrap_or("");
 
     let tags = tags_re()
@@ -162,8 +175,14 @@ fn parse_frontmatter(raw: &str) -> Frontmatter {
                 .collect()
         })
         .unwrap_or_default();
-    let status = status_re().captures(block).map(|c| c[1].to_string()).unwrap_or_default();
-    let created = created_re().captures(block).map(|c| c[1].to_string()).unwrap_or_default();
+    let status = status_re()
+        .captures(block)
+        .map(|c| c[1].to_string())
+        .unwrap_or_default();
+    let created = created_re()
+        .captures(block)
+        .map(|c| c[1].to_string())
+        .unwrap_or_default();
 
     // `raw.slice(fm[0].length).replace(/^\n/, '')`: everything after the
     // whole match, minus exactly one leading newline (the blank line
@@ -172,12 +191,20 @@ fn parse_frontmatter(raw: &str) -> Frontmatter {
     let rest = &raw[whole.end()..];
     let body = rest.strip_prefix('\n').unwrap_or(rest).to_string();
 
-    Frontmatter { tags, status, created, body }
+    Frontmatter {
+        tags,
+        status,
+        created,
+        body,
+    }
 }
 
 /// Ports `[...raw.matchAll(WIKILINK_RE)].map(m => m[1].trim())`.
 fn extract_wikilinks(raw: &str) -> Vec<String> {
-    wikilink_re().captures_iter(raw).map(|c| c[1].trim().to_string()).collect()
+    wikilink_re()
+        .captures_iter(raw)
+        .map(|c| c[1].trim().to_string())
+        .collect()
 }
 
 // ---- index ----
@@ -217,14 +244,18 @@ pub struct Index {
 /// unreadable `dir` (missing, permission-denied) is a silent empty result,
 /// matching the JS original's `try { ... } catch { return }`.
 fn collect_markdown_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
         if name_str.starts_with('.') {
             continue;
         }
-        let Ok(file_type) = entry.file_type() else { continue };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
         let full = entry.path();
         if file_type.is_dir() {
             collect_markdown_files(&full, out);
@@ -259,12 +290,25 @@ fn build_index_at(root: &Path) -> Index {
 
     let mut notes = Vec::new();
     for full in &files {
-        let Ok(raw) = std::fs::read_to_string(full) else { continue };
-        let Ok(meta) = std::fs::metadata(full) else { continue };
-        let Some(mtime) = mtime_millis(&meta) else { continue };
+        let Ok(raw) = std::fs::read_to_string(full) else {
+            continue;
+        };
+        let Ok(meta) = std::fs::metadata(full) else {
+            continue;
+        };
+        let Some(mtime) = mtime_millis(&meta) else {
+            continue;
+        };
 
-        let rel = full.strip_prefix(root).unwrap_or(full).to_string_lossy().into_owned();
-        let name = full.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let rel = full
+            .strip_prefix(root)
+            .unwrap_or(full)
+            .to_string_lossy()
+            .into_owned();
+        let name = full
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let fm = parse_frontmatter(&raw);
         let links = extract_wikilinks(&raw);
         notes.push(Note {
@@ -290,7 +334,11 @@ fn build_index_at(root: &Path) -> Index {
         }
     }
 
-    Index { root: root.to_string_lossy().into_owned(), notes, backlinks }
+    Index {
+        root: root.to_string_lossy().into_owned(),
+        notes,
+        backlinks,
+    }
 }
 
 // ---- module cache (ws -> Index), mirroring brain.js's module-level Map ----
@@ -309,7 +357,10 @@ fn cache() -> &'static Mutex<HashMap<String, Index>> {
 /// `cache.set(ws, index)` living inside `buildIndex` itself.
 fn build_index(ws: &str) -> Index {
     let index = build_index_at(&vault_root(ws));
-    cache().lock().expect("brain: CACHE lock poisoned").insert(ws.to_string(), index.clone());
+    cache()
+        .lock()
+        .expect("brain: CACHE lock poisoned")
+        .insert(ws.to_string(), index.clone());
     index
 }
 
@@ -354,13 +405,21 @@ fn confine_real(root: &Path, rel: &str, require_md: bool, must_exist: bool) -> O
 
     if must_exist {
         let real = std::fs::canonicalize(&full).ok()?;
-        return if real.starts_with(&real_root) && real != real_root { Some(full) } else { None };
+        return if real.starts_with(&real_root) && real != real_root {
+            Some(full)
+        } else {
+            None
+        };
     }
 
     let mut dir = full.parent()?.to_path_buf();
     loop {
         if let Ok(real_dir) = std::fs::canonicalize(&dir) {
-            return if real_dir.starts_with(&real_root) { Some(full) } else { None };
+            return if real_dir.starts_with(&real_root) {
+                Some(full)
+            } else {
+                None
+            };
         }
         let parent = dir.parent()?.to_path_buf();
         if parent == dir {
@@ -387,7 +446,10 @@ fn watchers() -> &'static Mutex<HashMap<String, WatchEntry>> {
 }
 
 fn stop_watch(ws: &str) {
-    watchers().lock().expect("brain: WATCHERS lock poisoned").remove(ws);
+    watchers()
+        .lock()
+        .expect("brain: WATCHERS lock poisoned")
+        .remove(ws);
 }
 
 /// Core of `startWatch`, parameterized over the "something under the vault
@@ -413,7 +475,10 @@ where
         // core only guarantees it never panics on one.
     };
     let mut debouncer = new_debouncer(REINDEX_DEBOUNCE, handler).ok()?;
-    debouncer.watcher().watch(root, RecursiveMode::Recursive).ok()?;
+    debouncer
+        .watcher()
+        .watch(root, RecursiveMode::Recursive)
+        .ok()?;
     Some(debouncer)
 }
 
@@ -430,7 +495,10 @@ fn start_watch(app: &AppHandle, ws: &str, root: &Path) {
     let app = app.clone();
     let debouncer = start_watch_with(root, move || {
         let index = build_index(&ws_owned);
-        let _ = app.emit("brain:changed", json!({"ws": ws_owned.clone(), "index": index}));
+        let _ = app.emit(
+            "brain:changed",
+            json!({"ws": ws_owned.clone(), "index": index}),
+        );
     });
     if let Some(d) = debouncer {
         watchers()
@@ -457,7 +525,10 @@ pub fn open(app: &AppHandle, ws: &str) -> Result<(PathBuf, Index), String> {
 /// Ports `close(ws)`: stops the watch and drops the cached index.
 pub fn close(ws: &str) {
     stop_watch(ws);
-    cache().lock().expect("brain: CACHE lock poisoned").remove(ws);
+    cache()
+        .lock()
+        .expect("brain: CACHE lock poisoned")
+        .remove(ws);
 }
 
 /// Ports `getIndex(ws)`: cache hit returns as-is (and, faithfully
@@ -470,7 +541,10 @@ pub fn get_index(app: &AppHandle, ws: &str) -> Index {
         return idx.clone();
     }
     let index = build_index(ws);
-    let has_watch = watchers().lock().expect("brain: WATCHERS lock poisoned").contains_key(ws);
+    let has_watch = watchers()
+        .lock()
+        .expect("brain: WATCHERS lock poisoned")
+        .contains_key(ws);
     if !has_watch {
         start_watch(app, ws, &vault_root(ws));
     }
@@ -480,7 +554,8 @@ pub fn get_index(app: &AppHandle, ws: &str) -> Index {
 /// Ports `readNote(ws, rel)`.
 pub fn read_note(ws: &str, rel: &str) -> Result<String, String> {
     let root = vault_root(ws);
-    let full = confine_real(&root, rel, true, true).ok_or_else(|| "brain: path escapes vault".to_string())?;
+    let full = confine_real(&root, rel, true, true)
+        .ok_or_else(|| "brain: path escapes vault".to_string())?;
     std::fs::read_to_string(&full).map_err(|e| e.to_string())
 }
 
@@ -497,10 +572,15 @@ pub enum WriteOutcome {
 /// original, which relies entirely on the already-running fs watch
 /// (started by `open`/`getIndex`) to notice the write and reindex, 300ms
 /// later.
-pub fn write_note(ws: &str, rel: &str, content: &str, exclusive: bool) -> Result<WriteOutcome, String> {
+pub fn write_note(
+    ws: &str,
+    rel: &str,
+    content: &str,
+    exclusive: bool,
+) -> Result<WriteOutcome, String> {
     let root = vault_root(ws);
-    let full =
-        confine_real(&root, rel, true, false).ok_or_else(|| "brain: path escapes vault".to_string())?;
+    let full = confine_real(&root, rel, true, false)
+        .ok_or_else(|| "brain: path escapes vault".to_string())?;
     if let Some(parent) = full.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -515,7 +595,9 @@ pub fn write_note(ws: &str, rel: &str, content: &str, exclusive: bool) -> Result
     };
     match result {
         Ok(()) => Ok(WriteOutcome::Ok),
-        Err(e) if exclusive && e.kind() == std::io::ErrorKind::AlreadyExists => Ok(WriteOutcome::Exists),
+        Err(e) if exclusive && e.kind() == std::io::ErrorKind::AlreadyExists => {
+            Ok(WriteOutcome::Exists)
+        }
         Err(e) => Err(e.to_string()),
     }
 }
@@ -524,7 +606,8 @@ pub fn write_note(ws: &str, rel: &str, content: &str, exclusive: bool) -> Result
 /// protection.
 pub fn delete_note(ws: &str, rel: &str) -> Result<(), String> {
     let root = vault_root(ws);
-    let full = confine_real(&root, rel, true, true).ok_or_else(|| "brain: path escapes vault".to_string())?;
+    let full = confine_real(&root, rel, true, true)
+        .ok_or_else(|| "brain: path escapes vault".to_string())?;
     let is_agents_md = full
         .file_name()
         .map(|n| n.to_string_lossy().eq_ignore_ascii_case("agents.md"))
@@ -555,7 +638,7 @@ impl CoreInfo {
     /// true` with `root: Some(..)`, so this can never silently return
     /// `Some("")`-via-a-configured-but-rootless state.
     pub(crate) fn configured_root(&self) -> Option<&str> {
-        self.configured.then(|| self.root.as_deref()).flatten()
+        self.configured.then_some(self.root.as_deref()).flatten()
     }
 }
 
@@ -567,7 +650,13 @@ impl CoreInfo {
 pub fn core_info(root: Option<&str>) -> CoreInfo {
     let root = match root {
         Some(r) if !r.is_empty() => r,
-        _ => return CoreInfo { configured: false, root: None, folders: Vec::new() },
+        _ => {
+            return CoreInfo {
+                configured: false,
+                root: None,
+                folders: Vec::new(),
+            }
+        }
     };
     match std::fs::read_dir(root) {
         Ok(entries) => {
@@ -580,9 +669,17 @@ pub fn core_info(root: Option<&str>) -> CoreInfo {
                 })
                 .collect();
             folders.sort();
-            CoreInfo { configured: true, root: Some(root.to_string()), folders }
+            CoreInfo {
+                configured: true,
+                root: Some(root.to_string()),
+                folders,
+            }
         }
-        Err(_) => CoreInfo { configured: false, root: Some(root.to_string()), folders: Vec::new() },
+        Err(_) => CoreInfo {
+            configured: false,
+            root: Some(root.to_string()),
+            folders: Vec::new(),
+        },
     }
 }
 
@@ -607,12 +704,14 @@ pub fn promote(
     if !info.configured {
         return Err("brain: core vault not configured".to_string());
     }
-    let info_root = info.root.expect("core_info: configured is only true when root is Some");
+    let info_root = info
+        .root
+        .expect("core_info: configured is only true when root is Some");
     let info_root_path = PathBuf::from(&info_root);
 
     let src_root = vault_root(ws);
-    let src_full =
-        confine_real(&src_root, rel, true, true).ok_or_else(|| "brain: path escapes vault".to_string())?;
+    let src_full = confine_real(&src_root, rel, true, true)
+        .ok_or_else(|| "brain: path escapes vault".to_string())?;
 
     let dest_dir = match folder {
         Some(f) if !f.is_empty() => confine_real(&info_root_path, f, false, false)
@@ -644,7 +743,11 @@ pub fn promote(
         }
     }
     std::fs::copy(&src_full, &dest_full).map_err(|e| e.to_string())?;
-    let rel_out = dest_full.strip_prefix(&info_root_path).unwrap_or(&dest_full).to_string_lossy().into_owned();
+    let rel_out = dest_full
+        .strip_prefix(&info_root_path)
+        .unwrap_or(&dest_full)
+        .to_string_lossy()
+        .into_owned();
     Ok(PromoteOutcome::Ok { rel: rel_out })
 }
 
@@ -699,7 +802,8 @@ mod tests {
         // Exactly one newline after the closing "---" (no blank-line
         // separator) — the leading-blank-line-stripping nuance has its own
         // dedicated test below.
-        let raw = "---\ntags: [a, b]\ncreated: 2024-01-02\nstatus: draft\n---\n# Title\nbody text\n";
+        let raw =
+            "---\ntags: [a, b]\ncreated: 2024-01-02\nstatus: draft\n---\n# Title\nbody text\n";
         let fm = parse_frontmatter(raw);
         assert_eq!(fm.tags, vec!["a".to_string(), "b".to_string()]);
         assert_eq!(fm.status, "draft");
@@ -762,22 +866,34 @@ mod tests {
 
     #[test]
     fn extract_wikilinks_finds_plain_links() {
-        assert_eq!(extract_wikilinks("see [[Note One]] please"), vec!["Note One".to_string()]);
+        assert_eq!(
+            extract_wikilinks("see [[Note One]] please"),
+            vec!["Note One".to_string()]
+        );
     }
 
     #[test]
     fn extract_wikilinks_strips_alias_after_pipe() {
-        assert_eq!(extract_wikilinks("[[Target|shown text]]"), vec!["Target".to_string()]);
+        assert_eq!(
+            extract_wikilinks("[[Target|shown text]]"),
+            vec!["Target".to_string()]
+        );
     }
 
     #[test]
     fn extract_wikilinks_strips_heading_anchor_after_hash() {
-        assert_eq!(extract_wikilinks("[[Target#Some Heading]]"), vec!["Target".to_string()]);
+        assert_eq!(
+            extract_wikilinks("[[Target#Some Heading]]"),
+            vec!["Target".to_string()]
+        );
     }
 
     #[test]
     fn extract_wikilinks_trims_whitespace_inside_brackets() {
-        assert_eq!(extract_wikilinks("[[  Spaced Name  ]]"), vec!["Spaced Name".to_string()]);
+        assert_eq!(
+            extract_wikilinks("[[  Spaced Name  ]]"),
+            vec!["Spaced Name".to_string()]
+        );
     }
 
     #[test]
@@ -791,7 +907,10 @@ mod tests {
 
     #[test]
     fn extract_wikilinks_returns_empty_for_no_links() {
-        assert_eq!(extract_wikilinks("plain text, no links"), Vec::<String>::new());
+        assert_eq!(
+            extract_wikilinks("plain text, no links"),
+            Vec::<String>::new()
+        );
     }
 
     // ================= build_index_at =================
@@ -802,7 +921,11 @@ mod tests {
         let root = tmp.path();
         std::fs::write(root.join("Top.md"), "---\nstatus: draft\n---\ntop body").unwrap();
         std::fs::create_dir(root.join("sub")).unwrap();
-        std::fs::write(root.join("sub").join("Nested.md"), "nested body, no frontmatter").unwrap();
+        std::fs::write(
+            root.join("sub").join("Nested.md"),
+            "nested body, no frontmatter",
+        )
+        .unwrap();
 
         let index = build_index_at(root);
         let mut names: Vec<&str> = index.notes.iter().map(|n| n.name.as_str()).collect();
@@ -858,7 +981,10 @@ mod tests {
         std::fs::write(root.join("Beta.md"), "no outgoing links").unwrap();
 
         let index = build_index_at(root);
-        assert_eq!(index.backlinks.get("beta"), Some(&vec!["Alpha.md".to_string()]));
+        assert_eq!(
+            index.backlinks.get("beta"),
+            Some(&vec!["Alpha.md".to_string()])
+        );
     }
 
     #[test]
@@ -886,7 +1012,10 @@ mod tests {
         let tmp = tempdir().unwrap();
         let root = tmp.path().canonicalize().unwrap();
         std::fs::write(root.join("note.md"), "x").unwrap();
-        assert_eq!(confine_real(&root, "note.md", true, true), Some(root.join("note.md")));
+        assert_eq!(
+            confine_real(&root, "note.md", true, true),
+            Some(root.join("note.md"))
+        );
     }
 
     #[test]
@@ -974,7 +1103,9 @@ mod tests {
         assert!(!agents_path.exists());
         std::fs::write(&agents_path, agents_md_template("ws-root")).unwrap();
         assert!(agents_path.exists());
-        assert!(std::fs::read_to_string(&agents_path).unwrap().starts_with("# AGENTS.md"));
+        assert!(std::fs::read_to_string(&agents_path)
+            .unwrap()
+            .starts_with("# AGENTS.md"));
     }
 
     #[test]
@@ -988,7 +1119,10 @@ mod tests {
         if !agents_path.exists() {
             std::fs::write(&agents_path, agents_md_template("ws-root-2")).unwrap();
         }
-        assert_eq!(std::fs::read_to_string(&agents_path).unwrap(), "user-edited content");
+        assert_eq!(
+            std::fs::read_to_string(&agents_path).unwrap(),
+            "user-edited content"
+        );
     }
 
     // ================= start_watch_with =================
@@ -1012,7 +1146,10 @@ mod tests {
         while Instant::now() < deadline && *hits.lock().unwrap() == 0 {
             std::thread::sleep(Duration::from_millis(50));
         }
-        assert!(*hits.lock().unwrap() >= 1, "expected the debounced watcher to fire at least once");
+        assert!(
+            *hits.lock().unwrap() >= 1,
+            "expected the debounced watcher to fire at least once"
+        );
     }
 
     #[test]
@@ -1079,7 +1216,10 @@ mod tests {
             .open(&full)
             .and_then(|mut f| f.write_all(b"clobber"));
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
         assert_eq!(std::fs::read_to_string(&full).unwrap(), "original");
     }
 
@@ -1114,8 +1254,10 @@ mod tests {
         let root = tmp.path().canonicalize().unwrap();
         std::fs::write(root.join("AGENTS.md"), "x").unwrap();
         let full = confine_real(&root, "AGENTS.md", true, true).unwrap();
-        let is_agents_md =
-            full.file_name().map(|n| n.to_string_lossy().eq_ignore_ascii_case("agents.md")).unwrap_or(false);
+        let is_agents_md = full
+            .file_name()
+            .map(|n| n.to_string_lossy().eq_ignore_ascii_case("agents.md"))
+            .unwrap_or(false);
         assert!(is_agents_md);
 
         // lowercase variant, in case a note is literally named agents.md
@@ -1133,8 +1275,22 @@ mod tests {
 
     #[test]
     fn core_info_reports_unconfigured_for_missing_or_empty_root() {
-        assert_eq!(core_info(None), CoreInfo { configured: false, root: None, folders: vec![] });
-        assert_eq!(core_info(Some("")), CoreInfo { configured: false, root: None, folders: vec![] });
+        assert_eq!(
+            core_info(None),
+            CoreInfo {
+                configured: false,
+                root: None,
+                folders: vec![]
+            }
+        );
+        assert_eq!(
+            core_info(Some("")),
+            CoreInfo {
+                configured: false,
+                root: None,
+                folders: vec![]
+            }
+        );
     }
 
     #[test]
@@ -1209,7 +1365,10 @@ mod tests {
         let dest_full = dest_dir.join("note.md");
         std::fs::copy(&src_full, &dest_full).unwrap();
         assert_eq!(std::fs::read_to_string(&dest_full).unwrap(), "content");
-        assert_eq!(dest_full.strip_prefix(&core_root).unwrap(), Path::new("projects/note.md"));
+        assert_eq!(
+            dest_full.strip_prefix(&core_root).unwrap(),
+            Path::new("projects/note.md")
+        );
     }
 
     #[test]
@@ -1290,7 +1449,10 @@ mod tests {
     fn unique_ws(label: &str) -> String {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        format!("brain-test-{label}-{}", COUNTER.fetch_add(1, Ordering::SeqCst))
+        format!(
+            "brain-test-{label}-{}",
+            COUNTER.fetch_add(1, Ordering::SeqCst)
+        )
     }
 
     #[test]

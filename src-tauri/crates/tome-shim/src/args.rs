@@ -187,7 +187,10 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ShimArgs, A
         match token.as_str() {
             "--port" => {
                 let raw = iter.next().ok_or(ArgError::MissingValue("--port"))?;
-                port = Some(raw.parse::<u16>().map_err(|_| ArgError::InvalidPort(raw.clone()))?);
+                port = Some(
+                    raw.parse::<u16>()
+                        .map_err(|_| ArgError::InvalidPort(raw.clone()))?,
+                );
             }
             "--sock" => {
                 let raw = iter.next().ok_or(ArgError::MissingValue("--sock"))?;
@@ -225,7 +228,15 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ShimArgs, A
     let sock = sock.ok_or(ArgError::MissingFlag("--sock"))?;
     let argv = argv.ok_or(ArgError::MissingSeparator)?;
 
-    Ok(ShimArgs { port, sock, self_unshare, new_session, deny_write, deny_read, argv })
+    Ok(ShimArgs {
+        port,
+        sock,
+        self_unshare,
+        new_session,
+        deny_write,
+        deny_read,
+        argv,
+    })
 }
 
 #[cfg(test)]
@@ -238,8 +249,18 @@ mod tests {
 
     #[test]
     fn parses_the_full_contract_with_port_sock_and_trailing_argv() {
-        let parsed = parse_args(v(&["--port", "54321", "--sock", "/run/tome/proxy.sock", "--", "zsh", "-l", "-c", "claude"]))
-            .unwrap();
+        let parsed = parse_args(v(&[
+            "--port",
+            "54321",
+            "--sock",
+            "/run/tome/proxy.sock",
+            "--",
+            "zsh",
+            "-l",
+            "-c",
+            "claude",
+        ]))
+        .unwrap();
         assert_eq!(
             parsed,
             ShimArgs {
@@ -266,7 +287,16 @@ mod tests {
 
     #[test]
     fn new_session_is_a_bare_boolean_flag_like_self_unshare() {
-        let parsed = parse_args(v(&["--port", "1", "--sock", "/s", "--new-session", "--", "true"])).unwrap();
+        let parsed = parse_args(v(&[
+            "--port",
+            "1",
+            "--sock",
+            "/s",
+            "--new-session",
+            "--",
+            "true",
+        ]))
+        .unwrap();
         assert!(parsed.new_session);
     }
 
@@ -285,19 +315,43 @@ mod tests {
             "true",
         ]))
         .unwrap();
-        assert_eq!(parsed.deny_write, Some(PathBuf::from("/home/tester/.config/tome")));
-        assert_eq!(parsed.deny_read, Some(PathBuf::from("/home/tester/.config/tome/airgap-auth.json")));
+        assert_eq!(
+            parsed.deny_write,
+            Some(PathBuf::from("/home/tester/.config/tome"))
+        );
+        assert_eq!(
+            parsed.deny_read,
+            Some(PathBuf::from("/home/tester/.config/tome/airgap-auth.json"))
+        );
     }
 
     #[test]
     fn deny_write_and_deny_read_are_independent_either_may_appear_alone() {
-        let write_only =
-            parse_args(v(&["--port", "1", "--sock", "/s", "--deny-write", "/cfg", "--", "true"])).unwrap();
+        let write_only = parse_args(v(&[
+            "--port",
+            "1",
+            "--sock",
+            "/s",
+            "--deny-write",
+            "/cfg",
+            "--",
+            "true",
+        ]))
+        .unwrap();
         assert_eq!(write_only.deny_write, Some(PathBuf::from("/cfg")));
         assert_eq!(write_only.deny_read, None);
 
-        let read_only =
-            parse_args(v(&["--port", "1", "--sock", "/s", "--deny-read", "/cfg/auth.json", "--", "true"])).unwrap();
+        let read_only = parse_args(v(&[
+            "--port",
+            "1",
+            "--sock",
+            "/s",
+            "--deny-read",
+            "/cfg/auth.json",
+            "--",
+            "true",
+        ]))
+        .unwrap();
         assert_eq!(read_only.deny_write, None);
         assert_eq!(read_only.deny_read, Some(PathBuf::from("/cfg/auth.json")));
     }
@@ -340,9 +394,18 @@ mod tests {
         assert!(parsed.self_unshare);
         assert!(parsed.new_session);
         assert_eq!(parsed.port, 54321);
-        assert_eq!(parsed.sock, PathBuf::from("/run/user/1000/tome/pane-pty-42.sock"));
-        assert_eq!(parsed.deny_write, Some(PathBuf::from("/home/tester/.config/tome")));
-        assert_eq!(parsed.deny_read, Some(PathBuf::from("/home/tester/.config/tome/airgap-auth.json")));
+        assert_eq!(
+            parsed.sock,
+            PathBuf::from("/run/user/1000/tome/pane-pty-42.sock")
+        );
+        assert_eq!(
+            parsed.deny_write,
+            Some(PathBuf::from("/home/tester/.config/tome"))
+        );
+        assert_eq!(
+            parsed.deny_read,
+            Some(PathBuf::from("/home/tester/.config/tome/airgap-auth.json"))
+        );
         assert_eq!(parsed.argv, v(&["claude", "--flow-node"]));
     }
 
@@ -354,9 +417,36 @@ mod tests {
 
     #[test]
     fn self_unshare_flag_can_appear_in_any_position_before_the_separator() {
-        let leading = parse_args(v(&["--self-unshare", "--port", "1", "--sock", "/s", "--", "true"])).unwrap();
-        let trailing = parse_args(v(&["--port", "1", "--sock", "/s", "--self-unshare", "--", "true"])).unwrap();
-        let middle = parse_args(v(&["--port", "1", "--self-unshare", "--sock", "/s", "--", "true"])).unwrap();
+        let leading = parse_args(v(&[
+            "--self-unshare",
+            "--port",
+            "1",
+            "--sock",
+            "/s",
+            "--",
+            "true",
+        ]))
+        .unwrap();
+        let trailing = parse_args(v(&[
+            "--port",
+            "1",
+            "--sock",
+            "/s",
+            "--self-unshare",
+            "--",
+            "true",
+        ]))
+        .unwrap();
+        let middle = parse_args(v(&[
+            "--port",
+            "1",
+            "--self-unshare",
+            "--sock",
+            "/s",
+            "--",
+            "true",
+        ]))
+        .unwrap();
         for parsed in [leading, trailing, middle] {
             assert!(parsed.self_unshare);
             assert_eq!(parsed.port, 1);
@@ -366,37 +456,66 @@ mod tests {
 
     #[test]
     fn errors_when_port_is_missing() {
-        assert_eq!(parse_args(v(&["--sock", "/s", "--", "true"])), Err(ArgError::MissingFlag("--port")));
+        assert_eq!(
+            parse_args(v(&["--sock", "/s", "--", "true"])),
+            Err(ArgError::MissingFlag("--port"))
+        );
     }
 
     #[test]
     fn errors_when_sock_is_missing() {
-        assert_eq!(parse_args(v(&["--port", "1", "--", "true"])), Err(ArgError::MissingFlag("--sock")));
+        assert_eq!(
+            parse_args(v(&["--port", "1", "--", "true"])),
+            Err(ArgError::MissingFlag("--sock"))
+        );
     }
 
     #[test]
     fn errors_when_port_is_out_of_u16_range_or_non_numeric() {
         for bad in ["not-a-number", "-1", "65536", "99999", "", "3.14"] {
             let result = parse_args(v(&["--port", bad, "--sock", "/s", "--", "true"]));
-            assert_eq!(result, Err(ArgError::InvalidPort(bad.to_string())), "port={bad:?}");
+            assert_eq!(
+                result,
+                Err(ArgError::InvalidPort(bad.to_string())),
+                "port={bad:?}"
+            );
         }
     }
 
     #[test]
     fn accepts_the_full_u16_boundary_values() {
-        assert_eq!(parse_args(v(&["--port", "0", "--sock", "/s", "--", "true"])).unwrap().port, 0);
-        assert_eq!(parse_args(v(&["--port", "65535", "--sock", "/s", "--", "true"])).unwrap().port, 65535);
+        assert_eq!(
+            parse_args(v(&["--port", "0", "--sock", "/s", "--", "true"]))
+                .unwrap()
+                .port,
+            0
+        );
+        assert_eq!(
+            parse_args(v(&["--port", "65535", "--sock", "/s", "--", "true"]))
+                .unwrap()
+                .port,
+            65535
+        );
     }
 
     #[test]
     fn errors_when_a_flag_is_the_last_token_with_no_value() {
-        assert_eq!(parse_args(v(&["--port"])), Err(ArgError::MissingValue("--port")));
-        assert_eq!(parse_args(v(&["--port", "1", "--sock"])), Err(ArgError::MissingValue("--sock")));
+        assert_eq!(
+            parse_args(v(&["--port"])),
+            Err(ArgError::MissingValue("--port"))
+        );
+        assert_eq!(
+            parse_args(v(&["--port", "1", "--sock"])),
+            Err(ArgError::MissingValue("--sock"))
+        );
     }
 
     #[test]
     fn errors_when_the_separator_is_missing_entirely() {
-        assert_eq!(parse_args(v(&["--port", "1", "--sock", "/s"])), Err(ArgError::MissingSeparator));
+        assert_eq!(
+            parse_args(v(&["--port", "1", "--sock", "/s"])),
+            Err(ArgError::MissingSeparator)
+        );
     }
 
     #[test]
@@ -413,7 +532,10 @@ mod tests {
 
     #[test]
     fn errors_when_argv_after_the_separator_is_empty() {
-        assert_eq!(parse_args(v(&["--port", "1", "--sock", "/s", "--"])), Err(ArgError::EmptyArgv));
+        assert_eq!(
+            parse_args(v(&["--port", "1", "--sock", "/s", "--"])),
+            Err(ArgError::EmptyArgv)
+        );
     }
 
     #[test]
@@ -435,7 +557,12 @@ mod tests {
         .unwrap();
         assert_eq!(
             parsed.argv,
-            v(&["zsh", "-l", "-c", "echo --self-unshare --port 9999 --sock /evil"])
+            v(&[
+                "zsh",
+                "-l",
+                "-c",
+                "echo --self-unshare --port 9999 --sock /evil"
+            ])
         );
         assert_eq!(parsed.port, 1);
         assert!(!parsed.self_unshare);
@@ -443,7 +570,10 @@ mod tests {
 
     #[test]
     fn a_bare_double_dash_inside_argv_after_the_first_one_is_kept_literally() {
-        let parsed = parse_args(v(&["--port", "1", "--sock", "/s", "--", "cmd", "--", "more"])).unwrap();
+        let parsed = parse_args(v(&[
+            "--port", "1", "--sock", "/s", "--", "cmd", "--", "more",
+        ]))
+        .unwrap();
         assert_eq!(parsed.argv, v(&["cmd", "--", "more"]));
     }
 
@@ -457,17 +587,30 @@ mod tests {
 
     #[test]
     fn last_value_wins_when_a_flag_is_repeated() {
-        let parsed = parse_args(v(&["--port", "1", "--port", "2", "--sock", "/a", "--sock", "/b", "--", "true"])).unwrap();
+        let parsed = parse_args(v(&[
+            "--port", "1", "--port", "2", "--sock", "/a", "--sock", "/b", "--", "true",
+        ]))
+        .unwrap();
         assert_eq!(parsed.port, 2);
         assert_eq!(parsed.sock, PathBuf::from("/b"));
     }
 
     #[test]
     fn display_messages_name_the_flag_or_reason_involved() {
-        assert_eq!(ArgError::MissingFlag("--port").to_string(), "missing required flag --port");
-        assert_eq!(ArgError::MissingValue("--sock").to_string(), "--sock requires a value");
-        assert!(ArgError::InvalidPort("x".to_string()).to_string().contains("--port"));
-        assert!(ArgError::UnknownFlag("--wat".to_string()).to_string().contains("--wat"));
+        assert_eq!(
+            ArgError::MissingFlag("--port").to_string(),
+            "missing required flag --port"
+        );
+        assert_eq!(
+            ArgError::MissingValue("--sock").to_string(),
+            "--sock requires a value"
+        );
+        assert!(ArgError::InvalidPort("x".to_string())
+            .to_string()
+            .contains("--port"));
+        assert!(ArgError::UnknownFlag("--wat".to_string())
+            .to_string()
+            .contains("--wat"));
         assert!(ArgError::MissingSeparator.to_string().contains("--"));
         assert!(ArgError::EmptyArgv.to_string().contains("--"));
     }

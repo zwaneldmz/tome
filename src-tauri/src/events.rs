@@ -73,7 +73,10 @@ struct Counters {
     since_rewrite: usize,
 }
 
-static COUNTERS: Mutex<Counters> = Mutex::new(Counters { lines: None, since_rewrite: 0 });
+static COUNTERS: Mutex<Counters> = Mutex::new(Counters {
+    lines: None,
+    since_rewrite: 0,
+});
 
 /// One append's worth of `countAndMaybeTrim()`: bump `lines`, and every
 /// 500th call, rewrite the file to the most recent `CAP` records if it grew
@@ -91,7 +94,10 @@ fn count_and_maybe_trim(path: &Path, counters: Counters) -> Counters {
     lines += 1;
     let since_rewrite = counters.since_rewrite + 1;
     if since_rewrite < 500 {
-        return Counters { lines: Some(lines), since_rewrite };
+        return Counters {
+            lines: Some(lines),
+            since_rewrite,
+        };
     }
     // sinceRewrite resets to 0 here regardless of whether a trim actually
     // happens below — pins the JS original's `sinceRewrite = 0` landing
@@ -101,7 +107,10 @@ fn count_and_maybe_trim(path: &Path, counters: Counters) -> Counters {
             lines = new_len;
         }
     }
-    Counters { lines: Some(lines), since_rewrite: 0 }
+    Counters {
+        lines: Some(lines),
+        since_rewrite: 0,
+    }
 }
 
 fn seed_line_count(path: &Path) -> usize {
@@ -135,7 +144,11 @@ fn append_line(dir: &Path, line: &str) {
     let path = events_file_path(dir);
     {
         use std::io::Write as _;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+        {
             let _ = writeln!(f, "{line}");
         }
     }
@@ -197,7 +210,9 @@ pub async fn list(app: &AppHandle) -> Vec<serde_json::Value> {
     let Ok(dir) = app.path().app_data_dir() else {
         return Vec::new();
     };
-    tokio::task::spawn_blocking(move || read_tail(&dir)).await.unwrap_or_default()
+    tokio::task::spawn_blocking(move || read_tail(&dir))
+        .await
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -257,8 +272,20 @@ mod tests {
         let dir = tempdir();
         let path = events_file_path(dir.path());
         std::fs::write(&path, "").unwrap();
-        let next = count_and_maybe_trim(&path, Counters { lines: Some(10), since_rewrite: 0 });
-        assert_eq!(next, Counters { lines: Some(11), since_rewrite: 1 });
+        let next = count_and_maybe_trim(
+            &path,
+            Counters {
+                lines: Some(10),
+                since_rewrite: 0,
+            },
+        );
+        assert_eq!(
+            next,
+            Counters {
+                lines: Some(11),
+                since_rewrite: 1
+            }
+        );
         // No trim attempted this far below the cadence: file left alone.
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "");
     }
@@ -272,8 +299,20 @@ mod tests {
         // counter, it just skips the actual rewrite — pins the JS
         // original's unconditional `sinceRewrite = 0` before its `if
         // (lines <= CAP) return`.
-        let next = count_and_maybe_trim(&path, Counters { lines: Some(10), since_rewrite: 499 });
-        assert_eq!(next, Counters { lines: Some(11), since_rewrite: 0 });
+        let next = count_and_maybe_trim(
+            &path,
+            Counters {
+                lines: Some(10),
+                since_rewrite: 499,
+            },
+        );
+        assert_eq!(
+            next,
+            Counters {
+                lines: Some(11),
+                since_rewrite: 0
+            }
+        );
     }
 
     #[test]
@@ -288,8 +327,20 @@ mod tests {
         }
         std::fs::write(&path, &text).unwrap();
         // lines counter says `over` already includes this call's append.
-        let next = count_and_maybe_trim(&path, Counters { lines: Some(over), since_rewrite: 499 });
-        assert_eq!(next, Counters { lines: Some(eventlog::CAP), since_rewrite: 0 });
+        let next = count_and_maybe_trim(
+            &path,
+            Counters {
+                lines: Some(over),
+                since_rewrite: 499,
+            },
+        );
+        assert_eq!(
+            next,
+            Counters {
+                lines: Some(eventlog::CAP),
+                since_rewrite: 0
+            }
+        );
         let rewritten = std::fs::read_to_string(&path).unwrap();
         let parsed = eventlog::parse_events(&rewritten);
         assert_eq!(parsed.len(), eventlog::CAP);
@@ -303,8 +354,24 @@ mod tests {
         let path = events_file_path(dir.path());
         // Three real lines plus a blank one, which the seed count (mirrors
         // `t.split('\n').filter((s) => s.trim()).length`) must not count.
-        std::fs::write(&path, format!("{}\n{}\n{}\n\n", line_for(0), line_for(1), line_for(2))).unwrap();
-        let next = count_and_maybe_trim(&path, Counters { lines: None, since_rewrite: 0 });
-        assert_eq!(next, Counters { lines: Some(4), since_rewrite: 1 }); // 3 seeded + 1 for this append
+        std::fs::write(
+            &path,
+            format!("{}\n{}\n{}\n\n", line_for(0), line_for(1), line_for(2)),
+        )
+        .unwrap();
+        let next = count_and_maybe_trim(
+            &path,
+            Counters {
+                lines: None,
+                since_rewrite: 0,
+            },
+        );
+        assert_eq!(
+            next,
+            Counters {
+                lines: Some(4),
+                since_rewrite: 1
+            }
+        ); // 3 seeded + 1 for this append
     }
 }

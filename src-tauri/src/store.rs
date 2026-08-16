@@ -155,7 +155,10 @@ mod tests {
     fn set_writes_0600_permissions() {
         let dir = tempdir();
         set(dir.path(), "workspaces", &json!({}), false).unwrap();
-        let mode = fs::metadata(dir.path().join("workspaces.json")).unwrap().permissions().mode();
+        let mode = fs::metadata(dir.path().join("workspaces.json"))
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o600);
     }
 

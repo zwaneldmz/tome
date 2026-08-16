@@ -49,7 +49,9 @@ use crate::agent_spawn::{AgentEntry, AGENTS};
 /// treat as reserved words. A custom id colliding with any of these would
 /// shadow a built-in in the merged list (or confuse a switch that never
 /// expects an agent there), so it is refused outright.
-const RESERVED_NON_AGENT_IDS: &[&str] = &["terminal", "chat", "brain", "flow", "runs", "doc", "editor", "events"];
+const RESERVED_NON_AGENT_IDS: &[&str] = &[
+    "terminal", "chat", "brain", "flow", "runs", "doc", "editor", "events",
+];
 
 fn is_reserved_id(id: &str) -> bool {
     AGENTS.contains(&id) || RESERVED_NON_AGENT_IDS.contains(&id)
@@ -63,12 +65,17 @@ const MAX_ARG_LEN: usize = 64;
 /// digits, or dashes.
 fn is_id_shape_valid(id: &str) -> bool {
     let mut chars = id.chars();
-    let Some(first) = chars.next() else { return false };
+    let Some(first) = chars.next() else {
+        return false;
+    };
     if !(first.is_ascii_lowercase() || first.is_ascii_digit()) {
         return false;
     }
     let rest: Vec<char> = chars.collect();
-    rest.len() <= 31 && rest.iter().all(|&c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    rest.len() <= 31
+        && rest
+            .iter()
+            .all(|&c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// Port of `BIN_RE = /^[a-z0-9._-]{0,63}$/i` — a bare command name, no
@@ -80,12 +87,17 @@ fn is_id_shape_valid(id: &str) -> bool {
 /// `[a-z0-9._-]` (the rest).
 fn is_bin_shape_valid(bin: &str) -> bool {
     let mut chars = bin.chars();
-    let Some(first) = chars.next() else { return false };
+    let Some(first) = chars.next() else {
+        return false;
+    };
     if !first.is_ascii_alphanumeric() {
         return false;
     }
     let rest: Vec<char> = chars.collect();
-    rest.len() <= 63 && rest.iter().all(|&c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    rest.len() <= 63
+        && rest
+            .iter()
+            .all(|&c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// Port of `MODELFLAG_RE = /^--[a-z-]{2,20}$/`: a literal `--` prefix,
@@ -94,7 +106,9 @@ fn is_bin_shape_valid(bin: &str) -> bool {
 /// the guard's job is keeping the token inert on the command line, not
 /// policing taste.
 fn is_model_flag_shape_valid(flag: &str) -> bool {
-    let Some(rest) = flag.strip_prefix("--") else { return false };
+    let Some(rest) = flag.strip_prefix("--") else {
+        return false;
+    };
     let len = rest.chars().count();
     (2..=20).contains(&len) && rest.chars().all(|c| c.is_ascii_lowercase() || c == '-')
 }
@@ -103,7 +117,9 @@ fn is_model_flag_shape_valid(flag: &str) -> bool {
 /// cap: 1–40 chars, every one printable ASCII (space included — unlike
 /// args, a label may contain spaces; "Aider", not "aider").
 fn is_valid_label(label: &str) -> bool {
-    !label.is_empty() && label.chars().count() <= 40 && label.chars().all(|c| ('\u{20}'..='\u{7e}').contains(&c))
+    !label.is_empty()
+        && label.chars().count() <= 40
+        && label.chars().all(|c| ('\u{20}'..='\u{7e}').contains(&c))
 }
 
 /// Port of `ARG_BAD_RE = /[^\x20-\x7e]|[;&|`$<>"'\\\s]/`, inverted to an
@@ -120,7 +136,11 @@ fn is_inert_arg(arg: &str) -> bool {
         return false;
     }
     arg.chars().all(|c| {
-        ('\u{20}'..='\u{7e}').contains(&c) && !matches!(c, ';' | '&' | '|' | '`' | '$' | '<' | '>' | '"' | '\'' | '\\' | ' ')
+        ('\u{20}'..='\u{7e}').contains(&c)
+            && !matches!(
+                c,
+                ';' | '&' | '|' | '`' | '$' | '<' | '>' | '"' | '\'' | '\\' | ' '
+            )
     })
 }
 
@@ -135,12 +155,17 @@ pub fn vet_custom_agent(raw: &serde_json::Value) -> Result<AgentEntry, String> {
     }
     let id = raw.get("id").and_then(|v| v.as_str()).unwrap_or_default();
     if !is_id_shape_valid(id) {
-        return Err("id must be 1–32 chars of [a-z0-9-], starting with a letter or digit".to_string());
+        return Err(
+            "id must be 1–32 chars of [a-z0-9-], starting with a letter or digit".to_string(),
+        );
     }
     if is_reserved_id(id) {
         return Err(format!(r#"id "{id}" is a built-in pane kind"#));
     }
-    let label = raw.get("label").and_then(|v| v.as_str()).unwrap_or_default();
+    let label = raw
+        .get("label")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
     if !is_valid_label(label) {
         return Err("label must be 1–40 chars of printable ASCII".to_string());
     }
@@ -155,7 +180,9 @@ pub fn vet_custom_agent(raw: &serde_json::Value) -> Result<AgentEntry, String> {
             .as_array()
             .ok_or_else(|| format!("args must be an array of at most {MAX_ARGS} tokens"))?;
         if arr.len() > MAX_ARGS {
-            return Err(format!("args must be an array of at most {MAX_ARGS} tokens"));
+            return Err(format!(
+                "args must be an array of at most {MAX_ARGS} tokens"
+            ));
         }
         for a in arr {
             let s = a.as_str().filter(|s| is_inert_arg(s));
@@ -206,7 +233,10 @@ pub fn vet_custom_agent(raw: &serde_json::Value) -> Result<AgentEntry, String> {
 /// else (missing key, a hand-edited scalar/object) is treated as empty,
 /// porting `Array.isArray(customs) ? customs : []`.
 pub fn merge_agents(builtins: &[&str], customs: &serde_json::Value) -> Vec<AgentEntry> {
-    let mut out: Vec<AgentEntry> = builtins.iter().map(|&name| AgentEntry::builtin(name)).collect();
+    let mut out: Vec<AgentEntry> = builtins
+        .iter()
+        .map(|&name| AgentEntry::builtin(name))
+        .collect();
     let mut seen: HashSet<String> = builtins.iter().map(|s| s.to_string()).collect();
     if let Some(arr) = customs.as_array() {
         for raw in arr {
@@ -257,7 +287,10 @@ mod tests {
             "args": ["--full-auto", "-q"], "modelFlag": "--model",
         });
         let agent = vet_custom_agent(&raw).unwrap();
-        assert_eq!(agent.args, vec!["--full-auto".to_string(), "-q".to_string()]);
+        assert_eq!(
+            agent.args,
+            vec!["--full-auto".to_string(), "-q".to_string()]
+        );
         assert_eq!(agent.model_flag, Some("--model".to_string()));
         // The vetted copy shares nothing with the caller's value: `raw`
         // is immutable input here (owned `String`s inside `agent`), so
@@ -275,7 +308,10 @@ mod tests {
     #[test]
     fn accepts_bins_with_dots_underscores_dashes_and_upper_case() {
         for bin in ["claude-code", "my_cli", "GPT-4.sh", "aider.chat"] {
-            assert!(vet_custom_agent(&with(&aider(), "bin", serde_json::json!(bin))).is_ok(), "{bin} should be accepted");
+            assert!(
+                vet_custom_agent(&with(&aider(), "bin", serde_json::json!(bin))).is_ok(),
+                "{bin} should be accepted"
+            );
         }
     }
 
@@ -285,7 +321,8 @@ mod tests {
     fn refuses_every_reserved_id() {
         for id in [
             "claude", "opencode", "pi", // built-in agents
-            "terminal", "chat", "brain", "flow", "runs", "doc", "editor", "events", // reserved non-agent kinds
+            "terminal", "chat", "brain", "flow", "runs", "doc", "editor",
+            "events", // reserved non-agent kinds
         ] {
             let err = vet_custom_agent(&with(&aider(), "id", serde_json::json!(id))).unwrap_err();
             assert!(err.contains("built-in"), "{id}: {err}");
@@ -294,7 +331,15 @@ mod tests {
 
     #[test]
     fn refuses_malformed_ids() {
-        for id in ["Aider", "aider_cli", "-aider", "aider ", "", &"a".repeat(33), "aidér"] {
+        for id in [
+            "Aider",
+            "aider_cli",
+            "-aider",
+            "aider ",
+            "",
+            &"a".repeat(33),
+            "aidér",
+        ] {
             assert!(
                 vet_custom_agent(&with(&aider(), "id", serde_json::json!(id))).is_err(),
                 "{id} should be refused"
@@ -305,7 +350,9 @@ mod tests {
     #[test]
     fn accepts_a_32_char_id_and_refuses_33() {
         assert!(vet_custom_agent(&with(&aider(), "id", serde_json::json!("a".repeat(32)))).is_ok());
-        assert!(vet_custom_agent(&with(&aider(), "id", serde_json::json!("a".repeat(33)))).is_err());
+        assert!(
+            vet_custom_agent(&with(&aider(), "id", serde_json::json!("a".repeat(33)))).is_err()
+        );
     }
 
     // ---- vet_custom_agent — label rules ----
@@ -322,7 +369,9 @@ mod tests {
 
     #[test]
     fn accepts_40_chars_of_printable_ascii_label() {
-        assert!(vet_custom_agent(&with(&aider(), "label", serde_json::json!("x".repeat(40)))).is_ok());
+        assert!(
+            vet_custom_agent(&with(&aider(), "label", serde_json::json!("x".repeat(40)))).is_ok()
+        );
     }
 
     // ---- vet_custom_agent — bin rules ----
@@ -334,8 +383,8 @@ mod tests {
             "../bin/aider",         // traversal
             "bin/aider",            // any separator at all
             "aider\\cli",
-            "aider;rm",  // separators are the only chars the regex must keep out…
-            "aider rm",  // …but a space would become two tokens on the command line
+            "aider;rm", // separators are the only chars the regex must keep out…
+            "aider rm", // …but a space would become two tokens on the command line
             "aider$HOME",
             "",
             "-aider", // must not start with a flag dash
@@ -369,23 +418,30 @@ mod tests {
             "two words",  // embedded space — single tokens only
             "tab\ttoken", // control chars
             "new\nline",
-            "",           // empty is not a token
+            "", // empty is not a token
             &"x".repeat(65),
         ] {
-            let err = vet_custom_agent(&with(&aider(), "args", serde_json::json!([arg]))).unwrap_err();
+            let err =
+                vet_custom_agent(&with(&aider(), "args", serde_json::json!([arg]))).unwrap_err();
             assert!(err.contains("args"), "{arg:?}: {err}");
         }
     }
 
     #[test]
     fn refuses_more_than_8_args() {
-        assert!(vet_custom_agent(&with(&aider(), "args", serde_json::json!(vec!["-q"; 9]))).is_err());
-        assert!(vet_custom_agent(&with(&aider(), "args", serde_json::json!(vec!["-q"; 8]))).is_ok());
+        assert!(
+            vet_custom_agent(&with(&aider(), "args", serde_json::json!(vec!["-q"; 9]))).is_err()
+        );
+        assert!(
+            vet_custom_agent(&with(&aider(), "args", serde_json::json!(vec!["-q"; 8]))).is_ok()
+        );
     }
 
     #[test]
     fn refuses_a_non_array_args() {
-        assert!(vet_custom_agent(&with(&aider(), "args", serde_json::json!("--full-auto"))).is_err());
+        assert!(
+            vet_custom_agent(&with(&aider(), "args", serde_json::json!("--full-auto"))).is_err()
+        );
     }
 
     // ---- vet_custom_agent — modelFlag rules ----
@@ -393,13 +449,22 @@ mod tests {
     #[test]
     fn accepts_wellformed_model_flags() {
         for flag in ["--model", "--mdl", "--use-model"] {
-            assert!(vet_custom_agent(&with(&aider(), "modelFlag", serde_json::json!(flag))).is_ok());
+            assert!(
+                vet_custom_agent(&with(&aider(), "modelFlag", serde_json::json!(flag))).is_ok()
+            );
         }
     }
 
     #[test]
     fn refuses_malformed_model_flags() {
-        for flag in ["-m", "--Model", "--model=x", "--model ", "--m", &format!("--{}", "m".repeat(21))] {
+        for flag in [
+            "-m",
+            "--Model",
+            "--model=x",
+            "--model ",
+            "--m",
+            &format!("--{}", "m".repeat(21)),
+        ] {
             assert!(
                 vet_custom_agent(&with(&aider(), "modelFlag", serde_json::json!(flag))).is_err(),
                 "{flag} should be refused"
@@ -415,7 +480,9 @@ mod tests {
         // Documented in the JS suite's comments but not asserted there;
         // asserted here since Rust has no equivalent inline comment-only
         // convention for "this is deliberately permissive".
-        assert!(vet_custom_agent(&with(&aider(), "modelFlag", serde_json::json!("---model"))).is_ok());
+        assert!(
+            vet_custom_agent(&with(&aider(), "modelFlag", serde_json::json!("---model"))).is_ok()
+        );
     }
 
     // ---- vet_custom_agent — shape rules ----
@@ -455,7 +522,8 @@ mod tests {
     fn normalizes_builtins_and_appends_vetted_customs() {
         let customs = serde_json::json!([aider()]);
         let merged = merge_agents(AGENTS, &customs);
-        let expected_builtins: Vec<AgentEntry> = AGENTS.iter().map(|&n| AgentEntry::builtin(n)).collect();
+        let expected_builtins: Vec<AgentEntry> =
+            AGENTS.iter().map(|&n| AgentEntry::builtin(n)).collect();
         assert_eq!(&merged[..AGENTS.len()], &expected_builtins[..]);
         assert_eq!(merged[AGENTS.len()], vet_custom_agent(&aider()).unwrap());
     }
@@ -490,9 +558,15 @@ mod tests {
 
     #[test]
     fn treats_a_non_array_customs_value_as_empty() {
-        for customs in [serde_json::Value::Null, serde_json::json!("aider"), serde_json::json!(42), serde_json::json!({})] {
+        for customs in [
+            serde_json::Value::Null,
+            serde_json::json!("aider"),
+            serde_json::json!(42),
+            serde_json::json!({}),
+        ] {
             let merged = merge_agents(AGENTS, &customs);
-            let expected: Vec<AgentEntry> = AGENTS.iter().map(|&n| AgentEntry::builtin(n)).collect();
+            let expected: Vec<AgentEntry> =
+                AGENTS.iter().map(|&n| AgentEntry::builtin(n)).collect();
             assert_eq!(merged, expected);
         }
     }
@@ -521,18 +595,27 @@ mod tests {
 
     #[test]
     fn builds_the_bare_bin_for_a_custom_without_args() {
-        assert_eq!(build_agent_spawn_from(&codex_list(), "aider", None), Some("aider".to_string()));
+        assert_eq!(
+            build_agent_spawn_from(&codex_list(), "aider", None),
+            Some("aider".to_string())
+        );
     }
 
     #[test]
     fn joins_bin_and_vetted_args_into_the_command_line() {
-        assert_eq!(build_agent_spawn_from(&codex_list(), "codex", None), Some("codex --full-auto".to_string()));
+        assert_eq!(
+            build_agent_spawn_from(&codex_list(), "codex", None),
+            Some("codex --full-auto".to_string())
+        );
     }
 
     #[test]
     fn returns_none_for_an_unknown_kind() {
         assert_eq!(build_agent_spawn_from(&codex_list(), "gpt", None), None);
-        assert_eq!(build_agent_spawn_from(&codex_list(), "terminal", None), None);
+        assert_eq!(
+            build_agent_spawn_from(&codex_list(), "terminal", None),
+            None
+        );
     }
 
     #[test]
@@ -554,7 +637,10 @@ mod tests {
 
     #[test]
     fn drops_a_pin_for_a_custom_with_no_modelflag_without_guessing_one() {
-        assert_eq!(build_agent_spawn_from(&codex_list(), "aider", Some("haiku")), Some("aider".to_string()));
+        assert_eq!(
+            build_agent_spawn_from(&codex_list(), "aider", Some("haiku")),
+            Some("aider".to_string())
+        );
     }
 
     #[test]
@@ -575,7 +661,9 @@ mod tests {
             args: Vec::new(),
             model_flag: Some("--use-model".to_string()),
         };
-        assert!(AGENT_MODELS.iter().any(|&(k, models)| k == "claude" && models.contains(&"haiku")));
+        assert!(AGENT_MODELS
+            .iter()
+            .any(|&(k, models)| k == "claude" && models.contains(&"haiku")));
         assert_eq!(
             build_agent_spawn_from(&[synthetic], "claude", Some("haiku")),
             Some("my-claude-fork --use-model haiku".to_string())
@@ -586,8 +674,14 @@ mod tests {
 
     #[test]
     fn the_builtin_wrapper_still_builds_builtins_exactly_as_before() {
-        assert_eq!(build_agent_spawn("claude", Some("haiku")), Some("claude --model haiku".to_string()));
-        assert_eq!(build_agent_spawn("opencode", None), Some("opencode".to_string()));
+        assert_eq!(
+            build_agent_spawn("claude", Some("haiku")),
+            Some("claude --model haiku".to_string())
+        );
+        assert_eq!(
+            build_agent_spawn("opencode", None),
+            Some("opencode".to_string())
+        );
     }
 
     #[test]

@@ -97,7 +97,8 @@ async fn run_loop(
             })
         };
 
-        let stream_fut = (env.stream_chat)(Some(sys.clone()), msgs.clone(), tool_defs.clone(), on_text);
+        let stream_fut =
+            (env.stream_chat)(Some(sys.clone()), msgs.clone(), tool_defs.clone(), on_text);
         let raced = tokio::select! {
             r = stream_fut => Some(r),
             _ = token.cancelled() => None,
@@ -121,23 +122,37 @@ async fn run_loop(
             return Ok(());
         }
         if final_resp.stop_reason != "tool_use" {
-            (env.send)("chat:done", json!({ "id": id, "aborted": false, "error": Value::Null }));
+            (env.send)(
+                "chat:done",
+                json!({ "id": id, "aborted": false, "error": Value::Null }),
+            );
             return Ok(());
         }
 
         msgs.push(json!({ "role": "assistant", "content": final_resp.content }));
         let mut results = Vec::new();
-        for block in final_resp.content.iter().filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use")) {
+        for block in final_resp
+            .content
+            .iter()
+            .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
+        {
             // A stop mid-turn must not let the rest of THIS batch of tool
             // calls run headless after the renderer stopped listening —
             // bail before the next dispatch (TOME-015).
             if token.is_cancelled() {
                 break;
             }
-            let tool_name = block.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+            let tool_name = block
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             let input = block.get("input").cloned().unwrap_or_else(|| json!({}));
             let hint = tools::tool_hint(&input);
-            (env.send)("chat:tool", json!({ "id": id, "tool": tool_name, "hint": hint }));
+            (env.send)(
+                "chat:tool",
+                json!({ "id": id, "tool": tool_name, "hint": hint }),
+            );
             let out = tools::run_tool(c, env, &tool_name, &input, id).await;
             // Audit the ACTION only: tool name, chat, outcome, and the same
             // hint the chat:tool event carries. Tool input/output never
@@ -152,7 +167,8 @@ async fn run_loop(
                 ],
             );
             let tool_use_id = block.get("id").cloned().unwrap_or(Value::Null);
-            results.push(json!({ "type": "tool_result", "tool_use_id": tool_use_id, "content": out }));
+            results
+                .push(json!({ "type": "tool_result", "tool_use_id": tool_use_id, "content": out }));
         }
         msgs.push(json!({ "role": "user", "content": results }));
 
@@ -161,13 +177,19 @@ async fn run_loop(
             let error = format!(
                 "Token budget reached (~{thousands}k tokens across tool turns) — stopped early. Ask again to continue."
             );
-            (env.send)("chat:done", json!({ "id": id, "aborted": false, "error": error }));
+            (env.send)(
+                "chat:done",
+                json!({ "id": id, "aborted": false, "error": error }),
+            );
             return Ok(());
         }
     }
 
     if aborted || token.is_cancelled() {
-        (env.send)("chat:done", json!({ "id": id, "aborted": true, "error": "Stopped." }));
+        (env.send)(
+            "chat:done",
+            json!({ "id": id, "aborted": true, "error": "Stopped." }),
+        );
         return Ok(());
     }
     (env.send)(
