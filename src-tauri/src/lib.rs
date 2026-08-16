@@ -353,8 +353,10 @@ pub fn run() {
             ipc::chat::chat_send,
             ipc::chat::chat_abort,
             ipc::chat::chat_providers,
+            ipc::chat::chat_complete,
             // mentor
             ipc::mentor::mentor_answer,
+            ipc::mentor::mentor_judge,
             // review
             ipc::review::review_generate,
             // brain

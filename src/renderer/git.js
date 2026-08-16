@@ -129,7 +129,8 @@ async function commitFlow() {
         toast(err.message)
       }
     }
-    comprehensionGate('commit', doCommit)
+    const context = `staged files:\n${files.map((f) => `${f.x}${f.y} ${f.path}`).join('\n')}`
+    comprehensionGate('commit', context, doCommit)
   })
   m.button('Cancel', () => m.close(), 'ghost')
 }
@@ -137,7 +138,7 @@ async function commitFlow() {
 async function pushFlow() {
   const dir = wsState.activeRoot
   if (!dir) return toast('no active folder')
-  comprehensionGate('push', async () => {
+  comprehensionGate('push', 'git push — the current branch to its remote', async () => {
     try {
       const r = await tome.git.push(dir)
       r.ok ? toast('pushed', 'ok') : toast(r.error)
@@ -147,13 +148,13 @@ async function pushFlow() {
   })
 }
 
-// The deterministic half of the comprehension gate: before commit or push,
-// when the mentor gate is armed at that point, ask the user to put the change
-// into their own words. Skip (bottom-left) and a non-empty answer both let the
-// action through; Cancel blocks it. Free-text is the fixed self-check here —
-// the model-driven half of the gate (verbose mode's gate_question) already
-// handles tailored questions with LLM-judged free text.
-function comprehensionGate(verb, onProceed) {
+// The comprehension gate: before commit or push, when the mentor gate is
+// armed at that point, ask the user to put the change into their own words
+// and judge the answer with a one-shot LLM call (mentor:judge). Skip
+// (bottom-left) and a judged pass both let the action through; a fail shows
+// the judge's feedback for a retry; Cancel blocks it. An empty answer is a
+// toast, not a call.
+function comprehensionGate(verb, context, onProceed) {
   if (!mentorState.gate || !mentorState.gatePoints?.[verb]) return onProceed()
   const m = modalShell(`Before you ${verb}`)
   const box = m.body.parentElement
@@ -163,14 +164,34 @@ function comprehensionGate(verb, onProceed) {
   ta.rows = 3
   ta.spellcheck = false
   m.body.appendChild(ta)
+  const feedback = el('p', 'mentor-feedback')
+  m.body.appendChild(feedback)
   let skipped = false
+  let judging = false
   const proceed = () => {
     m.close()
     onProceed()
   }
-  m.button(verb === 'commit' ? 'Commit anyway' : 'Push anyway', () => {
-    if (ta.value.trim() || skipped) proceed()
-    else toast('write a line first, or skip the test')
+  m.button(verb === 'commit' ? 'Commit anyway' : 'Push anyway', async () => {
+    if (skipped) return proceed()
+    const answer = ta.value.trim()
+    if (!answer) return toast('write a line first, or skip the test')
+    if (judging) return
+    judging = true
+    feedback.textContent = 'checking…'
+    try {
+      const r = await tome.mentor.judge(answer, context)
+      if (r.pass) {
+        proceed()
+      } else {
+        feedback.textContent = r.feedback || 'Not quite — try again.'
+        judging = false
+      }
+    } catch (err) {
+      feedback.textContent = ''
+      toast(`could not judge — ${err?.message || err}`)
+      judging = false
+    }
   })
   m.button('Cancel', () => m.close(), 'ghost')
   const skip = el('button', 'mentor-skip', 'Skip test')

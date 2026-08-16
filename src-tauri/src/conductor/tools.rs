@@ -1,4 +1,4 @@
-//! The conductor's 12 tools — direct port of `conductor.js`'s `TOOLS`
+//! The conductor's 13 tools — direct port of `conductor.js`'s `TOOLS`
 //! (Anthropic-shaped `input_schema` defs), `runTool` dispatch, and the two
 //! text sanitizers (`stripAnsi`/`stripControlChars`) it imports from
 //! `src/shared/terminal-text.js`. That shared module itself stays JS (the
@@ -89,12 +89,22 @@ pub(crate) fn system_prompt_text(agent_ids: &[String]) -> String {
 /// `mentorSystemPrompt()`, the teaching persona chosen when `chat_send` is
 /// called with `verbose: true`. Plain text, brief, and speakable — the
 /// assistant's replies may be read aloud. Interpolates the same
-/// agent-kinds parenthetical as [`system_prompt_text`].
-pub(crate) fn mentor_prompt_text(agent_ids: &[String]) -> String {
-    format!(
-        "You are the mentor persona of the assistant pane inside Tome, a desktop coding harness whose grid holds terminal panes, agent CLI panes ({}), editors, documents, and note vaults. You are teaching the user, not just doing their work for them: explain what you are about to do and why before you do it, work one step at a time, and check the user's understanding as you go — pause to confirm they follow each step before moving on. Use list_skills to see what skills are available and read_skill to load one when it applies (for example teach, tdd, grill-me, grilling, to-spec, to-questionnaire, code-review, diagnosing-bugs, ask-matt) — read a skill before relying on it. When the user asks you to implement a feature or make a significant change, first write a failing test that captures the requirement with write_file, then call gate_question with 1-3 comprehension questions about that test; do NOT implement until gate_question returns the user's answers, then judge whether they understand. If they skipped or answered poorly, explain what was missing before implementing. Keep your replies focused, brief, and speakable — plain text only, no markdown tables.",
+/// agent-kinds parenthetical as [`system_prompt_text`]. When `gate` is true
+/// (the default) the prompt includes the "write a failing test + call
+/// gate_question; do not implement until judged" instruction; when false
+/// that instruction is omitted but the rest of the teacher persona stays.
+pub(crate) fn mentor_prompt_text(agent_ids: &[String], gate: bool) -> String {
+    let base = format!(
+        "You are the mentor persona of the assistant pane inside Tome, a desktop coding harness whose grid holds terminal panes, agent CLI panes ({}), editors, documents, and note vaults. You are teaching the user, not just doing their work for them: explain what you are about to do and why before you do it, work one step at a time, and check the user's understanding as you go — pause to confirm they follow each step before moving on. Use list_skills to see what skills are available and read_skill to load one when it applies (for example teach, tdd, grill-me, grilling, to-spec, to-questionnaire, code-review, diagnosing-bugs, ask-matt) — read a skill before relying on it. ",
         agent_kinds_text(agent_ids)
-    )
+    );
+    const GATE_INSTRUCTION: &str = "When the user asks you to implement a feature or make a significant change, first write a failing test that captures the requirement with write_file, then call gate_question with 1-3 comprehension questions about that test; do NOT implement until gate_question returns the user's answers, then judge whether they understand. If they skipped or answered poorly, explain what was missing before implementing. ";
+    const TAIL: &str = "Keep your replies focused, brief, and speakable — plain text only, no markdown tables.";
+    if gate {
+        format!("{base}{GATE_INSTRUCTION}{TAIL}")
+    } else {
+        format!("{base}{TAIL}")
+    }
 }
 
 /// `TOOLS`, rebuilt fresh from `agent_ids` — see [`Conductor::tools`].
@@ -244,7 +254,7 @@ pub(crate) fn tool_schemas(agent_ids: &[String]) -> Vec<Value> {
 
 // ================= runTool dispatch =================
 
-/// `runTool(name, input, chatId)` — dispatches to one of the 12 impls below,
+/// `runTool(name, input, chatId)` — dispatches to one of the 13 impls below,
 /// or `"Unknown tool."` for anything else. Infallible (always returns a
 /// `String`): unlike the JS original's `try { out = runTool(...) } catch`,
 /// none of these impls can panic on attacker-shaped `input` (every field

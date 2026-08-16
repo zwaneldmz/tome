@@ -289,9 +289,11 @@ impl Conductor {
 
     /// `MENTOR_SYSTEM`, the teaching persona chosen when a `chat:send`
     /// arrives with `verbose: true` — same freshness rationale as
-    /// [`Self::system_prompt`].
-    pub fn mentor_system_prompt(&self) -> String {
-        super::tools::mentor_prompt_text(&self.agent_ids())
+    /// [`Self::system_prompt`]. `gate` forwards the renderer's
+    /// mentor-gate toggle: `true` keeps the "write a failing test +
+    /// gate_question" instruction, `false` drops it.
+    pub fn mentor_system_prompt(&self, gate: bool) -> String {
+        super::tools::mentor_prompt_text(&self.agent_ids(), gate)
     }
 }
 

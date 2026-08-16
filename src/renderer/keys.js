@@ -7,7 +7,7 @@
 // element has focus. The quick-open palette installs its own keydown
 // listener while it is open.
 import { tome, el, toast } from './util.js'
-import { dock, closePanel, openFile } from './panes.js'
+import { dock, closePanel, openFile, addTerminal, addChat, addBrain, addReport } from './panes.js'
 import { activeWorkspace } from './workspaces.js'
 import { zoomTerminals } from './panels/terminal.js'
 import { closeMenus } from './menus.js'
@@ -129,16 +129,12 @@ const isEditable = (n) =>
 export function quickOpen() {
   if (document.getElementById('qo-overlay')) return
   const w = activeWorkspace()
-  if (!w?.folders.length) {
-    toast('quick open needs a workspace with a folder')
-    return
-  }
   closeMenus()
   const overlay = el('div')
   overlay.id = 'qo-overlay'
   const box = el('div', 'qo-box')
   const input = el('input', 'qo-input')
-  input.placeholder = 'type to find a file…'
+  input.placeholder = 'type to find a file, pane, or action…'
   input.spellcheck = false
   const list = el('div', 'qo-list')
   box.append(input, list)
@@ -146,42 +142,72 @@ export function quickOpen() {
   overlay.addEventListener('mousedown', (e) => e.target === overlay && close())
   document.body.appendChild(overlay)
 
-  const index = new FileIndex(w.folders)
-  index.start()
+  // Static items — open panes and the action list — are available at once;
+  // files fill in behind them as the lazy walk discovers them.
+  const staticItems = [
+    ...dock.panels.map((p) => ({
+      name: p.title || p.id || 'untitled pane',
+      hint: 'pane',
+      run: () => p.api.setActive(),
+    })),
+    { name: 'New terminal', hint: 'pane', run: () => addTerminal('terminal') },
+    { name: 'Assistant chat', hint: 'pane', run: () => addChat() },
+    {
+      name: 'Brain',
+      hint: 'pane',
+      run: () => (activeWorkspace() ? addBrain() : toast('a brain pane needs an active workspace')),
+    },
+    { name: 'Review report…', hint: 'pane', run: () => addReport() },
+    {
+      name: 'Settings…',
+      hint: 'preferences',
+      run: () => import('./preferences.js').then((m) => m.preferencesModal()),
+    },
+    { name: 'Keyboard shortcuts', hint: 'reference', run: () => shortcutsModal() },
+  ]
+
+  const index = w?.folders.length ? new FileIndex(w.folders) : null
+  if (index) index.start()
   let results = []
   let sel = 0
   let shownVersion = -1
 
   function close() {
-    index.cancel()
+    index?.cancel()
     overlay.remove()
   }
 
   function refresh() {
     const q = input.value.trim()
     const scored = []
-    if (q) {
-      for (const f of index.files) {
-        const s = fuzzy(q, relToWorkspace(f))
-        if (s !== null) scored.push([s, f])
-      }
-      scored.sort((a, b) => b[0] - a[0])
-    } else {
-      for (const f of index.files) scored.push([0, f])
+    for (const it of staticItems) {
+      const s = q ? fuzzy(q, it.name + ' ' + it.hint) : 0
+      if (s !== null) scored.push([s, it])
     }
+    if (index) {
+      for (const f of index.files) {
+        const rel = relToWorkspace(f)
+        const s = q ? fuzzy(q, rel) : 0
+        if (s !== null) {
+          const slash = rel.lastIndexOf('/')
+          scored.push([
+            s,
+            { name: slash === -1 ? rel : rel.slice(slash + 1), hint: slash === -1 ? 'file' : rel.slice(0, slash), run: () => openFile(f) },
+          ])
+        }
+      }
+    }
+    // Stable sort keeps insertion order for ties, so panes + actions surface
+    // ahead of files on an empty query, and best matches win once typed.
+    scored.sort((a, b) => b[0] - a[0])
     results = scored.slice(0, MAX_RESULTS).map((r) => r[1])
     sel = Math.min(sel, Math.max(0, results.length - 1))
-    shownVersion = index.version
+    shownVersion = index?.version ?? -1
     list.innerHTML = ''
-    results.forEach((path, i) => {
+    results.forEach((it, i) => {
       const row = el('div', 'qo-row' + (i === sel ? ' sel' : ''))
-      const rel = relToWorkspace(path)
-      const slash = rel.lastIndexOf('/')
-      row.append(
-        el('span', 'qo-name', slash === -1 ? rel : rel.slice(slash + 1)),
-        el('span', 'qo-dir', slash === -1 ? '' : rel.slice(0, slash))
-      )
-      row.addEventListener('click', () => pick(path))
+      row.append(el('span', 'qo-name', it.name), el('span', 'qo-dir', it.hint))
+      row.addEventListener('click', () => pick(it))
       row.addEventListener('mousemove', () => {
         if (sel !== i) {
           sel = i
@@ -192,9 +218,9 @@ export function quickOpen() {
     })
     if (!results.length) {
       list.appendChild(
-        el('div', 'qo-empty', index.done ? 'no matches' : 'scanning… ' + index.files.length + ' files so far')
+        el('div', 'qo-empty', index && !index.done ? 'scanning… ' + index.files.length + ' files so far' : 'no matches')
       )
-    } else if (!index.done) {
+    } else if (index && !index.done) {
       list.appendChild(el('div', 'qo-empty', 'scanning… ' + index.files.length + ' files'))
     }
     list.querySelector('.qo-row.sel')?.scrollIntoView({ block: 'nearest' })
@@ -211,9 +237,9 @@ export function quickOpen() {
     list.querySelector('.qo-row.sel')?.scrollIntoView({ block: 'nearest' })
   }
 
-  function pick(path) {
+  function pick(it) {
     close()
-    openFile(path)
+    it.run()
   }
 
   input.addEventListener('input', () => {
@@ -239,7 +265,7 @@ export function quickOpen() {
   // Keep filling in while the lazy walk is still discovering files.
   const poll = setInterval(() => {
     if (!overlay.isConnected) return clearInterval(poll)
-    if (index.version !== shownVersion) refresh()
+    if ((index?.version ?? -1) !== shownVersion) refresh()
   }, 250)
   refresh()
   input.focus()
@@ -251,7 +277,7 @@ const SHORTCUTS = [
   [MOD + 'S', 'Save the active editor'],
   [MOD + '⌥S', 'Save every editor with unsaved changes'],
   [MOD + 'W', 'Close the active pane (asks if unsaved)'],
-  [MOD + 'P', 'Quick-open a file'],
+  [MOD + 'P / ' + MOD + 'K', 'Quick open — files, panes, and actions'],
   [MOD + ',', 'Preferences'],
   [MOD + '1–9', 'Focus the Nth tab of the active group'],
   [MOD + '⇧[ / ' + MOD + '⇧]', 'Previous / next tab (also Ctrl+PageUp/PageDown)'],
@@ -327,6 +353,14 @@ window.addEventListener('keydown', (e) => {
   // Tab cycling: ⌘⇧[/⌘⇧] on mac, Ctrl+PageUp/PageDown everywhere. Not
   // global inside inputs — plain PageUp/Down there belong to the field.
   if (isEditable(e.target)) return
+  // ⌘K — the command palette (files, panes, actions). Handled in the
+  // renderer (not a native accelerator) so it stays off when typing, and so a
+  // terminal keeps its own ⌘K (clear scrollback) for itself.
+  if (!e.shiftKey && e.key.toLowerCase() === 'k') {
+    e.preventDefault()
+    quickOpen()
+    return
+  }
   const prevKey = e.key === '[' || e.key === '{' || e.key === 'PageUp'
   const nextKey = e.key === ']' || e.key === '}' || e.key === 'PageDown'
   if ((e.metaKey && e.shiftKey && (prevKey || nextKey)) || (e.ctrlKey && !e.metaKey && (prevKey || nextKey))) {
