@@ -124,7 +124,7 @@ jobs:
       # ("no identity found") instead of skipping signing. Default to '-'
       # (ad-hoc) when no real identity is configured.
       - name: Build Tauri bundles
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
