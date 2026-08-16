@@ -53,12 +53,30 @@ fn fake_env() -> (ConductorEnv, Sent, Logged) {
         write_pty: Arc::new(|_id: &str, _text: &str| true),
         roots: Arc::new(Vec::new),
         stream_chat: Arc::new(|_, _, _, _: OnText| unimplemented!("stream_chat not faked for this test")),
+        resolve_path: Arc::new(|p: &Path| Ok(p.to_path_buf())),
+        resolve_write: Arc::new(|p: &Path| Ok(p.to_path_buf())),
+        skills_root: Arc::new(|| None),
+        run_command: Arc::new(|_cwd: &str, _cmd: &str| unimplemented!("run_command not faked for this test")),
+        gate_question: Arc::new(|_payload: Value| unimplemented!("gate_question not faked for this test")),
     };
     (env, sent, logged)
 }
 
 fn sent_channel(sent: &Sent, channel: &str) -> Vec<Value> {
     sent.lock().unwrap().iter().filter(|(ch, _)| ch == channel).map(|(_, p)| p.clone()).collect()
+}
+
+/// Synchronous wrapper around the now-`async` [`tools::run_tool`], so the
+/// many non-async tool-dispatch tests below can keep their existing
+/// `#[test]` shape. Each call gets its own current-thread runtime (none of
+/// these tests are already inside one, since they are plain `#[test]`s),
+/// driving the same fn the async `#[tokio::test]`s await.
+fn run_tool(c: &Conductor, env: &ConductorEnv, name: &str, input: &Value, chat_id: &str) -> String {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime")
+        .block_on(tools::run_tool(c, env, name, input, chat_id))
 }
 
 /// A `stream_chat` fake that always returns the same canned response,
@@ -87,7 +105,7 @@ fn read_terminal_refuses_a_registered_pane_with_no_consent_granted() {
     let (env, _sent, _logged) = fake_env();
     c.register("p-noconsent", "terminal", "/tmp", false);
     c.record("p-noconsent", "hello world");
-    let out = tools::run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-noconsent" }), "chat-1");
+    let out =     run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-noconsent" }), "chat-1");
     assert_eq!(out, "Refused: user has not authorized reading this terminal.");
 }
 
@@ -97,8 +115,8 @@ fn read_terminal_surfaces_a_one_time_consent_prompt_not_one_per_call() {
     let (env, sent, _logged) = fake_env();
     c.register("p-ask", "terminal", "/tmp", false);
     c.record("p-ask", "hello world");
-    tools::run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-ask" }), "chat-1");
-    tools::run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-ask" }), "chat-1");
+    run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-ask" }), "chat-1");
+    run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-ask" }), "chat-1");
     assert_eq!(sent_channel(&sent, "conductor:readRequest"), vec![json!({ "paneId": "p-ask" })]);
 }
 
@@ -108,7 +126,7 @@ fn read_terminal_never_prompts_for_an_airgapped_pane() {
     let (env, sent, _logged) = fake_env();
     c.register("p-air", "terminal", "/tmp", true);
     c.record("p-air", "secret");
-    tools::run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-air" }), "chat-1");
+    run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-air" }), "chat-1");
     assert!(sent_channel(&sent, "conductor:readRequest").is_empty());
 }
 
@@ -119,7 +137,7 @@ fn read_terminal_refuses_an_airgapped_pane_even_after_consent_is_granted() {
     c.register("p-airgap", "terminal", "/tmp", true);
     c.record("p-airgap", "secret output");
     c.set_read_consent("p-airgap", true);
-    let out = tools::run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-airgap" }), "chat-1");
+    let out = run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-airgap" }), "chat-1");
     assert_eq!(out, "Refused: air-gapped pane output cannot be disclosed.");
 }
 
@@ -130,7 +148,7 @@ fn read_terminal_returns_scrollback_once_consented_and_audits_pane_and_count_onl
     c.register("p-ok", "terminal", "/tmp", false);
     c.record("p-ok", "line1\nline2\nline3");
     c.set_read_consent("p-ok", true);
-    let out = tools::run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-ok", "lines": 2 }), "chat-1");
+    let out = run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-ok", "lines": 2 }), "chat-1");
     assert_eq!(out, "line2\nline3");
     let logs = logged.lock().unwrap();
     assert_eq!(logs.len(), 1);
@@ -148,7 +166,7 @@ fn read_terminal_revoking_consent_refuses_again() {
     c.record("p-revoke", "x");
     c.set_read_consent("p-revoke", true);
     c.set_read_consent("p-revoke", false);
-    let out = tools::run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-revoke" }), "chat-1");
+    let out = run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-revoke" }), "chat-1");
     assert_eq!(out, "Refused: user has not authorized reading this terminal.");
 }
 
@@ -156,7 +174,7 @@ fn read_terminal_revoking_consent_refuses_again() {
 fn read_terminal_an_unknown_pane_is_refused_for_missing_pane_reasons_not_consent() {
     let c = Conductor::new();
     let (env, _sent, _logged) = fake_env();
-    let out = tools::run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "never-registered" }), "chat-1");
+    let out = run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "never-registered" }), "chat-1");
     assert_eq!(out, "No such terminal pane. Use list_panes.");
 }
 
@@ -170,7 +188,7 @@ fn forgetting_a_pane_clears_its_read_consent_too() {
     c.forget("p-forget");
     c.register("p-forget", "terminal", "/tmp", false);
     c.record("p-forget", "data-again");
-    let out = tools::run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-forget" }), "chat-1");
+    let out = run_tool(&c, &env, "read_terminal", &json!({ "pane_id": "p-forget" }), "chat-1");
     assert_eq!(out, "Refused: user has not authorized reading this terminal.");
 }
 
@@ -357,7 +375,7 @@ fn list_panes_merges_the_renderer_snapshot_with_registered_meta() {
     c.set_panes(json!([{ "id": "p1", "title": "one" }, { "id": "p2", "title": "two" }]));
     c.register("p1", "claude", "/work", true);
     // p2 stays unregistered (e.g. a chat/brain pane) — passed through as-is.
-    let out = tools::run_tool(&c, &env, "list_panes", &json!({}), "chat-1");
+    let out = run_tool(&c, &env, "list_panes", &json!({}), "chat-1");
     let rows: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(rows[0]["kind"], json!("claude"));
     assert_eq!(rows[0]["cwd"], json!("/work"));
@@ -373,7 +391,7 @@ fn list_panes_reports_a_marked_exited_pane_as_not_alive() {
     c.set_panes(json!([{ "id": "p1", "title": "one" }]));
     c.register("p1", "terminal", "/tmp", false);
     c.mark_exited("p1");
-    let out = tools::run_tool(&c, &env, "list_panes", &json!({}), "chat-1");
+    let out = run_tool(&c, &env, "list_panes", &json!({}), "chat-1");
     let rows: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(rows[0]["alive"], json!(false));
 }
@@ -383,7 +401,7 @@ fn type_in_terminal_strips_control_chars_and_never_submits_when_auto_run_is_off(
     let c = Conductor::new();
     let (env, sent, _logged) = fake_env();
     assert!(!c.allow_run());
-    let out = tools::run_tool(
+    let out = run_tool(
         &c,
         &env,
         "type_in_terminal",
@@ -401,7 +419,7 @@ fn type_in_terminal_submits_when_auto_run_is_on_and_press_enter_is_set() {
     let (env, sent, _logged) = fake_env();
     c.set_allow_run(true);
     let out =
-        tools::run_tool(&c, &env, "type_in_terminal", &json!({ "pane_id": "p1", "text": "ls", "press_enter": true }), "chat-1");
+        run_tool(&c, &env, "type_in_terminal", &json!({ "pane_id": "p1", "text": "ls", "press_enter": true }), "chat-1");
     assert_eq!(out, "Typed and submitted.");
     assert_eq!(sent_channel(&sent, "conductor:acted"), vec![json!({ "pane": "p1", "ran": true })]);
 }
@@ -411,7 +429,7 @@ fn type_in_terminal_reports_a_dead_or_unknown_pane() {
     let c = Conductor::new();
     let (mut env, _sent, _logged) = fake_env();
     env.write_pty = Arc::new(|_, _| false);
-    let out = tools::run_tool(&c, &env, "type_in_terminal", &json!({ "pane_id": "gone", "text": "hi" }), "chat-1");
+    let out = run_tool(&c, &env, "type_in_terminal", &json!({ "pane_id": "gone", "text": "hi" }), "chat-1");
     assert_eq!(out, "No such live terminal pane. Use list_panes.");
 }
 
@@ -419,7 +437,7 @@ fn type_in_terminal_reports_a_dead_or_unknown_pane() {
 fn open_pane_requests_the_renderer_open_a_new_pane() {
     let c = Conductor::new();
     let (env, sent, _logged) = fake_env();
-    let out = tools::run_tool(&c, &env, "open_pane", &json!({ "kind": "claude" }), "chat-9");
+    let out = run_tool(&c, &env, "open_pane", &json!({ "kind": "claude" }), "chat-9");
     assert_eq!(out, "Requested.");
     assert_eq!(sent_channel(&sent, "conductor:open"), vec![json!({ "kind": "claude", "source": "chat-9" })]);
 }
@@ -429,7 +447,7 @@ fn open_file_refuses_a_path_outside_the_confined_set() {
     let c = Conductor::new();
     let (mut env, sent, _logged) = fake_env();
     env.can_open_file = Arc::new(|_p: &Path| false);
-    let out = tools::run_tool(&c, &env, "open_file", &json!({ "path": "/etc/passwd" }), "chat-1");
+    let out = run_tool(&c, &env, "open_file", &json!({ "path": "/etc/passwd" }), "chat-1");
     assert_eq!(out, "Refused: open_file is confined to the open workspace folders and brain vaults.");
     assert!(sent_channel(&sent, "conductor:open").is_empty());
 }
@@ -438,7 +456,7 @@ fn open_file_refuses_a_path_outside_the_confined_set() {
 fn open_file_requests_the_renderer_open_a_confined_path() {
     let c = Conductor::new();
     let (env, sent, _logged) = fake_env();
-    let out = tools::run_tool(&c, &env, "open_file", &json!({ "path": "/work/proj/README.md" }), "chat-1");
+    let out = run_tool(&c, &env, "open_file", &json!({ "path": "/work/proj/README.md" }), "chat-1");
     assert_eq!(out, "Requested.");
     assert_eq!(sent_channel(&sent, "conductor:open"), vec![json!({ "file": "/work/proj/README.md", "source": "chat-1" })]);
 }
@@ -454,7 +472,7 @@ fn read_flow_and_draft_flow_round_trip_through_flow_tools() {
         Arc::new(move || vec![root.clone()])
     };
 
-    let list_before = tools::run_tool(&c, &env, "read_flow", &json!({}), "chat-1");
+    let list_before = run_tool(&c, &env, "read_flow", &json!({}), "chat-1");
     assert_eq!(list_before, "No flows exist yet.");
 
     let flow_doc = json!({
@@ -462,12 +480,12 @@ fn read_flow_and_draft_flow_round_trip_through_flow_tools() {
         "nodes": [{ "id": "n1", "kind": "claude", "inputs": [], "outputs": [] }],
         "edges": [],
     });
-    let draft_out = tools::run_tool(&c, &env, "draft_flow", &json!({ "name": "pipeline", "flow": flow_doc }), "chat-1");
+    let draft_out = run_tool(&c, &env, "draft_flow", &json!({ "name": "pipeline", "flow": flow_doc }), "chat-1");
     assert!(draft_out.starts_with("Created \"pipeline\""), "{draft_out}");
     // A newly-created flow asks the renderer to open it.
     assert_eq!(sent_channel(&sent, "conductor:open").len(), 1);
 
-    let read_back = tools::run_tool(&c, &env, "read_flow", &json!({ "name": "pipeline" }), "chat-1");
+    let read_back = run_tool(&c, &env, "read_flow", &json!({ "name": "pipeline" }), "chat-1");
     let doc: Value = serde_json::from_str(&read_back).unwrap();
     assert_eq!(doc["name"], json!("pipeline"));
 }
@@ -476,7 +494,7 @@ fn read_flow_and_draft_flow_round_trip_through_flow_tools() {
 fn unknown_tool_name_is_reported_as_such() {
     let c = Conductor::new();
     let (env, _sent, _logged) = fake_env();
-    assert_eq!(tools::run_tool(&c, &env, "delete_everything", &json!({}), "chat-1"), "Unknown tool.");
+    assert_eq!(run_tool(&c, &env, "delete_everything", &json!({}), "chat-1"), "Unknown tool.");
 }
 
 // ================= dynamic TOOLS / SYSTEM (setAgents) =================
@@ -508,7 +526,7 @@ fn set_agents_falls_back_to_the_builtins_on_an_empty_list() {
 }
 
 #[test]
-fn tool_schemas_names_exactly_the_seven_tools_in_order() {
+fn tool_schemas_names_exactly_the_thirteen_tools_in_order() {
     let names: Vec<Value> = tools::tool_schemas(&["claude".to_string()]).into_iter().map(|t| t["name"].clone()).collect();
     assert_eq!(
         names,
@@ -520,8 +538,40 @@ fn tool_schemas_names_exactly_the_seven_tools_in_order() {
             json!("open_file"),
             json!("read_flow"),
             json!("draft_flow"),
+            json!("write_file"),
+            json!("read_file"),
+            json!("run_command"),
+            json!("list_skills"),
+            json!("read_skill"),
+            json!("gate_question"),
         ]
     );
+}
+
+// ================= mentor persona / gate_question =================
+
+#[test]
+fn mentor_prompt_text_mentions_gate_and_skills() {
+    let text = tools::mentor_prompt_text(&["claude".to_string()]);
+    assert!(text.contains("gate_question"), "mentor prompt must mention gate_question: {text}");
+    assert!(text.contains("list_skills"), "mentor prompt must mention list_skills: {text}");
+}
+
+#[test]
+fn gate_question_returns_the_answer_value() {
+    let c = Conductor::new();
+    let (mut env, _sent, _logged) = fake_env();
+    env.gate_question = Arc::new(|_payload: Value| {
+        Box::pin(async move { Ok("the-answer".to_string()) }) as BoxFuture<Result<String, String>>
+    });
+    let out = run_tool(
+        &c,
+        &env,
+        "gate_question",
+        &json!({ "questions": ["q1"], "test_code": "assert(true)", "summary": "a test" }),
+        "chat-1",
+    );
+    assert_eq!(out, "the-answer");
 }
 
 // ================= strip_ansi / strip_control_chars =================
@@ -632,4 +682,86 @@ fn draft_flow_description_matches_conductor_js_exactly() {
     let agent_ids: Vec<String> = crate::agent_spawn::AGENTS.iter().map(|s| s.to_string()).collect();
     let draft_flow = tools::tool_schemas(&agent_ids).into_iter().find(|t| t["name"] == json!("draft_flow")).unwrap();
     assert_eq!(draft_flow["description"], json!("Create or overwrite a flow at .tome/flows/<name>.flow.json; a flow pane opens and live-updates as you refine it. `flow` is the whole document: {version: 1, name, nodes: [], edges: []}. Node: {id, kind, name, instructions, expects, produces, inputs: [{name}], outputs: [{name}], x, y, model?} — kind is \"terminal\" or an agent CLI (claude, opencode, pi); give every node a unique short id like \"n1\"; omit x/y for auto-layout. Edge: {id, from, to, fromOutput, toInput} joining an output port name to an input port name. Structural errors are refused outright; contract warnings come back for you to raise with the user. Only call this after the user agrees to start (or change) a draft."));
+}
+
+// ================= new conductor tools (write/read/run/skills) =================
+
+#[test]
+fn write_file_refuses_a_path_outside_the_workspace() {
+    let c = Conductor::new();
+    let (mut env, _sent, logged) = fake_env();
+    env.resolve_write = Arc::new(|_p: &Path| Err("path is outside the open workspace folders".to_string()));
+    let out = run_tool(&c, &env, "write_file", &json!({ "path": "/etc/passwd", "content": "x" }), "chat-1");
+    assert_eq!(out, "Refused: path is outside the open workspace folders");
+    assert!(logged.lock().unwrap().is_empty());
+}
+
+#[test]
+fn write_file_writes_content_and_audits() {
+    let c = Conductor::new();
+    let (mut env, _sent, logged) = fake_env();
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("out.txt");
+    let target_for_closure = target.clone();
+    env.resolve_write = Arc::new(move |_p: &Path| Ok(target_for_closure.clone()));
+    let out = run_tool(&c, &env, "write_file", &json!({ "path": "/work/out.txt", "content": "hello" }), "chat-1");
+    assert_eq!(out, "Wrote 5 bytes to /work/out.txt.");
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "hello");
+    let logs = logged.lock().unwrap();
+    assert_eq!(*logs, vec![("conductor:writeFile".to_string(), vec![("path".to_string(), json!("/work/out.txt"))])]);
+}
+
+#[test]
+fn read_file_returns_content() {
+    let c = Conductor::new();
+    let (mut env, _sent, _logged) = fake_env();
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("in.txt");
+    std::fs::write(&target, "file body").unwrap();
+    let target_for_closure = target.clone();
+    env.resolve_path = Arc::new(move |_p: &Path| Ok(target_for_closure.clone()));
+    let out = run_tool(&c, &env, "read_file", &json!({ "path": "/work/in.txt" }), "chat-1");
+    assert_eq!(out, "file body");
+}
+
+#[test]
+fn run_command_refuses_when_allow_run_is_false() {
+    let c = Conductor::new();
+    let (mut env, _sent, _logged) = fake_env();
+    c.set_allow_run(false);
+    let called = Arc::new(AtomicUsize::new(0));
+    let called_for_closure = called.clone();
+    env.run_command = Arc::new(move |_cwd: &str, _cmd: &str| {
+        called_for_closure.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async move { Ok("PASS".to_string()) }) as BoxFuture<Result<String, String>>
+    });
+    let out = run_tool(&c, &env, "run_command", &json!({ "cwd": "/work", "cmd": "ls" }), "chat-1");
+    assert!(out.contains("Refused"), "unexpected output: {out}");
+    assert_eq!(called.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn run_command_returns_output_when_allowed() {
+    let c = Conductor::new();
+    let (mut env, _sent, _logged) = fake_env();
+    c.set_allow_run(true);
+    env.run_command = Arc::new(|_cwd: &str, _cmd: &str| {
+        Box::pin(async move { Ok("PASS".to_string()) }) as BoxFuture<Result<String, String>>
+    });
+    let out = run_tool(&c, &env, "run_command", &json!({ "cwd": "/work", "cmd": "echo PASS" }), "chat-1");
+    assert_eq!(out, "PASS");
+}
+
+#[test]
+fn list_skills_returns_json() {
+    let c = Conductor::new();
+    let (mut env, _sent, _logged) = fake_env();
+    let tmp = tempfile::tempdir().unwrap();
+    let skill_dir = tmp.path().join("myskill");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    std::fs::write(skill_dir.join("SKILL.md"), "---\nname: myskill\ndescription: does a thing\n---\nbody here").unwrap();
+    let root_for_closure = tmp.path().to_path_buf();
+    env.skills_root = Arc::new(move || Some(root_for_closure.clone()));
+    let out = run_tool(&c, &env, "list_skills", &json!({}), "chat-1");
+    assert!(out.contains("myskill"), "unexpected output: {out}");
 }

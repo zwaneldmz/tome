@@ -16,16 +16,17 @@
 //! boot-time `init()` step" shape); [`super::tests`] builds fakes.
 
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::chat::providers::ResolvedProvider;
 use crate::chat::sse::{self, ChatError, NormalizedResponse};
-use crate::{confine, state::AppState};
+use crate::{confine, skills, state::AppState};
 
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 /// One stream call's text-delta sink — `impl FnMut(&str) + Send` boxed so
@@ -70,6 +71,100 @@ pub struct ConductorEnv {
             + Send
             + Sync,
     >,
+    /// `read_file`/`run_command(cwd)`'s confinement resolver for EXISTING
+    /// paths — `confine::confined_real_path` (realpath + double-check,
+    /// requires the path to exist).
+    pub resolve_path: Arc<dyn Fn(&Path) -> Result<PathBuf, String> + Send + Sync>,
+    /// `write_file`'s confinement resolver for NEW (not-yet-existing) files
+    /// — `confine::confined_write_path` (parent-dir check so a fresh file
+    /// can be created inside a confined root).
+    pub resolve_write: Arc<dyn Fn(&Path) -> Result<PathBuf, String> + Send + Sync>,
+    /// `list_skills`/`read_skill`'s skills root — `skills::default_root(app)`.
+    pub skills_root: Arc<dyn Fn() -> Option<PathBuf> + Send + Sync>,
+    /// `run_command`'s backend — `(cwd, cmd) -> combined stdout+stderr`
+    /// (capped, with a timeout), or an `Err` describing the failure.
+    pub run_command: Arc<dyn Fn(&str, &str) -> BoxFuture<Result<String, String>> + Send + Sync>,
+    /// `gate_question`'s backend — registers a comprehension gate, emits
+    /// `mentor:check`, and awaits the user's `mentor_answer` (or times out).
+    /// Returns the serialized answer value the tool loop appends as the
+    /// tool result; `Err` carries a same-shaped fallback string.
+    pub gate_question: Arc<dyn Fn(Value) -> BoxFuture<Result<String, String>> + Send + Sync>,
+}
+
+/// `run_command`'s timeout — the process is SIGKILLed via `kill_on_drop`
+/// when this expires, matching the kill-on-timeout discipline `git.rs`/
+/// `login_env.rs` already apply.
+const RUN_TIMEOUT: Duration = Duration::from_secs(120);
+/// `run_command`'s combined-output cap, in bytes. Output past this is
+/// trimmed before being handed back to the model (trimmed from the FRONT,
+/// keeping the tail — the most useful part of a long command run — via the
+/// same boundary-snap idiom `conductor::state::Conductor::record` uses).
+const RUN_OUTPUT_CAP: usize = 50_000;
+/// `gate_question`'s wait cap — how long the paused tool loop holds before
+/// giving up and reporting a timeout back to the model.
+const GATE_TIMEOUT: Duration = Duration::from_secs(600);
+
+/// Runs `sh -c <cmd>` in `cwd`, returning stdout+stderr combined and capped.
+/// Spawn failure, timeout, and non-zero exit are all reported as `Err` (the
+/// non-zero exit carries its code AND the output so the model can see what
+/// went wrong). `kill_on_drop(true)` is what makes the timeout path actually
+/// kill the child rather than orphan it — see `git.rs`'s doc comment for the
+/// parity rationale.
+async fn run_command_impl(cwd: &str, cmd: &str) -> Result<String, String> {
+    let child = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .current_dir(cwd)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let out = tokio::time::timeout(RUN_TIMEOUT, child.wait_with_output())
+        .await
+        .map_err(|_| "run_command timed out".to_string())?
+        .map_err(|e| e.to_string())?;
+
+    let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
+    combined.push_str(&String::from_utf8_lossy(&out.stderr));
+    if combined.len() > RUN_OUTPUT_CAP {
+        let mut cut = combined.len() - RUN_OUTPUT_CAP;
+        while cut < combined.len() && !combined.is_char_boundary(cut) {
+            cut += 1;
+        }
+        combined.drain(..cut);
+    }
+
+    if out.status.success() {
+        Ok(combined)
+    } else {
+        let code = out.status.code().unwrap_or(-1);
+        Err(format!("exit {code}:\n{combined}"))
+    }
+}
+
+/// `gate_question`'s real backend: mint a gate on `AppState.mentor`, emit
+/// `mentor:check` so the renderer can prompt the user, then await the
+/// `mentor_answer` that completes it. The tool loop stays paused on this
+/// future for up to [`GATE_TIMEOUT`]; on timeout (or a closed gate) it
+/// returns a same-shaped JSON string rather than an `Err`, so the model
+/// always gets a parsable tool result to react to.
+async fn gate_question_impl(app: &AppHandle, payload: Value) -> Result<String, String> {
+    let (id, rx) = app.state::<AppState>().mentor.register();
+    let _ = app.emit(
+        "mentor:check",
+        json!({
+            "id": id,
+            "questions": payload["questions"],
+            "test_code": payload["test_code"],
+            "summary": payload["summary"],
+        }),
+    );
+    match tokio::time::timeout(GATE_TIMEOUT, rx).await {
+        Ok(Ok(v)) => Ok(v.to_string()),
+        Ok(Err(_)) => Ok("{\"error\":\"gate closed\"}".to_string()),
+        Err(_) => Ok("{\"timed_out\":true}".to_string()),
+    }
 }
 
 /// Builds the real [`ConductorEnv`] a `chat:send` call drives the tool loop
@@ -146,5 +241,35 @@ pub fn production_env(
                 sse::stream_chat(crate::ipc::chat::http_client(), &provider, args, move |t: &str| on_text(t)).await
             }) as BoxFuture<Result<NormalizedResponse, ChatError>>
         }),
+        resolve_path: {
+            let app = app.clone();
+            Arc::new(move |p: &Path| {
+                let state = app.state::<AppState>();
+                confine::confined_real_path(&state, p)
+            })
+        },
+        resolve_write: {
+            let app = app.clone();
+            Arc::new(move |p: &Path| {
+                let state = app.state::<AppState>();
+                confine::confined_write_path(&state, p)
+            })
+        },
+        skills_root: {
+            let app = app.clone();
+            Arc::new(move || skills::default_root(&app))
+        },
+        run_command: Arc::new(move |cwd: &str, cmd: &str| {
+            let cwd = cwd.to_string();
+            let cmd = cmd.to_string();
+            Box::pin(async move { run_command_impl(&cwd, &cmd).await }) as BoxFuture<Result<String, String>>
+        }),
+        gate_question: {
+            let app = app.clone();
+            Arc::new(move |payload: Value| {
+                let app = app.clone();
+                Box::pin(async move { gate_question_impl(&app, payload).await }) as BoxFuture<Result<String, String>>
+            })
+        },
     }
 }

@@ -6,6 +6,60 @@
       "sourceType": "github",
       "skillPath": "skills/orchestration/SKILL.md",
       "computedHash": "b5c364878fb07d21a369f091f2e96b823da94308b15b39636f2585d8b5621b51"
+    },
+    "mattpocock/ask-matt": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/mattpocock/ask-matt/SKILL.md",
+      "computedHash": "3d38910535f5f01e15bc5fd7f6ca8880d628cd248741f08e6780dd7c1828e832"
+    },
+    "mattpocock/code-review": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/mattpocock/code-review/SKILL.md",
+      "computedHash": "4e8eeefbf3bd32ec2c911ed6c7db103866ce11fedc98b1f8e358d2e1cada3895"
+    },
+    "mattpocock/diagnosing-bugs": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/mattpocock/diagnosing-bugs/SKILL.md",
+      "computedHash": "573142d28dc5a4d931dd4a6faa3e615e731f8e9cc65d2dd4468045a2efd6148c"
+    },
+    "mattpocock/tdd": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/mattpocock/tdd/SKILL.md",
+      "computedHash": "6875cbca6b7d17be635dc9b457cc6363125f85cef26f443991b77c7d9eb430d2"
+    },
+    "mattpocock/to-spec": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/mattpocock/to-spec/SKILL.md",
+      "computedHash": "69ae8bd0ee33d4d350e50eed68f8c958c4b95ffa502ad90e7757e95e7e21419d"
+    },
+    "mattpocock/grill-me": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/mattpocock/grill-me/SKILL.md",
+      "computedHash": "caaf8b8de1684f96e26b28f3c29189db5c89cce4b73e1c93d86164f66ef88637"
+    },
+    "mattpocock/grilling": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/mattpocock/grilling/SKILL.md",
+      "computedHash": "d2498125dd20a0d3a27f03e0ebcc8e681cf42be468e2d3e3c9e8f5dadcae8d47"
+    },
+    "mattpocock/teach": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/mattpocock/teach/SKILL.md",
+      "computedHash": "6d2dbe5e03084cf26fef66b535127b36cd1bcbe9478e26b0626029cd51dc2259"
+    },
+    "mattpocock/to-questionnaire": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/mattpocock/to-questionnaire/SKILL.md",
+      "computedHash": "8e7f9ed8d7b2e66babf1a54aee9b94319bf38c32619cffe78819df6518ead5fc"
     }
   }
 }

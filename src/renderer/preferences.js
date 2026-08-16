@@ -9,6 +9,8 @@ import { TERM_FONT, setTermFontSize } from './panels/terminal.js'
 import { editorPrefs, setEditorPrefs } from './panels/editor.js'
 import { totpModal } from './airgap-ui.js'
 import { showOnboarding } from './onboarding.js'
+import { activeWorkspace } from './workspaces.js'
+import { mentorState, saveMentorSettings, setUq, uq } from './mentor.js'
 
 const THEME_LABEL = { system: 'Match system', light: 'Light', dark: 'Dark' }
 const SIDEBAR_DEFAULT = 236
@@ -503,6 +505,88 @@ export async function preferencesModal() {
   row(sidebar, 'Width', widthBox, `drag the divider · default ${SIDEBAR_DEFAULT} px`)
   paintWidth()
   m.body.appendChild(sidebar)
+
+  // ---------- mentor ----------
+  const mentor = el('section', 'prefs-section')
+  mentor.append(el('h4', '', 'Mentor'))
+  toggleRow(
+    mentor,
+    'Verbose guide (default)',
+    'new workspaces teach rather than just do',
+    () => mentorState.verboseDefault,
+    (v) => saveMentorSettings({ verboseDefault: v })
+  )
+  toggleRow(
+    mentor,
+    'Test before implementing',
+    'the mentor writes a failing test and checks understanding first',
+    () => mentorState.gate,
+    (v) => saveMentorSettings({ gate: v })
+  )
+  toggleRow(
+    mentor,
+    'Gate before commit',
+    null,
+    () => mentorState.gatePoints.commit,
+    (v) => saveMentorSettings({ gatePoints: { ...mentorState.gatePoints, commit: v } })
+  )
+  toggleRow(
+    mentor,
+    'Gate before push',
+    null,
+    () => mentorState.gatePoints.push,
+    (v) => saveMentorSettings({ gatePoints: { ...mentorState.gatePoints, push: v } })
+  )
+  const thrInput = el('input', 'prefs-input')
+  thrInput.type = 'number'
+  thrInput.min = '0'
+  thrInput.max = '100'
+  thrInput.value = String(mentorState.threshold)
+  thrInput.addEventListener('change', () => {
+    const n = Math.max(0, Math.min(100, Number(thrInput.value) || 0))
+    saveMentorSettings({ threshold: n })
+    thrInput.value = String(n)
+  })
+  row(mentor, 'Pass threshold', thrInput, 'understanding score needed to pass a gate · 0–100')
+  const mix = el('div', 'prefs-mix')
+  const MIX = [
+    ['multiple_choice', 'Multiple choice'],
+    ['true_false', 'True / false'],
+    ['short_answer', 'Short answer'],
+    ['code', 'Code'],
+  ]
+  for (const [key, label] of MIX) {
+    const item = el('span', 'prefs-mix-item')
+    const sw = el('button', 'prefs-switch')
+    sw.type = 'button'
+    sw.setAttribute('role', 'switch')
+    sw.append(el('span', 'prefs-knob'))
+    const paint = () => {
+      const on = mentorState.questionTypes.includes(key)
+      sw.classList.toggle('on', on)
+      sw.setAttribute('aria-checked', String(on))
+    }
+    sw.addEventListener('click', () => {
+      const next = mentorState.questionTypes.includes(key)
+        ? mentorState.questionTypes.filter((t) => t !== key)
+        : [...mentorState.questionTypes, key]
+      saveMentorSettings({ questionTypes: next })
+      paint()
+    })
+    item.append(el('span', 'prefs-mix-label', label), sw)
+    mix.appendChild(item)
+    paint()
+  }
+  row(mentor, 'Question mix', mix, 'which kinds of question the gate may ask')
+  const resetUq = el('button', 'ag-btn ghost', 'Reset understanding score')
+  resetUq.type = 'button'
+  resetUq.addEventListener('click', () => {
+    if (!activeWorkspace()) return toast('no active workspace to reset')
+    setUq(0)
+    toast('understanding score reset', 'ok')
+  })
+  row(mentor, 'Understanding score', resetUq, `per workspace · currently ${uq()}`)
+  m.body.appendChild(mentor)
 
   // ---------- onboarding ----------
   const onboarding = el('section', 'prefs-section')

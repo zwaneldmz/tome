@@ -1,73 +1,77 @@
-// Vibi — the mascot. A small bookmark-sprite in the status bar that mirrors
+// Viibi — the mascot. A small bookmark-sprite in the status bar that mirrors
 // what the app is doing: resting when idle, reading while flows / chat /
 // voice are busy, gapped when the air gap is holding, blocked on a refused
 // request, and error on a failure. Pure presentation — it reads shared state
 // and the event bus, and never mutates app state.
 //
-// The SVG and animation CSS are lifted from docs/vibi.html (the design pass):
+// The SVG and animation CSS are lifted from docs/viibi.html (the design pass):
 // one rounded-bookmark body, five faces, a falling-snow tail, recoloured
-// entirely through a `--vibi` variable so it themes and re-states for free.
+// entirely through a `--viibi` variable so it themes and re-states for free.
 import { tome } from './util.js'
 import { agState } from './state.js'
 import { runningCount, RUN_PANE_PREFIX } from '../shared/flow-run-plan.js'
 import { voiceActive } from './voice.js'
+import { toggleViibiPopover } from './viibi-popover.js'
+import { uq } from './mentor.js'
 
 // The one component stylesheet. Injected as a <style> rather than living in
 // style.css so the mascot stays a single, deletable unit. CSP allows inline
 // styles (style-src 'unsafe-inline'), same as every status-bar glyph.
 const CSS = `
-.vibi { --vibi: var(--accent); --vibi-fg: var(--accent-fg); --vibi-mist: #ffffff; display: block; }
-.vibi { --vibi-glow: 0 0 8px rgba(0, 113, 227, 0.28); }
-:root[data-theme='dark'] .vibi { --vibi-glow: 0 0 12px rgba(0, 229, 255, 0.45); }
-.vibi .body { fill: var(--vibi); filter: drop-shadow(var(--vibi-glow)); }
-.vibi .eye { fill: var(--vibi-fg); }
-.vibi .mouth { fill: none; stroke: var(--vibi-fg); stroke-width: 2.2; stroke-linecap: round; }
-.vibi .eye-arc { fill: none; stroke: var(--vibi-fg); stroke-width: 2.6; stroke-linecap: round; }
-.vibi .mouth-open { fill: var(--vibi-fg); stroke: none; }
-.vibi .mouth-o { fill: var(--vibi-fg); stroke: none; }
-.vibi .mouth-frown { fill: none; stroke: var(--vibi-fg); stroke-width: 2.2; stroke-linecap: round; }
-.vibi .shield { fill: var(--vibi); stroke: var(--vibi); filter: drop-shadow(var(--vibi-glow)); }
-.vibi .shieldcross { stroke: var(--vibi-fg); stroke-width: 3.5; fill: none; stroke-linecap: round; }
-.vibi .eyesx path { stroke: var(--vibi-fg); stroke-width: 2.4; fill: none; stroke-linecap: round; }
-.vibi .halo { animation: v-breathe 3.6s ease-in-out infinite; }
-.vibi .bodygroup { transform-box: fill-box; transform-origin: 50% 35%; animation: v-bob 3s ease-in-out infinite; }
-.vibi .eyes { transform-box: fill-box; transform-origin: 50% 50%; animation: v-blink 4.6s infinite; }
-.vibi .wisp { fill: var(--vibi-mist); filter: drop-shadow(0 0 3px var(--vibi-mist)); transform-box: fill-box; transform-origin: center; animation: v-wisp 1.8s linear infinite; animation-delay: var(--d, 0s); opacity: 0; }
-.vibi .spark { opacity: 0; }
-.vibi .eyesx { display: none; }
-.vibi .eyes-happy, .vibi .eyes-wide, .vibi .mouth-open, .vibi .mouth-o, .vibi .mouth-frown { display: none; }
-.vibi .shield { display: none; }
+.viibi { --viibi: var(--accent); --viibi-fg: var(--accent-fg); --viibi-mist: #ffffff; display: block; }
+.viibi { --viibi-glow: 0 0 8px rgba(0, 113, 227, 0.28); }
+:root[data-theme='dark'] .viibi { --viibi-glow: 0 0 12px rgba(0, 229, 255, 0.45); }
+.viibi .body { fill: var(--viibi); filter: drop-shadow(var(--viibi-glow)); }
+.viibi .eye { fill: var(--viibi-fg); }
+.viibi .mouth { fill: none; stroke: var(--viibi-fg); stroke-width: 2.2; stroke-linecap: round; }
+.viibi .eye-arc { fill: none; stroke: var(--viibi-fg); stroke-width: 2.6; stroke-linecap: round; }
+.viibi .mouth-open { fill: var(--viibi-fg); stroke: none; }
+.viibi .mouth-o { fill: var(--viibi-fg); stroke: none; }
+.viibi .mouth-frown { fill: none; stroke: var(--viibi-fg); stroke-width: 2.2; stroke-linecap: round; }
+.viibi .shield { fill: var(--viibi); stroke: var(--viibi); filter: drop-shadow(var(--viibi-glow)); }
+.viibi .shieldcross { stroke: var(--viibi-fg); stroke-width: 3.5; fill: none; stroke-linecap: round; }
+.viibi .eyesx path { stroke: var(--viibi-fg); stroke-width: 2.4; fill: none; stroke-linecap: round; }
+.viibi .halo { animation: v-breathe 3.6s ease-in-out infinite; }
+.viibi .bodygroup { transform-box: fill-box; transform-origin: 50% 35%; animation: v-bob 3s ease-in-out infinite; }
+.viibi .eyes { transform-box: fill-box; transform-origin: 50% 50%; animation: v-blink 4.6s infinite; }
+.viibi .wisp { fill: var(--viibi-mist); filter: drop-shadow(0 0 3px var(--viibi-mist)); transform-box: fill-box; transform-origin: center; animation: v-wisp 1.8s linear infinite; animation-delay: var(--d, 0s); opacity: 0; }
+.viibi .spark { opacity: 0; }
+.viibi .eyesx { display: none; }
+.viibi .eyes-happy, .viibi .eyes-wide, .viibi .mouth-open, .viibi .mouth-o, .viibi .mouth-frown { display: none; }
+.viibi .shield { display: none; }
+.viibi .cap { display: none; fill: var(--viibi); filter: drop-shadow(var(--viibi-glow)); }
+.viibi.s-mentor .cap { display: block; }
 
-.vibi.s-reading .bodygroup { animation: v-tilt 0.9s ease-in-out infinite; }
-.vibi.s-reading .wisp { animation-duration: 0.9s; }
-.vibi.s-reading .spark { animation: v-spark 1.6s infinite; }
-.vibi.s-reading .spark.s2 { animation-delay: 0.45s; }
-.vibi.s-reading .spark.s3 { animation-delay: 0.9s; }
-.vibi.s-reading .eyes { display: none; }
-.vibi.s-reading .eyes-happy { display: block; }
-.vibi.s-reading .mouth { display: none; }
-.vibi.s-reading .mouth-open { display: block; }
+.viibi.s-reading .bodygroup { animation: v-tilt 0.9s ease-in-out infinite; }
+.viibi.s-reading .wisp { animation-duration: 0.9s; }
+.viibi.s-reading .spark { animation: v-spark 1.6s infinite; }
+.viibi.s-reading .spark.s2 { animation-delay: 0.45s; }
+.viibi.s-reading .spark.s3 { animation-delay: 0.9s; }
+.viibi.s-reading .eyes { display: none; }
+.viibi.s-reading .eyes-happy { display: block; }
+.viibi.s-reading .mouth { display: none; }
+.viibi.s-reading .mouth-open { display: block; }
 
-.vibi.s-gapped .wisps { display: none; }
-.vibi.s-gapped .shield { display: block; }
-.vibi.s-gapped .bodygroup { animation: v-breathe 2.2s ease-in-out infinite; }
+.viibi.s-gapped .wisps { display: none; }
+.viibi.s-gapped .shield { display: block; }
+.viibi.s-gapped .bodygroup { animation: v-breathe 2.2s ease-in-out infinite; }
 
-.vibi.s-blocked { --vibi: var(--no); --vibi-fg: #fff; --vibi-mist: #ffd9de; --vibi-glow: 0 0 12px rgba(255, 59, 92, 0.5); }
-.vibi.s-blocked .wisps { display: none; }
-.vibi.s-blocked .bodygroup { animation: v-jolt 0.5s ease-in-out infinite; }
-.vibi.s-blocked .halo { animation: v-pulse 0.5s ease-in-out infinite; }
-.vibi.s-blocked .eyes { display: none; }
-.vibi.s-blocked .eyes-wide { display: block; }
-.vibi.s-blocked .mouth { display: none; }
-.vibi.s-blocked .mouth-o { display: block; }
+.viibi.s-blocked { --viibi: var(--no); --viibi-fg: #fff; --viibi-mist: #ffd9de; --viibi-glow: 0 0 12px rgba(255, 59, 92, 0.5); }
+.viibi.s-blocked .wisps { display: none; }
+.viibi.s-blocked .bodygroup { animation: v-jolt 0.5s ease-in-out infinite; }
+.viibi.s-blocked .halo { animation: v-pulse 0.5s ease-in-out infinite; }
+.viibi.s-blocked .eyes { display: none; }
+.viibi.s-blocked .eyes-wide { display: block; }
+.viibi.s-blocked .mouth { display: none; }
+.viibi.s-blocked .mouth-o { display: block; }
 
-.vibi.s-error { --vibi: var(--faint); --vibi-fg: var(--text); --vibi-mist: #c3cad6; }
-.vibi.s-error .eyes { display: none; }
-.vibi.s-error .eyesx { display: block; }
-.vibi.s-error .mouth { display: none; }
-.vibi.s-error .mouth-frown { display: block; }
-.vibi.s-error .wisps { opacity: 0.4; }
-.vibi.s-error .bodygroup { animation: v-ember 2.4s ease-in-out infinite; }
+.viibi.s-error { --viibi: var(--faint); --viibi-fg: var(--text); --viibi-mist: #c3cad6; }
+.viibi.s-error .eyes { display: none; }
+.viibi.s-error .eyesx { display: block; }
+.viibi.s-error .mouth { display: none; }
+.viibi.s-error .mouth-frown { display: block; }
+.viibi.s-error .wisps { opacity: 0.4; }
+.viibi.s-error .bodygroup { animation: v-ember 2.4s ease-in-out infinite; }
 
 @keyframes v-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
 @keyframes v-breathe { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.85; } }
@@ -79,9 +83,10 @@ const CSS = `
 @keyframes v-ember { 0%, 100% { opacity: 0.35; transform: rotate(6deg) translateY(8px); } 50% { opacity: 0.6; transform: rotate(5deg) translateY(8px); } }
 @keyframes v-wisp { 0% { opacity: 0; transform: translate(0, 0) scale(1); } 15% { opacity: 0.9; } 100% { opacity: 0; transform: translate(var(--tx, 0px), var(--ty, 46px)) scale(0.3); } }
 
-#sb-vibi { display: inline-flex; align-items: center; height: 100%; }
-#sb-vibi .vibi { width: 14px; height: 20px; }
-@media (prefers-reduced-motion: reduce) { .vibi * { animation: none !important; } }
+#sb-viibi { display: inline-flex; align-items: center; height: 100%; cursor: pointer; }
+#sb-viibi:hover { opacity: 0.85; }
+#sb-viibi .viibi { width: 24px; height: 36px; }
+@media (prefers-reduced-motion: reduce) { .viibi * { animation: none !important; } }
 `
 
 // Falling-snow particles: [cx, cy, r, drift-x, drift-y, delay]
@@ -102,9 +107,9 @@ function wispMarkup() {
 
 function svgMarkup() {
   return (
-    `<svg class="vibi s-resting" viewBox="0 0 120 170" aria-hidden="true">` +
-    `<defs><radialGradient id="vibi-halo"><stop offset="0" stop-color="var(--vibi)" stop-opacity="0.55"/><stop offset="1" stop-color="var(--vibi)" stop-opacity="0"/></radialGradient></defs>` +
-    `<g class="halo"><circle cx="60" cy="50" r="50" fill="url(#vibi-halo)"/></g>` +
+    `<svg class="viibi s-resting" viewBox="0 0 120 170" aria-hidden="true">` +
+    `<defs><radialGradient id="viibi-halo"><stop offset="0" stop-color="var(--viibi)" stop-opacity="0.55"/><stop offset="1" stop-color="var(--viibi)" stop-opacity="0"/></radialGradient></defs>` +
+    `<g class="halo"><circle cx="60" cy="50" r="50" fill="url(#viibi-halo)"/></g>` +
     `<g class="wisps">${wispMarkup()}</g>` +
     `<g class="bodygroup">` +
     `<path class="body" d="M40 20 Q40 14 46 14 L74 14 Q80 14 80 20 L80 84 Q80 92 72 92 L48 92 Q40 92 40 84 Z"/>` +
@@ -119,6 +124,7 @@ function svgMarkup() {
     `</g>` +
     `<g class="shield"><path d="M46 24 L74 24 L74 50 C74 66 60 74 60 80 C60 74 46 66 46 50 Z"/><path class="shieldcross" d="M60 30 V72 M50 51 H70"/></g>` +
     `<g class="sparkles"><circle class="spark s1" cx="93" cy="18" r="2.2"/><circle class="spark s2" cx="100" cy="42" r="1.6"/><circle class="spark s3" cx="22" cy="30" r="1.8"/></g>` +
+    `<path class="cap" d="M60 0.5 L61.6 4.8 L66.2 5 L62.6 7.8 L63.8 12.3 L60 9.7 L56.2 12.3 L57.4 7.8 L53.8 5 L58.4 4.8 Z"/>` +
     `</svg>`
   )
 }
@@ -142,6 +148,10 @@ function countGapped() {
 function computeState() {
   if (runsActive || streaming.size > 0 || voiceActive()) return 'reading'
   if (countGapped() > 0) return 'gapped'
+  // Mentor: a high understanding score (>= 80) turns Viibi into a little
+  // graduation-cap star while idle. Deliberately below the busy states — a
+  // streaming turn still reads as "reading", mentor only flavours idle.
+  if (uq() >= 80) return 'mentor'
   return 'resting'
 }
 
@@ -150,7 +160,7 @@ function apply() {
   const s = flashState || computeState()
   if (s === current) return
   current = s
-  el.setAttribute('class', 'vibi s-' + s)
+  el.setAttribute('class', 'viibi s-' + s)
 }
 
 function flash(s, ms = 1600) {
@@ -165,16 +175,17 @@ function flash(s, ms = 1600) {
 }
 
 function mount() {
-  const host = document.getElementById('sb-vibi')
+  const host = document.getElementById('sb-viibi')
   if (!host) return
   const style = document.createElement('style')
   style.textContent = CSS
   document.head.appendChild(style)
   host.innerHTML = svgMarkup()
-  el = host.querySelector('.vibi')
+  el = host.querySelector('.viibi')
+  host.addEventListener('click', () => toggleViibiPopover(host))
 }
 
-export function initVibi() {
+export function initViibi() {
   mount()
   if (!el) return
 
@@ -217,4 +228,4 @@ export function initVibi() {
 // Self-initialize: this module is imported once (renderer.js) as a side
 // effect, and the status bar lives for the life of the window. Matches
 // statusbar.js's own module-level watchRuns().
-initVibi()
+initViibi()

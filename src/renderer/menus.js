@@ -3,7 +3,7 @@
 import { tome, toast, el, notifLog } from './util.js'
 import { prefs, wsState } from './state.js'
 import { activeWorkspace, saveWs, renderWsChip } from './workspaces.js'
-import { addTerminal, addChat, addBrain, addEvents, addRuns, openFile, createFlowFile } from './panes.js'
+import { addTerminal, addChat, addBrain, addEvents, addRuns, addReport, openFile, createFlowFile } from './panes.js'
 import { confirmModal, promptModal } from './modals.js'
 import { renderStatusbar } from './statusbar.js'
 import { renderTree, createFileIn, createFolderIn } from './tree.js'
@@ -11,6 +11,7 @@ import { validateRelPath } from './tree-create.js'
 import { refreshGit } from './git.js'
 import { shortcutsModal } from './keys.js'
 import { preferencesModal } from './preferences.js'
+import { isVerbose, mentorState } from './mentor.js'
 
 const allMenus = []
 // Which button opened which menu — used to flip aria-expanded and to hand
@@ -304,6 +305,16 @@ wireMenu('ws-chip', 'ws-menu', (menu) => {
         renderAll()
       },
     })
+    menuItem(menu, {
+      label: 'verbose guide',
+      hint: isVerbose() ? 'on' : 'off',
+      active: isVerbose(),
+      onClick: () => {
+        const w = activeWorkspace()
+        w.verbose = !(w.verbose ?? mentorState.verboseDefault)
+        saveWs()
+      },
+    })
   }
   menuRule(menu)
   menuItem(menu, {
@@ -419,6 +430,7 @@ export async function populateAddMenu(menu, target) {
   menuRule(menu)
   menuItem(menu, { label: 'Flow runs', onClick: () => addRuns(target) })
   menuItem(menu, { label: 'Event log', hint: 'audit', onClick: () => addEvents(target) })
+  menuItem(menu, { label: 'Review report…', hint: 'usage', onClick: () => addReport(target) })
   menuRule(menu)
   menuItem(menu, { label: 'Settings…', hint: '⌘,', onClick: () => preferencesModal() })
   menuItem(menu, { label: 'Keyboard shortcuts', hint: '⌘', onClick: () => shortcutsModal() })

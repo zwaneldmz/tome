@@ -138,7 +138,7 @@ async fn run_loop(
             let input = block.get("input").cloned().unwrap_or_else(|| json!({}));
             let hint = tools::tool_hint(&input);
             (env.send)("chat:tool", json!({ "id": id, "tool": tool_name, "hint": hint }));
-            let out = tools::run_tool(c, env, &tool_name, &input, id);
+            let out = tools::run_tool(c, env, &tool_name, &input, id).await;
             // Audit the ACTION only: tool name, chat, outcome, and the same
             // hint the chat:tool event carries. Tool input/output never
             // goes in the log — typed text may contain secrets.

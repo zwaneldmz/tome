@@ -24,7 +24,8 @@ import { bootChrome } from './chrome.js'
 import { initVoice, voiceActive, VOICE_CHAT_ID } from './voice.js'
 import { loadEditorPrefs, warmLanguages } from './panels/editor.js'
 import './airgap-ui.js' // wires the air-gap event listeners + strip ticker
-import './vibi.js' // the mascot: status-bar sprite + processing-state wiring
+import './viibi.js' // the mascot: status-bar sprite + processing-state wiring
+import './mentor.js' // mentor mode: gate subscription + per-workspace uq/verbose
 import './keys.js' // the keyboard spine: pane keys, quick open, zoom, reference
 import './menu-bridge.js' // native menu bar actions → the same functions the buttons use
 import './style.css'
