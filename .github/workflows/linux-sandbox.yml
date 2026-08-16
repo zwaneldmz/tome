@@ -114,10 +114,9 @@ jobs:
           # restored into the 22.04 leg — cargo saw "fresh" fingerprints but
           # unusable rlibs and failed with "can't find crate for `tauri`".
           # Bump the prefix to bust the poisoned v0 cache and key it on the
-          # matrix OS. save-if is success-gated so a failed run can never
-          # poison the cache for the next one.
+          # matrix OS, so a 22.04 run can never restore 24.04-built tauri
+          # rlibs (or vice versa).
           prefix-key: v1-rust-${{ matrix.os }}
-          save-if: ${{ success() }}
 
       # MUST come before any plain `cargo build`/`cargo test` of the main
       # package: tauri.conf.json's bundle.externalBin makes tauri-build's
