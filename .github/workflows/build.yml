@@ -3,6 +3,12 @@ name: build
 permissions:
   contents: read
 
+# Cancel a superseded run (a newer push to the same PR/branch) instead of
+# burning minutes on a stale one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main]
@@ -11,6 +17,7 @@ on:
 jobs:
   build:
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -57,6 +64,10 @@ jobs:
       - name: Rust toolchain (stable)
         uses: dtolnay/rust-toolchain@stable
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
       # tauri.conf.json's bundle.externalBin makes tauri-build's build script
       # REQUIRE the triple-suffixed sidecar to exist before any Rust compiles
       # ("resource path `binaries/tome-shim-<triple>` doesn't exist"), and
@@ -65,10 +76,24 @@ jobs:
       - name: Stage the tome-shim sidecar (required by tauri-build's externalBin check)
         run: bash scripts/build-sidecar.sh
 
+      - name: cargo fmt --check
+        working-directory: src-tauri
+        run: cargo fmt --check
+
       - name: cargo check (src-tauri workspace compiles)
         working-directory: src-tauri
-        run: cargo check --workspace
+        run: cargo check --workspace --locked
+
+      - name: cargo clippy (lint gate)
+        working-directory: src-tauri
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: cargo test --lib (macOS unit tests)
         working-directory: src-tauri
-        run: cargo test --lib
+        run: cargo test --lib --locked
+
+      - name: cargo audit (Rust supply-chain)
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: src-tauri

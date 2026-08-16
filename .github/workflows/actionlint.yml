@@ -1,0 +1,30 @@
+# actionlint: validates the workflow YAML *before* it runs — catches the
+# class of "invalid expression / unknown input" errors (e.g. a `success()` in
+# a `with:` block) that otherwise only surface as a 0-second red run.
+
+name: actionlint
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download actionlint
+        run: bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+
+      - name: Check workflow files
+        run: ./actionlint -color
