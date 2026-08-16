@@ -1,41 +1,72 @@
 # <img src="docs/icon.png" width="28" align="top" alt=""> Tome
 
-**Run your coding agents in a containment cell, in one workspace.** Agents,
-terminals, editors, documents, and an AI assistant share one grid — light or
-dark, following your system by default.
+**One workspace for your coding agents — with the agents in a containment
+cell.** Terminals, editors, documents, flows, and an AI assistant share one
+tiling grid, and every agent runs in an OS-level sandbox with no network
+access unless you open a door for it.
 
 [![CI](https://github.com/zwaneldmz/tome/actions/workflows/build.yml/badge.svg)](https://github.com/zwaneldmz/tome/actions/workflows/build.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-![Tome](docs/screenshot.png)
+![The Tome workspace: file tree, a contained terminal, an editor, the assistant chat, and a brain vault in one grid](docs/screenshot.png)
 
-New here? [Take the interactive tour.](https://zwaneldmz.github.io/tome/how-tome-works.html)
+New here? **[Take the interactive tour](https://zwaneldmz.github.io/tome/how-tome-works.html)** — ten
+clickable steps through a real session, with a screen recording of a flow
+being built.
 
-## What it is
+## Why Tome?
 
-Tome is a desktop app for working with AI coding agents. You open agents,
-terminals, editors, and documents as panes in a tiling grid, and an assistant
-sits alongside them. The point of difference: **agents run in an OS-level
-sandbox with no network access by default**, so a tool you don't fully trust
-can't quietly phone home.
+AI coding agents are terrific — and they run with your shell, your
+credentials, and your network. Tome exists for the moment you'd like to try
+an agent (or an agent-written tool) *without* handing it all three. Its
+answer:
+
+- Agents run inside a real OS sandbox (macOS seatbelt, Linux bubblewrap) with
+  **all network access blocked**.
+- The only way out is a small local proxy that allows **model-provider
+  domains and nothing else** — so the agent can think, but not phone home.
+- Opening that door is deliberate: a click, a second factor, and an automatic
+  re-lock on a timer.
+
+Everything else — the pane grid, git tools, documents, notes, voice, flows —
+is there so the cautious setup is also a pleasant place to spend the day.
 
 ## Quick start
 
-You need **Bun** (1.3+) and a stable **Rust toolchain** (plus the Xcode Command
-Line Tools on macOS). On Linux, also install **bubblewrap** — it's what the
-sandbox is built on.
+You need **Bun** (1.3+) and a stable **Rust toolchain** (plus the Xcode
+Command Line Tools on macOS). On Linux, also install **bubblewrap** — it's
+what the sandbox is built on.
 
 ```bash
 bun install     # installs the renderer deps
 bun run dev     # launch the app (tauri dev)
 ```
 
-Prebuilt bundles (macOS universal, Linux `.deb`/`.rpm`/`.AppImage`) are on the
+Prefer a bundle? Prebuilt packages (macOS universal `.dmg`, Linux
+`.deb`/`.rpm`/`.AppImage`) are on the
 [releases page](https://github.com/zwaneldmz/tome/releases) — unsigned for
 now, with checksums and build provenance you can verify.
 
-To use the assistant, set an API key for one provider (see [The assistant](#the-assistant)).
-Everything else works without a key.
+To use the assistant, set an API key for one provider (see
+[The assistant](#the-assistant)). Everything else works without a key.
+
+## A quick look around
+
+You start with an empty grid and a `＋` button. Everything in Tome opens from
+that menu into the same tiling grid: agents, terminals, editors, documents,
+flows, notes.
+
+![An empty workspace inviting you to open a pane, with a project tree on the left](docs/tour-workspace.png)
+
+The `＋` menu lists every agent CLI found on your `PATH` (Claude Code,
+opencode, pi, and any custom ones you add), alongside plain terminals and the
+app's own panes. The two toggles that matter live right here: *spawn agents
+air-gapped* and *assistant may run commands*.
+
+![The ＋ menu: agents, terminal, editor, chat, flows, and the air-gap toggles](docs/tour-plus-menu.png)
+
+Drag panes to rearrange, drop one on another to stack them as tabs, tear a
+pane off into its own OS window with `⧉`. Your layout is saved and restored.
 
 ## The containment cell
 
@@ -45,16 +76,34 @@ nothing else**.
 
 - A pane's **cyan strip** opens that pane's proxy for 15, 30, or 60 minutes,
   then it re-locks on its own. Opening it asks for your second factor (an
-  authenticator code, or your passphrase). Blocked hosts show up on the strip.
+  authenticator code, or your passphrase). Blocked hosts show up on the
+  strip.
 - Opening a pane widens the **proxy**, never the sandbox — a contained pane
   still can't touch raw sockets, SSH, or your Tome config files.
 - Need full, normal network access? Spawn an **uncontained pane** from the
-  `＋` menu. Because that pane can run anything with your privileges, Tome asks
-  for your passphrase or code first — every time.
+  `＋` menu. Because that pane can run anything with your privileges, Tome
+  asks for your passphrase or code first — every time.
 - A repo can ship a **team allowlist** at `.tome/airgap.json`. Tome validates
   it and asks you to approve it before using it; editing it later re-asks.
 - A **security event log** records unlocks, blocked hosts, and assistant
   actions (what happened, never the contents). Open it from the `＋` menu.
+
+## Flows
+
+Wire agents into a small graph: each node says what it needs and what it
+produces, and **Run** executes the graph in the background — one headless
+agent per node, in dependency order, inside the same containment a normal
+pane would get.
+
+![A three-node release-notes flow on the canvas: gather → draft → review](docs/tour-flow-saved.png)
+
+A flow lives in a plain `.flow.json` file in your repo, so it's diffable and
+shareable. Each node can pin its own model — a cheap fast model for
+gathering, a stronger one for drafting.
+
+![The node editor: kind, model, instructions, and the node's output contract](docs/tour-node-editor.png)
+
+Starter graphs live in [examples/flows/](examples/flows/).
 
 ## The assistant
 
@@ -67,54 +116,47 @@ The chat pane talks to a model provider you pick in Preferences:
 | **Claude** (Anthropic) | `ANTHROPIC_API_KEY` | |
 | **DeepSeek** (V4 Pro / Flash) | `DEEPSEEK_API_KEY` | pick Pro or Flash in Preferences |
 
-Two shortcuts: set `REQUESTY_API_KEY` to route Claude Opus through the Requesty
-router instead, or set `TOME_CHAT_BASE_URL` / `TOME_CHAT_MODEL` to point at any
-OpenAI- or Anthropic-compatible endpoint. Your key stays in the main process
-and never reaches the browser layer.
+Two shortcuts: set `REQUESTY_API_KEY` to route Claude Opus through the
+Requesty router instead, or set `TOME_CHAT_BASE_URL` / `TOME_CHAT_MODEL` to
+point at any OpenAI- or Anthropic-compatible endpoint. Your key stays in the
+main process and never reaches the browser layer.
 
-**Any provider:** Preferences → Assistant → *Custom provider* lets you point the
-assistant at any OpenAI- or Anthropic-compatible endpoint (base URL + model +
-key + wire). The key is stored locally in the 0600 store, never sent to a
-browser or logged.
+**Any provider:** Preferences → Assistant → *Custom provider* lets you point
+the assistant at any OpenAI- or Anthropic-compatible endpoint (base URL +
+model + key + wire). The key is stored locally in the 0600 store, never sent
+to a browser or logged.
 
-The assistant is also a **conductor** — it can list your panes, open panes and
-files, and type into a terminal. Two guardrails:
+The assistant is also a **conductor** — it can list your panes, open panes
+and files, and type into a terminal. Two guardrails:
 
 - It only **runs** a command when you turn on *assistant may run commands* in
-  the `＋` menu (off by default). With it off, nothing is submitted without your
-  Enter.
+  the `＋` menu (off by default). With it off, nothing is submitted without
+  your Enter.
 - It can **read** a terminal's scrollback only for panes you approve — Tome
   asks before the first read, and contained panes are never readable.
 
 **Voice is fully local.** The `🎙` button records push-to-talk audio and
 transcribes it with a local whisper.cpp sidecar — audio never leaves your
 machine, and the transcript lands in the composer for you to edit and send.
-One-time setup: `brew install whisper-cpp`, then the first click shows the exact
-command to fetch the model file.
+One-time setup: `brew install whisper-cpp`, then the first click shows the
+exact command to fetch the model file.
 
-## Features
+## Everything else in the grid
 
 - **Workspaces** — named groups of project folders. Switch, create, or add
   folders from the `▚` chip in the top bar.
-- **Agent panes** — spawn Claude Code, opencode, or pi in a real terminal from
-  the `＋` menu. Agents appear automatically when their CLI is on your `PATH`.
-- **Pane grid** — drag panes to rearrange, drop one on another to stack them as
-  tabs. Tear a pane off into its own window with `⧉` (or by dragging it past the
-  window edge); your layout is saved.
-- **Flows** — wire agents into a small graph in a `.flow.json` file: each node
-  says what it needs and what it produces. **Run** executes the graph in the
-  background, one headless agent per node, in dependency order — inside the
-  same containment a normal pane would get. Starter graphs:
-  [examples/flows/](examples/flows/).
 - **Editor** — CodeMirror 6 with language auto-detect, `⌘S` to save, and a
   dirty indicator.
 - **Documents** — PDFs, images, and converted `.docx` / `.xlsx` open in
   sandboxed viewers.
-- **Git** — a branch chip to switch or create branches, live `+ ~ −` and `↑↓`
-  counters, and an IntelliJ-style commit **History** pane.
-- **App login** — set a passphrase and Tome locks at launch; unlock with Touch
-  ID or your passphrase (plus an authenticator code if enrolled). The lock is
-  enforced in the main process, not just painted on.
+- **Git** — a branch chip to switch or create branches, live `+ ~ −` and
+  `↑↓` counters, and an IntelliJ-style commit **History** pane.
+- **Brain** — a per-workspace markdown note vault with `[[wikilinks]]`,
+  backlinks, and a graph view; agents can read it, and the assistant can pull
+  relevant notes into context.
+- **App login** — set a passphrase and Tome locks at launch; unlock with
+  Touch ID or your passphrase (plus an authenticator code if enrolled). The
+  lock is enforced in the main process, not just painted on.
 - **Appearance** — light, dark, or match the system, from the `◐` chip. `⌘B`
   hides the sidebar.
 
@@ -124,9 +166,9 @@ command to fetch the model file.
 bun run package  # tauri build → src-tauri/target/release/bundle/  (unsigned)
 ```
 
-Local packages are **unsigned by design**, so contributors don't need an Apple
-Developer ID. After copying to `/Applications`, clear the quarantine flag for a
-dev build:
+Local packages are **unsigned by design**, so contributors don't need an
+Apple Developer ID. After copying to `/Applications`, clear the quarantine
+flag for a dev build:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/Tome.app
@@ -136,8 +178,8 @@ Tagged releases (`vX.Y.Z`) build in `.github/workflows/release-tauri.yml` and
 publish a macOS universal `.dmg` and Linux `.deb` / `.rpm` / `.AppImage` with
 `SHA256SUMS` manifests and a build-provenance attestation. **Code signing and
 notarization are on the roadmap** — until the Apple credentials are
-configured, released builds are unsigned too. Verify a download before opening
-it:
+configured, released builds are unsigned too. Verify a download before
+opening it:
 
 ```bash
 shasum -a 256 -c SHA256SUMS-macos-latest   # matches the manifest
@@ -163,8 +205,8 @@ vulnerability.
 
 ## Platform support
 
-macOS and Linux. The sandbox uses macOS seatbelt (`sandbox-exec`) on macOS and
-bubblewrap network namespaces on Linux; the allowlist proxy itself is
+macOS and Linux. The sandbox uses macOS seatbelt (`sandbox-exec`) on macOS
+and bubblewrap network namespaces on Linux; the allowlist proxy itself is
 platform-neutral.
 
 ## Stack
