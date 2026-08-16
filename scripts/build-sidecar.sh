@@ -61,11 +61,11 @@ for TARGET_TRIPLE in "${WANTED[@]}"; do
 
   if [ "$TARGET_TRIPLE" = "$HOST_TRIPLE" ]; then
     echo "build-sidecar: cargo build -p tome-shim --release (host target: $TARGET_TRIPLE)"
-    (cd src-tauri && cargo build -p tome-shim --release)
+    (cd src-tauri && cargo build -p tome-shim --release --locked)
     SRC="src-tauri/target/release/tome-shim${EXT}"
   else
     echo "build-sidecar: cargo build -p tome-shim --release --target $TARGET_TRIPLE (cross)"
-    (cd src-tauri && cargo build -p tome-shim --release --target "$TARGET_TRIPLE")
+    (cd src-tauri && cargo build -p tome-shim --release --target "$TARGET_TRIPLE" --locked)
     SRC="src-tauri/target/${TARGET_TRIPLE}/release/tome-shim${EXT}"
   fi
 
