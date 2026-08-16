@@ -103,13 +103,19 @@ pub async fn chat_providers(app: AppHandle, state: State<'_, AppState>) -> Resul
 
     let login = login_env::login_env().await;
     let env: HashMap<String, String> = std::env::vars().collect();
-    let stored = {
+    let (stored, custom_value) = {
         let dir = dir.clone();
-        tokio::task::spawn_blocking(move || store::get(&dir, "chat-provider", locked))
-            .await
-            .map_err(|e| e.to_string())?
+        tokio::task::spawn_blocking(move || {
+            (
+                store::get(&dir, "chat-provider", locked),
+                store::get(&dir, "custom-provider", locked),
+            )
+        })
+        .await
+        .map_err(|e| e.to_string())?
     };
     let active = providers::active_provider_id(stored.as_str());
+    let custom = providers::parse_custom_provider(&custom_value);
 
     let list: Vec<Value> = providers::CHAT_PROVIDERS
         .iter()
@@ -122,6 +128,13 @@ pub async fn chat_providers(app: AppHandle, state: State<'_, AppState>) -> Resul
                 "keySet": providers::key_is_set(&login.secrets, &env, p.key_env),
             })
         })
+        .chain(std::iter::once(json!({
+            "id": providers::CUSTOM_ID,
+            "label": custom.as_ref().map(|c| c.label.as_str()).unwrap_or("Custom provider"),
+            "model": custom.as_ref().map(|c| c.model.as_str()).unwrap_or(""),
+            "keyEnv": Value::Null,
+            "keySet": custom.is_some(),
+        })))
         .collect();
 
     Ok(json!({ "providers": list, "active": active }))
@@ -140,29 +153,36 @@ pub(crate) async fn resolve_chat(
     let locked = *state.locked.read().expect("AppState.locked lock poisoned");
     let login = login_env::login_env().await;
     let env: HashMap<String, String> = std::env::vars().collect();
-    let (stored_provider, stored_model) = {
+    let (stored_provider, stored_model, custom_value) = {
         let dir = dir.clone();
         tokio::task::spawn_blocking(move || {
             (
                 store::get(&dir, "chat-provider", locked),
                 store::get(&dir, "chat-model", locked),
+                store::get(&dir, "custom-provider", locked),
             )
         })
         .await
         .map_err(|e| e.to_string())?
     };
+    let custom = providers::parse_custom_provider(&custom_value);
 
     let provider = match providers::resolve_chat_provider(
         &env,
         &login.secrets,
         stored_provider.as_str(),
         stored_model.as_str(),
+        custom.as_ref(),
     ) {
         providers::ProviderResolution::KeyMissing { entry, .. } => {
-            let message = format!(
-                "{} needs {} — export it in your shell and restart, or pick another provider in \u{2318}, \u{2192} Assistant.",
-                entry.label, entry.key_env
-            );
+            let message = if entry.id == providers::CUSTOM_ID {
+                "Custom provider is not configured — set it up in Settings → Assistant.".to_string()
+            } else {
+                format!(
+                    "{} needs {} — export it in your shell and restart, or pick another provider in \u{2318}, \u{2192} Assistant.",
+                    entry.label, entry.key_env
+                )
+            };
             return Err(message);
         }
         providers::ProviderResolution::Ready(p) => p,
@@ -251,7 +271,7 @@ pub async fn chat_send(
         let msg = err.message();
         let authy = err.status() == Some(401) || is_authy_message(&msg);
         let friendly = if authy {
-            "Chat credentials rejected. Check the provider key (MOONSHOT_API_KEY / ZHIPU_API_KEY / ANTHROPIC_API_KEY / REQUESTY_API_KEY) in your shell and restart Tome.".to_string()
+            "Chat credentials rejected. Check the provider key (MOONSHOT_API_KEY / ZHIPU_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY / REQUESTY_API_KEY) in your shell and restart Tome.".to_string()
         } else {
             msg
         };

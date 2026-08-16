@@ -375,7 +375,13 @@ export async function preferencesModal() {
       const b = el('button', '', `${p.keySet ? '●' : '○'} ${p.label}`)
       b.type = 'button'
       b.setAttribute('role', 'radio')
-      b.title = p.keySet ? `${p.keyEnv} found in your login shell` : `${p.keyEnv} not found in your login shell`
+      b.title = p.keyEnv
+        ? p.keySet
+          ? `${p.keyEnv} found in your login shell`
+          : `${p.keyEnv} not found in your login shell`
+        : p.keySet
+          ? 'custom provider configured in Settings'
+          : 'custom provider not configured — set it below'
       b.setAttribute('aria-checked', String(chatInfo.active === p.id))
       b.classList.toggle('on', chatInfo.active === p.id)
       b.addEventListener('click', () => {
@@ -407,13 +413,89 @@ export async function preferencesModal() {
     const keysHint = el(
       'div',
       'prefs-hint',
-      'keys come from your login shell — set MOONSHOT_API_KEY / ZHIPU_API_KEY / ANTHROPIC_API_KEY and restart'
+      'keys come from your login shell — set MOONSHOT_API_KEY / ZHIPU_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY and restart'
     )
     assistant.appendChild(keysHint)
   } else {
     assistant.appendChild(el('div', 'prefs-hint', 'Provider list unavailable.'))
   }
   m.body.appendChild(assistant)
+
+  // ---------- custom provider ("any provider") ----------
+  // An OpenAI- or Anthropic-compatible endpoint the user supplies. Unlike the
+  // built-ins (whose key comes from a login-shell env var), the key is stored
+  // in the 0600 JSON store so it can be pasted here — it never reaches the
+  // browser layer beyond this form.
+  const customSection = el('section', 'prefs-section')
+  customSection.append(el('h4', '', 'Custom provider'))
+  const custom = (await tome.store.get('custom-provider')) || {}
+  const cpInput = (key, placeholder, type = 'text') => {
+    const i = el('input', 'prefs-input')
+    i.type = type
+    i.placeholder = placeholder
+    i.spellcheck = false
+    i.value = custom[key] || ''
+    i.setAttribute('aria-label', placeholder)
+    return i
+  }
+  const cpLabel = cpInput('label', 'label — e.g. My endpoint')
+  const cpBase = cpInput('baseUrl', 'base URL — e.g. https://api.deepseek.com/v1')
+  const cpModel = cpInput('model', 'model id — e.g. deepseek-v4-pro')
+  const cpKey = cpInput('key', 'API key', 'password')
+  const wireSeg = el('div', 'prefs-seg')
+  wireSeg.setAttribute('role', 'radiogroup')
+  wireSeg.setAttribute('aria-label', 'Custom provider wire')
+  let wire = custom.wire === 'anthropic' ? 'anthropic' : 'openai'
+  const wireOpenai = el('button', '', 'OpenAI')
+  const wireAnth = el('button', '', 'Anthropic')
+  for (const b of [wireOpenai, wireAnth]) {
+    b.type = 'button'
+    b.setAttribute('role', 'radio')
+  }
+  const paintWire = () => {
+    wireOpenai.classList.toggle('on', wire === 'openai')
+    wireAnth.classList.toggle('on', wire === 'anthropic')
+    wireOpenai.setAttribute('aria-checked', String(wire === 'openai'))
+    wireAnth.setAttribute('aria-checked', String(wire === 'anthropic'))
+  }
+  wireOpenai.addEventListener('click', () => {
+    wire = 'openai'
+    paintWire()
+  })
+  wireAnth.addEventListener('click', () => {
+    wire = 'anthropic'
+    paintWire()
+  })
+  wireSeg.append(wireOpenai, wireAnth)
+  paintWire()
+  const cpSave = el('button', 'ag-btn ghost', 'Save custom provider')
+  cpSave.type = 'button'
+  cpSave.addEventListener('click', async () => {
+    const value = {
+      label: cpLabel.value.trim(),
+      baseUrl: cpBase.value.trim(),
+      model: cpModel.value.trim(),
+      key: cpKey.value.trim(),
+      wire,
+    }
+    if (!value.label || !value.baseUrl || !value.model || !value.key) {
+      return toast('fill in label, base URL, model, and key')
+    }
+    await tome.store.set('custom-provider', value)
+    toast('custom provider saved — select it under Provider', 'ok')
+  })
+  const cpClear = el('button', 'ag-btn ghost', 'Clear')
+  cpClear.type = 'button'
+  cpClear.addEventListener('click', async () => {
+    await tome.store.set('custom-provider', null)
+    cpLabel.value = cpBase.value = cpModel.value = cpKey.value = ''
+    toast('custom provider cleared', 'ok')
+  })
+  customSection.append(cpLabel, cpBase, cpModel, cpKey, wireSeg, cpSave, cpClear)
+  customSection.append(
+    el('div', 'prefs-hint', 'the key is stored locally in the 0600 store — never shown to a browser or logged')
+  )
+  m.body.appendChild(customSection)
 
   // ---------- security ----------
   const security = el('section', 'prefs-section')

@@ -65,11 +65,17 @@ The chat pane talks to a model provider you pick in Preferences:
 | **Kimi** (Moonshot) | `MOONSHOT_API_KEY` | the default |
 | **GLM** (Zhipu) | `ZHIPU_API_KEY` | |
 | **Claude** (Anthropic) | `ANTHROPIC_API_KEY` | |
+| **DeepSeek** (V4 Pro / Flash) | `DEEPSEEK_API_KEY` | pick Pro or Flash in Preferences |
 
 Two shortcuts: set `REQUESTY_API_KEY` to route Claude Opus through the Requesty
 router instead, or set `TOME_CHAT_BASE_URL` / `TOME_CHAT_MODEL` to point at any
 OpenAI- or Anthropic-compatible endpoint. Your key stays in the main process
 and never reaches the browser layer.
+
+**Any provider:** Preferences → Assistant → *Custom provider* lets you point the
+assistant at any OpenAI- or Anthropic-compatible endpoint (base URL + model +
+key + wire). The key is stored locally in the 0600 store, never sent to a
+browser or logged.
 
 The assistant is also a **conductor** — it can list your panes, open panes and
 files, and type into a terminal. Two guardrails:
