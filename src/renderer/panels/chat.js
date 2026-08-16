@@ -8,6 +8,7 @@ import { encodeWav } from '../../shared/wav.js'
 import { loadHistory, persistHistory, flushHistory } from '../chat-history.js'
 import { shouldAbortOnDispose } from '../chat-lifecycle.js'
 import { voiceActive } from '../voice.js'
+import { isVerbose } from '../mentor.js'
 
 export class ChatPanel {
   constructor() {
@@ -244,7 +245,7 @@ export class ChatPanel {
     }
     // main catches and re-signals over chat:done; this catch is the backstop
     // so a rejected invoke never dies as an unhandled rejection
-    tome.chat.send(this.chatId, this.history, brainWs).catch((err) => {
+    tome.chat.send(this.chatId, this.history, brainWs, isVerbose()).catch((err) => {
       this.finish(err?.message || String(err))
     })
   }

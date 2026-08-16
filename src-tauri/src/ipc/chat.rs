@@ -136,8 +136,12 @@ pub async fn chat_send(
     id: String,
     messages: Vec<Value>,
     brain_ws: Option<String>,
+    verbose: Option<bool>,
 ) -> Result<Value, String> {
     lock_gate::guard(&state, "chat:send")?;
+    // Backward-compatible: the renderer lands the `verbose` flag in a later
+    // slice; absent means the default (non-mentor) persona.
+    let verbose = verbose.unwrap_or(false);
 
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let locked = *state.locked.read().expect("AppState.locked lock poisoned");
@@ -185,8 +189,9 @@ pub async fn chat_send(
     // is not yet ported (see module doc comment); system is conductor's own
     // prompt alone, exactly the fallback `run_chat` would apply itself, made
     // explicit here to mirror index.js's `let system = conductor.SYSTEM`
-    // assignment site.
-    let system = state.conductor.system_prompt();
+    // assignment site. `verbose: true` swaps in the mentor (teaching)
+    // persona — `conductor.mentor_system_prompt()` — instead.
+    let system = if verbose { state.conductor.mentor_system_prompt() } else { state.conductor.system_prompt() };
     let conductor_env = conductor::env::production_env(app.clone(), provider, betas, fallbacks);
 
     // `run_chat` owns the whole multi-turn loop, including the abort race

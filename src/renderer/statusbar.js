@@ -5,16 +5,18 @@
 // Otherwise pure presentation: it reads shared state.  Panels may expose
 // statusMeta() returning { icon, text } for contextual info (editor line:col,
 // terminal cwd).
-import { tome } from './util.js'
+import { tome, el } from './util.js'
 import { wsState, agState } from './state.js'
 import { addRuns } from './panes.js'
 import { runningCount, RUN_PANE_PREFIX } from '../shared/flow-run-plan.js'
+import { uq } from './mentor.js'
 
 const rootEl = document.getElementById('sb-root')
 const contextEl = document.getElementById('sb-context')
 const panesEl = document.getElementById('sb-panes')
 const runsEl = document.getElementById('sb-runs')
 const airgapEl = document.getElementById('sb-airgap')
+const uqEl = document.getElementById('sb-uq')
 
 // panes.js injects the dock after creating it — avoids a panes<->statusbar
 // import cycle at module-evaluation time.
@@ -54,6 +56,9 @@ export function renderStatusbar() {
   const root = wsState.activeRoot
   rootEl.textContent = root ? `▸ ${root.split('/').pop() || root}` : ''
   rootEl.title = root ? `Active root — ${root}` : 'Active root — new panes and git follow this folder'
+
+  // understanding score ring (mentor mode) — see renderUq below
+  renderUq()
 
   // active-pane context (editor line:col, terminal cwd, …)
   renderContext()
@@ -101,6 +106,41 @@ export function renderStatusbar() {
     airgapEl.title = `${gapped} air-gapped pane${gapped === 1 ? '' : 's'} — model APIs only`
   }
 }
+
+// ---------- understanding score (mentor mode) ----------
+// A compact ring gauge + the number, fed by mentor.js's uq() (per-workspace,
+// 0..100). mentor.js can't import renderUq back (statusbar.js imports it),
+// so a UQ change is signalled through a window event mentor.js dispatches —
+// that listener is armed at the bottom of this file, cycle-free.
+const UQ_CIRC = 2 * Math.PI * 9
+export function renderUq() {
+  const score = uq()
+  const pct = Math.max(0, Math.min(100, score))
+  const dash = (pct / 100) * UQ_CIRC
+  uqEl.innerHTML = ''
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  svg.setAttribute('class', 'sb-uq-ring')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('aria-hidden', 'true')
+  const track = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+  track.setAttribute('class', 'sb-uq-track')
+  track.setAttribute('cx', '12')
+  track.setAttribute('cy', '12')
+  track.setAttribute('r', '9')
+  const fill = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+  fill.setAttribute('class', 'sb-uq-fill')
+  fill.setAttribute('cx', '12')
+  fill.setAttribute('cy', '12')
+  fill.setAttribute('r', '9')
+  fill.setAttribute('transform', 'rotate(-90 12 12)')
+  fill.setAttribute('stroke-dasharray', `${dash.toFixed(2)} ${UQ_CIRC.toFixed(2)}`)
+  svg.append(track, fill)
+  uqEl.append(svg, el(`span`, 'sb-uq-num', String(score)))
+  uqEl.title = `Understanding score — ${score}/100`
+  uqEl.setAttribute('aria-label', `Understanding score ${score} of 100`)
+}
+
+window.addEventListener('mentor:uq-changed', renderUq)
 
 // ---------- background flow runs ----------
 // The one item here that isn't fed by whoever changed the state: a run

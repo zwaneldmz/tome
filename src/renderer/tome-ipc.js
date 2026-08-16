@@ -253,6 +253,15 @@
       log: (dir, limit) => call('git_log', { dir, limit }),
       commit: (dir, hash) => call('git_commit', { dir, hash }),
       diff: (dir, hash, file) => call('git_diff', { dir, hash, file }),
+      status: (dir) => call('git_status', { dir }),
+      stage: (dir, paths) => call('git_stage', { dir, paths }),
+      commitCreate: (dir, message) => call('git_commit_create', { dir, message }),
+      push: (dir) => call('git_push', { dir }),
+    },
+
+    skills: {
+      list: () => call('skills_list'),
+      read: (name) => call('skills_read', { name }),
     },
 
     auth: {
@@ -336,7 +345,7 @@
     },
 
     chat: {
-      send: (id, messages, brainWs) => call('chat_send', { id, messages, brainWs }),
+      send: (id, messages, brainWs, verbose) => call('chat_send', { id, messages, brainWs, verbose }),
       abort: (id) => fire('chat_abort', { id }),
       providers: () => call('chat_providers'),
       // Rust side emits these as plain events until the real chat command
@@ -357,6 +366,19 @@
       promote: (ws, rel, folder, overwrite, rename) =>
         call('brain_promote', { ws, rel, folder, overwrite, rename }),
       onChanged: (cb) => on('brain:changed', cb),
+    },
+
+    // Usage review report: a counts-only summary of local signals, sent
+    // one-shot to the configured provider for a markdown report.
+    review: {
+      generate: () => call('review_generate'),
+    },
+
+    // Mentor mode (teaching persona): the gate_question tool emits
+    // mentor:check while it waits; mentor_answer completes the pending gate.
+    mentor: {
+      onCheck: (cb) => on('mentor:check', cb),
+      answer: (id, answers, skip) => call('mentor_answer', { id, answers, skip }),
     },
 
     lsp: {

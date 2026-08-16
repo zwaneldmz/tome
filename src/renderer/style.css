@@ -697,7 +697,7 @@ body.tree-collapsed #btn-sidebar .chev {
 /* ================= layout ================= */
 #body {
   display: flex;
-  height: calc(100% - 44px - 26px); /* topbar + statusbar */
+  height: calc(100% - 44px - 32px); /* topbar + statusbar */
   background: var(--bg-sunken);
 }
 
@@ -706,7 +706,7 @@ body.tree-collapsed #btn-sidebar .chev {
   display: flex;
   align-items: center;
   gap: 14px;
-  height: 26px;
+  height: 32px;
   padding: 0 12px;
   border-top: 1px solid var(--line);
   background: var(--chrome);
@@ -771,6 +771,28 @@ body.tree-collapsed #btn-sidebar .chev {
 }
 #sb-airgap.sb-shut {
   color: var(--accent);
+}
+/* understanding score ring (mentor mode) */
+#sb-uq .sb-uq-ring {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+.sb-uq-track {
+  fill: none;
+  stroke: var(--line-2);
+  stroke-width: 2.5;
+}
+.sb-uq-fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+#sb-uq .sb-uq-num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
 }
 #tree {
   width: 236px;
@@ -2080,6 +2102,94 @@ canvas.brain-graph {
   margin-top: 8px;
 }
 
+/* ---- mentor gate overlay ---- */
+.mentor-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.mentor-test {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow: auto;
+  color: var(--text);
+}
+.mentor-q {
+  margin: 0;
+  color: var(--bright);
+  font-weight: 500;
+}
+.mentor-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mentor-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--fs-ui);
+}
+.mentor-opt input[type='radio'] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  cursor: pointer;
+}
+.mentor-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: var(--fs-meta);
+  font-family: var(--mono);
+  color: var(--bright);
+  background: var(--bg);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  resize: vertical;
+  min-height: 56px;
+}
+.mentor-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+/* Pinned to the full-screen scrim (appended to #ag-overlay, not the box), so
+   it reads as an always-available escape hatch in the bottom-left corner. */
+.mentor-skip {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 8px 16px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+.mentor-skip:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
 /* ---- preferences ---- */
 .prefs-box {
   width: 560px;
@@ -2255,6 +2365,23 @@ canvas.brain-graph {
 .prefs-switch.on .prefs-knob {
   transform: translateX(16px);
   background: var(--accent);
+}
+/* mentor "Question mix" — a wrapped row of labelled switches */
+.prefs-mix {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  justify-content: flex-end;
+  max-width: 320px;
+}
+.prefs-mix-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.prefs-mix-label {
+  color: var(--muted);
+  font-size: var(--fs-micro);
 }
 /* custom agents: availability dot + the four-input add form */
 .prefs-agents {
@@ -3514,4 +3641,127 @@ body.tome-popout .dockview-theme-tome .dv-groupview {
 .ob-agent-pick input[type="checkbox"]:disabled {
   cursor: default;
   opacity: 0.4;
+}
+
+/* ---- review report pane ---- */
+.panel-report {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.report-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.report-title {
+  flex: 1;
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  padding-left: 6px;
+}
+.report-btn {
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 0 10px;
+  cursor: pointer;
+  font-size: var(--fs-meta);
+}
+.report-btn:hover {
+  border-color: var(--accent-ring);
+  background: var(--accent-soft);
+}
+.report-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 18px 20px;
+}
+.report-body .md p { margin: 0.5em 0; }
+.report-body .md h1,
+.report-body .md h2,
+.report-body .md h3 { margin: 0.7em 0 0.3em; line-height: 1.3; }
+.report-body .md h1 { font-size: 1.25em; }
+.report-body .md h2 { font-size: 1.12em; }
+.report-body .md h3 { font-size: 1em; }
+.report-body .md ul,
+.report-body .md ol { margin: 0.4em 0; padding-left: 1.4em; }
+.report-body .md li { margin: 0.15em 0; }
+.report-body .md code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  padding: 1px 5px;
+}
+.report-body .md pre {
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  margin: 0.5em 0;
+  overflow-x: auto;
+}
+.report-body .md pre code {
+  display: block;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: var(--fs-meta);
+  line-height: 1.45;
+  white-space: pre;
+}
+
+/* ---- Viibi companion popover ---- */
+.viibi-pop {
+  position: fixed;
+  z-index: 2600;
+  width: 250px;
+  padding: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.viibi-pop-title {
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+.viibi-pop-score {
+  font-size: 1.4em;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.viibi-pop-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.viibi-pop-rowtext {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.viibi-pop-label {
+  color: var(--text);
+  font-size: var(--fs-meta);
+}
+.viibi-pop-hint {
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+.viibi-pop-btn {
+  text-align: left;
+  width: 100%;
 }

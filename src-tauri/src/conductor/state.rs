@@ -286,6 +286,13 @@ impl Conductor {
     pub fn system_prompt(&self) -> String {
         super::tools::system_prompt_text(&self.agent_ids())
     }
+
+    /// `MENTOR_SYSTEM`, the teaching persona chosen when a `chat:send`
+    /// arrives with `verbose: true` — same freshness rationale as
+    /// [`Self::system_prompt`].
+    pub fn mentor_system_prompt(&self) -> String {
+        super::tools::mentor_prompt_text(&self.agent_ids())
+    }
 }
 
 impl Default for Conductor {

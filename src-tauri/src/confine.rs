@@ -250,6 +250,46 @@ pub fn confined_real_path(state: &State<'_, AppState>, path: &Path) -> Result<Pa
     confined_real_path_core(&open_folders, folders_synced, path)
 }
 
+/// Pure core of [`confined_write_path`] — same testability split as
+/// [`confined_real_path_core`]. Unlike the real-path resolver (which
+/// requires the target to EXIST, since `canonicalize` is `realpath(3)` and
+/// `realpath` fails on a missing file), a write tool must be able to CREATE
+/// a fresh file (e.g. a new test), so the existence check moves one level
+/// up: the PARENT directory must exist and canonically resolve inside a
+/// confined root, while the final file name itself is a not-yet-resolvable
+/// leaf appended back onto that resolved parent. A symlinked parent whose
+/// target lands outside the root is still refused — the `canonicalize`
+/// still resolves the parent's own symlinks, then re-checks the resolved
+/// parent against the same roots.
+fn confined_write_path_core(
+    open_folders: &[PathBuf],
+    folders_synced: bool,
+    path: &Path,
+) -> Result<PathBuf, String> {
+    if !is_confined(open_folders, folders_synced, path) {
+        return Err(confinement_reason(folders_synced));
+    }
+    let parent = path.parent().ok_or_else(|| confinement_reason(folders_synced))?;
+    let name = path.file_name().filter(|n| !n.is_empty()).ok_or_else(|| confinement_reason(folders_synced))?;
+    let real_parent = std::fs::canonicalize(parent).map_err(|_| confinement_reason(folders_synced))?;
+    if !is_confined(open_folders, folders_synced, &real_parent) {
+        return Err(confinement_reason(folders_synced));
+    }
+    Ok(real_parent.join(name))
+}
+
+/// The write-side counterpart to [`confined_real_path`]: resolves `path`'s
+/// PARENT directory to its real (symlink-free) form and checks it against
+/// `state.open_folders`, then rejoins the file name — so a tool that
+/// creates a not-yet-existing file inside a confined root still passes,
+/// while a parent whose symlink target escapes the root is refused.
+/// Everything else about the two-step check matches [`confined_real_path`].
+pub fn confined_write_path(state: &State<'_, AppState>, path: &Path) -> Result<PathBuf, String> {
+    let folders_synced = *state.folders_synced.read().unwrap();
+    let open_folders = state.open_folders.read().unwrap();
+    confined_write_path_core(&open_folders, folders_synced, path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,5 +466,79 @@ mod tests {
             Err(confinement_reason(false))
         );
         assert_ne!(confinement_reason(true), confinement_reason(false));
+    }
+
+    // ---- confined_write_path_core — parent-checked write resolution ----
+
+    #[test]
+    fn confined_write_path_allows_a_new_file_inside_root() {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let inside = base.join("workspace");
+        fs::create_dir_all(&inside).unwrap();
+        let new_file = inside.join("new.txt"); // does not exist yet
+
+        let folders = vec![inside.clone()];
+        let result = confined_write_path_core(&folders, true, &new_file);
+        assert_eq!(result, Ok(inside.join("new.txt")));
+    }
+
+    #[test]
+    fn confined_write_path_rejects_a_parent_symlink_that_escapes_the_root() {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let inside = base.join("workspace");
+        let outside = base.join("secret");
+        fs::create_dir_all(&inside).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        // A symlink whose NAME sits inside the workspace but whose target
+        // directory is outside it — the lexical check passes, the realpath
+        // check must not.
+        let link = inside.join("link");
+        symlink(&outside, &link).unwrap();
+        let target = link.join("new.txt");
+
+        let folders = vec![inside];
+        let result = confined_write_path_core(&folders, true, &target);
+        assert!(
+            result.is_err(),
+            "a parent symlink whose target resolves outside the confined root must be refused"
+        );
+    }
+
+    #[test]
+    fn confined_write_path_rejects_dotdot_traversal() {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let inside = base.join("workspace");
+        fs::create_dir_all(&inside).unwrap();
+
+        let folders = vec![inside.clone()];
+        let result = confined_write_path_core(&folders, true, &inside.join("../outside.txt"));
+        assert_eq!(result, Err(confinement_reason(true)));
+    }
+
+    #[test]
+    fn confined_write_path_rejects_a_path_outside_the_root() {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let inside = base.join("workspace");
+        fs::create_dir_all(&inside).unwrap();
+
+        let folders = vec![inside];
+        let result = confined_write_path_core(&folders, true, &base.join("outside.txt"));
+        assert_eq!(result, Err(confinement_reason(true)));
+    }
+
+    #[test]
+    fn confined_write_path_reports_not_synced_distinctly() {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let inside = base.join("workspace");
+        fs::create_dir_all(&inside).unwrap();
+
+        let folders = vec![inside];
+        let result = confined_write_path_core(&folders, false, &base.join("workspace").join("new.txt"));
+        assert_eq!(result, Err(confinement_reason(false)));
     }
 }

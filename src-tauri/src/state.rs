@@ -196,6 +196,15 @@ pub struct AppState {
     /// `'static` data-tap closure can hold its own strong reference to feed
     /// `record()` — the per-chunk scrollback tap `read_terminal` reads back.
     pub conductor: std::sync::Arc<conductor::Conductor>,
+
+    /// Mentor-mode comprehension-gate registry — `mentor::Mentor`
+    /// (backend half of the `gate_question`/`mentor_answer` loop; see that
+    /// module's doc comment). A plain value field that owns its own interior
+    /// locking, the same shape `pty`/`airgap` above already use — the gate is
+    /// only ever touched from within a command's own `State<'_, AppState>`
+    /// borrow, never from a `tokio::spawn`'d background task outliving that
+    /// borrow, so no `Arc` wrapper is needed.
+    pub mentor: crate::mentor::Mentor,
 }
 
 impl AppState {
@@ -217,6 +226,7 @@ impl AppState {
             auth: Mutex::new(None),
             flow: std::sync::Arc::new(flow::Runner::new()),
             conductor: std::sync::Arc::new(conductor::Conductor::new()),
+            mentor: crate::mentor::Mentor::new(),
         }
     }
 }

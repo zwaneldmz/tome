@@ -31,3 +31,7 @@ src-tauri/gen/
 # specific build output (tome-shim-<target-triple>), not source. See that
 # script and tauri.conf.json's bundle.externalBin entry.
 src-tauri/binaries/
+
+# Planning + mockup sites: working decision-of-record docs and standalone
+# mockup sites, personal to the author — never committed.
+planning/

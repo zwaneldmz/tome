@@ -33,10 +33,13 @@ mod lock_gate;
 mod login_env;
 mod lsp;
 mod menu;
+mod mentor;
 mod migrate;
 mod protocol;
 mod pty;
 mod pty_authority;
+mod review;
+mod skills;
 mod state;
 mod store;
 mod store_keys;
@@ -302,6 +305,10 @@ pub fn run() {
             ipc::git::git_log,
             ipc::git::git_commit,
             ipc::git::git_diff,
+            ipc::git::git_status,
+            ipc::git::git_stage,
+            ipc::git::git_commit_create,
+            ipc::git::git_push,
             // auth (Phase 3)
             ipc::auth::auth_status,
             ipc::auth::auth_login,
@@ -346,6 +353,10 @@ pub fn run() {
             ipc::chat::chat_send,
             ipc::chat::chat_abort,
             ipc::chat::chat_providers,
+            // mentor
+            ipc::mentor::mentor_answer,
+            // review
+            ipc::review::review_generate,
             // brain
             ipc::brain::brain_open,
             ipc::brain::brain_close,
@@ -361,6 +372,9 @@ pub fn run() {
             ipc::lsp::lsp_did_close,
             ipc::lsp::lsp_hover,
             ipc::lsp::lsp_definition,
+            // skills
+            ipc::skills::skills_list,
+            ipc::skills::skills_read,
             // dialog
             ipc::dialog::dialog_pick_folder,
             ipc::dialog::dialog_pick_file,

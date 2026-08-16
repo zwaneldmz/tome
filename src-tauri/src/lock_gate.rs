@@ -161,6 +161,10 @@ pub const CHANNEL_OF_COMMAND: &[(&str, &str)] = &[
     ("git_log", "git:log"),
     ("git_commit", "git:commit"),
     ("git_diff", "git:diff"),
+    ("git_status", "git:status"),
+    ("git_stage", "git:stage"),
+    ("git_commit_create", "git:commitCreate"),
+    ("git_push", "git:push"),
     ("auth_status", "auth:status"),
     ("auth_login", "auth:login"),
     ("auth_touchid", "auth:touchid"),
@@ -210,6 +214,10 @@ pub const CHANNEL_OF_COMMAND: &[(&str, &str)] = &[
     ("dialog_pick_file", "dialog:pickFile"),
     ("app_quit_ready", "app:quit-ready"),
     ("popout_close", "popout:close"),
+    ("skills_list", "skills:list"),
+    ("skills_read", "skills:read"),
+    ("mentor_answer", "mentor:answer"),
+    ("review_generate", "review:generate"),
 ];
 
 #[cfg(test)]

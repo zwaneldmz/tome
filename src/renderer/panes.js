@@ -19,6 +19,7 @@ import { BrainPanel } from './panels/brain.js'
 import { FlowPanel } from './panels/flow.js'
 import { EventsPanel } from './panels/events.js'
 import { RunsPanel } from './panels/runs.js'
+import { ReportPanel } from './panels/report.js'
 import { HistoryPanel } from './history.js'
 import { renderStatusbar, setStatusbarDock } from './statusbar.js'
 import { plusIcon, popoutIcon } from './icons.js'
@@ -113,6 +114,8 @@ export const dock = createDockview(document.getElementById('dock'), {
         return new EventsPanel()
       case 'runs':
         return new RunsPanel()
+      case 'report':
+        return new ReportPanel()
       case 'flow':
         return new FlowPanel()
       default:
@@ -868,6 +871,29 @@ function spawnEvents(saved, target) {
 
 export function addRuns(target) {
   spawnRuns(undefined, target)
+}
+
+export function addReport(target) {
+  spawnReport(undefined, target)
+}
+
+// One report pane at a time, same fixed-id dedupe as the event log and runs
+// list: the report is a summary of the whole app's state, not a view of any
+// one file, so a second request means "show me that", not "give me another".
+function spawnReport(saved, target) {
+  const id = 'report:review'
+  const existing = dock.getPanel(id)
+  if (existing) {
+    existing.api.setActive()
+    return
+  }
+  dock.addPanel({
+    id,
+    component: 'report',
+    title: saved?.title || 'report',
+    position: saved ? { referencePanel: saved.id } : place(target),
+    params: { report: true },
+  })
 }
 
 // One runs pane at a time, same fixed-id dedupe as the event log: both are
