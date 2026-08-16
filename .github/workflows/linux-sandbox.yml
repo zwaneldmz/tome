@@ -48,7 +48,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # bubblewrap: the actual mechanism under test. The rest of this list
       # is Tauri v2's own documented Ubuntu build prerequisites (needed to
@@ -155,7 +155,7 @@ jobs:
     container: fedora:latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install bubblewrap + Tauri Linux build prerequisites + Rust (dnf)
         run: |
