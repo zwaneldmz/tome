@@ -2105,7 +2105,7 @@ canvas.brain-graph {
 /* ---- mentor gate overlay ---- */
 .mentor-label {
   margin: 0;
-  color: var(--muted);
+  color: var(--accent);
   font-size: var(--fs-micro);
   font-weight: 600;
   letter-spacing: 0.06em;
@@ -2139,10 +2139,20 @@ canvas.brain-graph {
 .mentor-opt {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
   color: var(--text);
   cursor: pointer;
   font-size: var(--fs-ui);
+}
+.mentor-opt:hover {
+  border-color: var(--accent-ring);
+}
+.mentor-opt.sel {
+  border-color: var(--accent-ring);
+  background: var(--accent-soft);
 }
 .mentor-opt input[type='radio'] {
   accent-color: var(--accent);
@@ -2171,11 +2181,12 @@ canvas.brain-graph {
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
 /* Pinned to the full-screen scrim (appended to #ag-overlay, not the box), so
-   it reads as an always-available escape hatch in the bottom-left corner. */
+   it reads as an always-available escape hatch in the bottom-right corner —
+   clear of the modal's own answer/Submit buttons. */
 .mentor-skip {
   position: absolute;
   bottom: 16px;
-  left: 16px;
+  right: 16px;
   color: var(--muted);
   background: transparent;
   border: 1px solid var(--line);
