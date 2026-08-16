@@ -92,8 +92,11 @@ jobs:
         working-directory: src-tauri
         run: cargo test --lib --locked
 
-      - name: cargo audit (Rust supply-chain)
-        uses: rustsec/audit-check@v2
+      - name: Install cargo-audit (prebuilt)
+        uses: taiki-e/install-action@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          working-directory: src-tauri
+          tool: cargo-audit
+
+      - name: cargo audit (Rust supply-chain)
+        working-directory: src-tauri
+        run: cargo audit
