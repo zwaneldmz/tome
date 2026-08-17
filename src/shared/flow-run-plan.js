@@ -85,19 +85,28 @@ export function layers(flow) {
 // parents. Built once at startRun and then only ever read, so the scheduler
 // can be re-asked on every process exit without re-deriving the graph. null
 // on a cycle, like layers().
+//
+// `terminals` — node ids with no outgoing edge, in `order` order — is the
+// run's own sinks. A dangling edge doesn't count as "outgoing" any more than
+// it counts toward `parents` below: the node on its `from` end never really
+// depends on anything downstream of a reference validateFlow already refused.
 export function runPlan(flow) {
   const ls = layers(flow)
   if (!ls) return null
   const parents = new Map(flow.nodes.map((n) => [n.id, []]))
+  const hasOutgoing = new Set()
   for (const edge of flow.edges) {
     if (!parents.has(edge.to) || !parents.has(edge.from)) continue // dangling, as above
+    hasOutgoing.add(edge.from)
     const list = parents.get(edge.to)
     // Two edges between the same pair (different ports) are one dependency,
     // not two — otherwise "every parent is done" would be counted twice and
     // the skip pass would report the same node twice.
     if (!list.includes(edge.from)) list.push(edge.from)
   }
-  return { layers: ls, order: ls.flat(), parents }
+  const order = ls.flat()
+  const terminals = order.filter((id) => !hasOutgoing.has(id))
+  return { layers: ls, order, parents, terminals }
 }
 
 // What the runner should do next, given where every node currently stands:

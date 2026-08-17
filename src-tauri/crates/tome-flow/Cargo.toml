@@ -1,0 +1,63 @@
+[package]
+name = "tome-flow"
+version = "0.1.0"
+edition = "2021"
+description = "Tauri-free background flow-run engine: DAG scheduling, the live run registry, realpath confinement, product promotion, agent spawn-policy allowlists, and the air-gap subsystem."
+
+[lib]
+name = "tome_flow"
+path = "src/lib.rs"
+
+[dependencies]
+# Version pins copied verbatim from the root `tome` crate's own
+# `Cargo.toml` (this workspace's single source of truth for these — every
+# one is used by code moved here unchanged from that crate, so drifting a
+# pin here would risk two incompatible copies resolving in the same
+# `Cargo.lock`).
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# airgap/mod.rs: Sha1 (repo-allowlist hashing).
+sha1 = "0.11.0"
+# flow/products.rs: Sha256 over each promoted product plus the flow file
+# itself, for manifest.json's integrity fields.
+sha2 = "0.11.0"
+# airgap/proxy.rs: the plain-HTTP leg of the per-pane loopback proxy
+# forwards each request through a real `reqwest::Client` (redirect-chasing
+# disabled — see that module's own comment on why: an internally-chased
+# redirect would fetch a Location header host entirely unchecked, which
+# defeats the whole point of this proxy). Not in the slice brief's own
+# dependency list — verified needed against the actual file; see this
+# slice's own report. Same version/feature pin as the root `tome` crate's
+# own `Cargo.toml` (its `chat/sse.rs` is reqwest's other consumer in this
+# workspace), so both crates' copies resolve to the one `Cargo.lock` entry.
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "http2", "json", "stream", "charset"] }
+#
+# NOT added: `nix`/`libc`. The slice brief that scoped this crate expected
+# `airgap::linux` to need Linux-only `nix`/`libc` features here — verified
+# against the actual file and that is not the case. `airgap/linux.rs`'s own
+# module doc comment is explicit and load-bearing on this point ("POLICY vs
+# MECHANISM… Nothing here is MECHANISM. No `unshare()`, no `mount()`… THE
+# DESIGN assigns all of that to `tome-shim`"): every function in that file,
+# `#[cfg(target_os = "linux")]` ones included, is pure argv/path assembly
+# or a `std::fs::read_to_string` of a `/proc` file — no raw syscall crate
+# is ever called. Adding an unused dependency here would contradict that
+# module's own documented boundary, so it is deliberately omitted; see this
+# slice's own report for the full note.
+
+[dev-dependencies]
+# flow/products.rs, flow/runner/tests.rs, flow/confine.rs, airgap/{mod,
+# proxy,linux}.rs's own `#[cfg(test)]` modules all build scratch
+# directories through this — same pin as the root `tome` crate's own
+# `[dev-dependencies]` (not new to the workspace's `Cargo.lock`, just now
+# also a direct dependency of this crate).
+tempfile = "3"
+# Path dependency on the sidecar crate's own argv PARSER, for
+# `airgap::linux`'s real cross-crate contract test (feeds this crate's own
+# `build_bwrap_argv`/`build_self_unshare_argv` output straight into
+# `tome_shim::args::parse_args`) — moved here unchanged from the root
+# `tome` crate's own identically-justified dev-dependency (see that
+# `Cargo.toml`'s comment on this same entry). Test-only, and safe to depend
+# on natively (macOS) for the same reason documented there: `tome-shim`'s
+# `[lib]` only unconditionally exposes `args`/`pure` (both OS-agnostic).
+tome-shim = { path = "../tome-shim" }

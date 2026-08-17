@@ -12,7 +12,7 @@
 //! of a real network call or a hand-rolled local HTTP server).
 //!
 //! [`production_env`] builds the real one per `chat_send` call (mirroring
-//! `flow::runner::env::production_env`'s own "cheap to call per-command, no
+//! `flow_env::production_env`'s own "cheap to call per-command, no
 //! boot-time `init()` step" shape); [`super::tests`] builds fakes.
 
 use std::future::Future;

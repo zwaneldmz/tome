@@ -58,25 +58,20 @@ regex = "1.13.1"
 # bump anything.
 tokio-util = "0.7"
 futures-util = "0.3"
+# Plan step 2.1: the extracted background flow-run engine (DAG scheduling,
+# the live run registry, realpath confinement, product promotion, agent
+# spawn-policy allowlists, the air-gap subsystem) — see that crate's own
+# `lib.rs` doc comment for its full membership. `tome_lib` re-exports its
+# public surface at every module's original path (`flow`, `agent_spawn`,
+# `agent_env`, `login_env`, `airgap`, `custom_agents`), so this is the one
+# place those modules' code is now actually compiled from.
+tome-flow = { path = "crates/tome-flow" }
 
 [dev-dependencies]
 tempfile = "3"
-# Path dependency on the sidecar crate's own argv PARSER, for a real
-# cross-crate contract test (see airgap::linux's test module): feeds this
-# crate's `airgap::linux::build_bwrap_argv`/`build_self_unshare_argv` output
-# straight into `tome_shim::args::parse_args` so the two sides of that wire
-# contract can never silently drift apart again (they did once — see
-# tome-shim's args.rs doc comment). Test-only: nothing in this crate's own
-# (non-test) runtime code parses tome-shim's argv back — it only ever
-# builds argv for a SEPARATE process to parse — so this is a dev-dependency,
-# not a regular one. Safe to depend on natively (macOS): tome-shim's `[lib]`
-# only unconditionally exposes `args`/`pure` (both OS-agnostic); its `linux`
-# module is itself `#[cfg(target_os = "linux")]`, so a macOS build of THIS
-# crate never links tome-shim's `nix`/`libc` deps at all.
-tome-shim = { path = "crates/tome-shim" }
 
 [workspace]
-members = ["crates/tome-shim"]
+members = ["crates/tome-shim", "crates/tome-flow", "crates/tome-runner"]
 
 # The conductor/flow `*Env` structs are dependency-injection seams whose
 # fields are `Arc<dyn Fn(...) + Send + Sync>` callbacks — each signature is a

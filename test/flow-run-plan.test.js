@@ -107,6 +107,36 @@ describe('runPlan', () => {
   it('is null for a cycle', () => {
     expect(runPlan(graph(['n1', 'n2'], [['n1', 'n2'], ['n2', 'n1']]))).toBe(null)
   })
+
+  // terminals — the same node ids the Rust twin's run_plan.rs pins, so a
+  // flow's sinks read the same on both sides of the port.
+  it('terminals is every node when there are no edges at all', () => {
+    const plan = runPlan(graph(['n1', 'n2', 'n3']))
+    expect(plan.terminals).toEqual(['n1', 'n2', 'n3'])
+  })
+
+  it('terminals is only the fan-in sink, not the fan-out nodes feeding it', () => {
+    const flow = graph(
+      ['n1', 'n2', 'n3', 'n4'],
+      [
+        ['n1', 'n2'],
+        ['n1', 'n3'],
+        ['n2', 'n4'],
+        ['n3', 'n4'],
+      ]
+    )
+    expect(runPlan(flow).terminals).toEqual(['n4'])
+  })
+
+  it('terminals lists every leaf of a branching graph, in order order', () => {
+    const plan = runPlan(graph(['n1', 'n2', 'n3'], [['n1', 'n2'], ['n1', 'n3']]))
+    expect(plan.terminals).toEqual(['n2', 'n3'])
+  })
+
+  it('terminals ignores a dangling edge so the real node still counts', () => {
+    const plan = runPlan(graph(['n1', 'n2'], [['n1', 'ghost']]))
+    expect(plan.terminals).toEqual(['n1', 'n2'])
+  })
 })
 
 describe('nextActions — what may start', () => {

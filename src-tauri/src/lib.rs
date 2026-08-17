@@ -9,7 +9,11 @@ mod confine;
 mod custom_agents;
 mod eventlog;
 mod events;
+mod export;
 mod flow;
+// The tauri-touching half of `tome-flow`'s injected `RunnerEnv` seam — see
+// this module's own doc comment for the split (plan step 2.1).
+mod flow_env;
 mod fs;
 mod git;
 mod ipc;
@@ -38,7 +42,9 @@ mod migrate;
 mod protocol;
 mod pty;
 mod pty_authority;
+mod remote;
 mod review;
+mod schedule;
 mod skills;
 mod state;
 mod store;
@@ -207,6 +213,60 @@ fn boot_auth_and_airgap<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         .load_repo_consents(&dir.join("airgap-repo-consents.json"));
 }
 
+/// Spawns the in-app scheduler's 30-second tick loop (plan §Flow products
+/// pipeline step 1.7) and stores its `AbortHandle` on `AppState.
+/// schedule_ticker` so the quit handshake below (`abort_schedule_ticker`)
+/// can cancel it. Called once from `.setup()`, after `boot_auth_and_airgap`
+/// — order does not matter functionally (the ticker only ever reads
+/// `AppState.locked`/`app_data_dir` per tick, never anything
+/// `boot_auth_and_airgap` seeds once at startup), but keeping every
+/// boot-time background task's spawn call in one place, right after the
+/// other one, is easier to audit than scattering them through `.setup()`.
+///
+/// `tokio::time::interval`'s default first tick fires immediately (not
+/// after the first 30s) — deliberately left as-is rather than skipped: a
+/// schedule that has never run is due the moment anything checks (see
+/// `schedule::next_due`'s doc comment), so there is no reason to make a
+/// fresh install wait out a whole extra period before its first schedule
+/// can fire.
+fn spawn_schedule_ticker(app: &tauri::AppHandle) {
+    let app_handle = app.clone();
+    let join = tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            ipc::schedules::run_tick(&app_handle).await;
+        }
+    });
+    let state = app.state::<AppState>();
+    *state
+        .schedule_ticker
+        .lock()
+        .expect("AppState.schedule_ticker lock poisoned") = Some(join.inner().abort_handle());
+}
+
+/// Cancels the scheduler's tick loop — the quit-time counterpart to
+/// [`spawn_schedule_ticker`], called from the `CloseRequested` handler right
+/// alongside `shutdown_all_proxies` (that function's own relock-timer drain
+/// is "the existing timer drain" this one is deliberately kept next to,
+/// rather than folded INTO a function named for proxies specifically). A
+/// scheduled run's own already-spawned child processes are reaped
+/// separately by `flow::runner::kill_all` (called right after, in `run()`'s
+/// quit path) regardless — this function's only job is making sure the
+/// ticker itself stops POLLING once the app is on its way down, rather than
+/// firing `flow::runner::start_run` into a process that is mid-exit.
+/// Idempotent: `Option::take` leaves nothing for a second call to abort.
+fn abort_schedule_ticker(state: &AppState) {
+    if let Some(handle) = state
+        .schedule_ticker
+        .lock()
+        .expect("AppState.schedule_ticker lock poisoned")
+        .take()
+    {
+        handle.abort();
+    }
+}
+
 /// Shuts down every live pane proxy (loopback listener + any established
 /// tunnels) and cancels every pending auto-relock timer — the quit-time
 /// half of `closeAll()` (`airgap.js`'s own doc comment: "proxies are
@@ -289,6 +349,7 @@ pub fn run() {
             // module doc comment.
             migrate::run(app.handle());
             boot_auth_and_airgap(app.handle());
+            spawn_schedule_ticker(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -357,6 +418,21 @@ pub fn run() {
             ipc::runs::runs_start,
             ipc::runs::runs_cancel,
             ipc::runs::runs_list,
+            // export destinations (and the runs-pane Export action)
+            ipc::export::export_destinations,
+            ipc::export::export_consent,
+            ipc::export::export_revoke,
+            ipc::export::runs_export,
+            // schedules (in-app scheduler)
+            ipc::schedules::schedules_list,
+            ipc::schedules::schedules_set,
+            ipc::schedules::schedules_delete,
+            // remote run visibility (plan phase 3)
+            ipc::remote::remote_sources,
+            ipc::remote::remote_consent,
+            ipc::remote::remote_revoke,
+            ipc::remote::remote_runs,
+            ipc::remote::remote_run_detail,
             // stt
             ipc::stt::stt_transcribe,
             ipc::stt::stt_warmup,
@@ -510,6 +586,7 @@ pub fn run() {
                 // would keep its loopback port bound, and any of its live
                 // tunnels would keep piping bytes, past process exit.
                 shutdown_all_proxies(&state);
+                abort_schedule_ticker(&state);
                 // Matches index.js's `will-quit`/`window-all-closed` both
                 // calling `flowRunner.killAll()` — a background flow run's
                 // headless node processes are their own process-group

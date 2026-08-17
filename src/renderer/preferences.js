@@ -3,7 +3,7 @@
 // persisted keys the original surfaces use, so nothing drifts out of sync.
 import { tome, el, toast } from './util.js'
 import { prefs } from './state.js'
-import { modalShell } from './modals.js'
+import { modalShell, confirmModal } from './modals.js'
 import { setTheme, themeState, THEME_ORDER, THEME_GLYPH } from './theme.js'
 import { TERM_FONT, setTermFontSize } from './panels/terminal.js'
 import { editorPrefs, setEditorPrefs } from './panels/editor.js'
@@ -194,6 +194,377 @@ export async function buildAgentsSection() {
   section.appendChild(form)
   section.appendChild(err)
   return section
+}
+
+// ---- export destinations ----
+// Consent-gated remote/local targets a finished run's promoted products can
+// be copied to (panels/runs.js's Export… button). Every record here is an
+// `export-destinations.json` entry main hashed at consent time
+// (export_consent, src-tauri/src/export.rs) — this section only ever lists
+// what main already verified and only ever adds through that same consent
+// path, so a destination shown here can never disagree with what main will
+// actually use.
+export async function buildExportSection(closePreferences) {
+  const section = el('section', 'prefs-section')
+  section.append(el('h4', '', 'Export destinations'))
+  const list = el('div', 'prefs-agents')
+  section.appendChild(list)
+
+  const renderRows = async () => {
+    list.innerHTML = ''
+    let destinations = []
+    try {
+      destinations = await tome.exportDest.list()
+    } catch (err) {
+      list.appendChild(el('div', 'prefs-hint', err.message))
+      return
+    }
+    if (!destinations.length) {
+      const empty = el('div', 'prefs-hint', 'No export destinations yet — add one below.')
+      empty.style.padding = '4px 0'
+      list.appendChild(empty)
+    }
+    for (const d of destinations) {
+      const r = el('div', 'prefs-row')
+      const text = el('div', 'prefs-text')
+      text.append(el('span', 'prefs-label', d.label))
+      text.append(
+        el(
+          'span',
+          'prefs-hint',
+          d.kind === 'http'
+            ? `${d.method} ${d.url}${d.authBearer ? ' · authenticated' : ''}`
+            : `${d.tool} · ${d.target}`
+        )
+      )
+      const remove = el('button', 'ag-btn ghost', 'Remove')
+      remove.type = 'button'
+      remove.addEventListener('click', async () => {
+        await tome.exportDest.revoke(d.id)
+        await renderRows()
+        toast(`removed ${d.label}`, 'ok')
+      })
+      r.append(text, remove)
+      list.appendChild(r)
+    }
+  }
+  await renderRows()
+
+  const add = el('button', 'ag-btn ghost', 'Add destination…')
+  add.type = 'button'
+  add.addEventListener('click', () => {
+    // modalShell keeps exactly one overlay at a time (its own doc comment)
+    // — a nested form has to take Preferences' place, same as "Enroll
+    // authenticator" / "Replay setup wizard" below already do.
+    closePreferences?.()
+    openAddDestinationModal()
+  })
+  section.appendChild(add)
+  return section
+}
+
+// Custom multi-field form built directly on modalShell (the shared
+// prompt/choice/confirm helpers each cover a single value, not a form this
+// shaped) — the same field(label, control) idiom panels/flow.js's node
+// editor modal uses. Submitting restates exactly what will be consented to
+// in a separate confirmModal before ever calling export_consent — the same
+// "state it back before granting" discipline repo-airgap.js's consentModal
+// applies to the repo-allowlist flow, except here the content being
+// consented to is fresh user input rather than something main already read
+// and hashed, so the restatement is the only guard against a typo'd
+// URL/target.
+function openAddDestinationModal() {
+  const m = modalShell('Add export destination')
+  const field = (label, control) => {
+    m.body.appendChild(el('label', 'flow-field-label', label))
+    m.body.appendChild(control)
+    return control
+  }
+
+  const kindSelect = field('Kind', el('select'))
+  for (const [value, text] of [
+    ['http', 'HTTP'],
+    ['sftp', 'SFTP'],
+  ]) {
+    const opt = el('option', null, text)
+    opt.value = value
+    kindSelect.appendChild(opt)
+  }
+
+  const labelInput = field('Label', el('input'))
+  labelInput.type = 'text'
+  labelInput.placeholder = 'e.g. Staging bucket'
+
+  const httpGroup = el('div', 'prefs-export-group')
+  const urlInput = el('input')
+  urlInput.type = 'text'
+  urlInput.placeholder = 'https://example.com/uploads'
+  httpGroup.append(el('label', 'flow-field-label', 'URL'), urlInput)
+  const methodSelect = el('select')
+  for (const v of ['PUT', 'POST']) {
+    const opt = el('option', null, v)
+    opt.value = v
+    methodSelect.appendChild(opt)
+  }
+  httpGroup.append(el('label', 'flow-field-label', 'Method'), methodSelect)
+  const authInput = el('input')
+  authInput.type = 'password'
+  authInput.placeholder = 'bearer token (optional)'
+  httpGroup.append(el('label', 'flow-field-label', 'Authorization'), authInput)
+  m.body.appendChild(httpGroup)
+
+  const sftpGroup = el('div', 'prefs-export-group')
+  const targetInput = el('input')
+  targetInput.type = 'text'
+  targetInput.placeholder = 'user@host:/path'
+  sftpGroup.append(el('label', 'flow-field-label', 'Target'), targetInput)
+  const toolSelect = el('select')
+  for (const v of ['scp', 'rsync']) {
+    const opt = el('option', null, v)
+    opt.value = v
+    toolSelect.appendChild(opt)
+  }
+  sftpGroup.append(el('label', 'flow-field-label', 'Tool'), toolSelect)
+  m.body.appendChild(sftpGroup)
+
+  const paintKind = () => {
+    httpGroup.classList.toggle('hidden', kindSelect.value !== 'http')
+    sftpGroup.classList.toggle('hidden', kindSelect.value !== 'sftp')
+  }
+  kindSelect.addEventListener('change', paintKind)
+  paintKind()
+
+  m.button('Continue', async () => {
+    const kind = kindSelect.value
+    const label = labelInput.value.trim()
+    // Whichever of URL/Target belongs to the picked kind — kept as one
+    // value through validation and the restated confirmation text, then
+    // routed back into the right named field only in the consent() call
+    // below, where url and target are genuinely two different columns.
+    const primary = kind === 'http' ? urlInput.value.trim() : targetInput.value.trim()
+    if (!label || !primary) {
+      m.err.textContent = `label and ${kind === 'http' ? 'URL' : 'target'} are required`
+      return
+    }
+    m.close()
+    const restated = kind === 'http' ? `${methodSelect.value} ${primary}` : `${toolSelect.value} ${primary}`
+    if (!(await confirmModal('Add export destination', `${label} — ${restated}`, 'Add'))) return
+    try {
+      await tome.exportDest.consent({
+        kind,
+        label,
+        url: kind === 'http' ? primary : undefined,
+        method: kind === 'http' ? methodSelect.value : undefined,
+        authBearer: kind === 'http' ? authInput.value.trim() || undefined : undefined,
+        target: kind === 'sftp' ? primary : undefined,
+        tool: kind === 'sftp' ? toolSelect.value : undefined,
+      })
+      toast('export destination added', 'ok')
+    } catch (err) {
+      toast(err.message)
+    }
+  })
+  m.button('Cancel', () => m.close(), 'ghost')
+}
+
+// ---- schedules ----
+// The in-app scheduler (flow.js's Schedule… button, schedule.rs): every row
+// here is a flow-schedules.json record main already hashed at schedules_set
+// time. Main ticks every 30s, always air-gapped, and re-verifies the hash
+// on every tick — a mismatch suspends the schedule rather than run content
+// nobody reviewed, which is the state "Re-consent" below clears by calling
+// schedules_set again with the schedule's own current fields (there is no
+// separate reconsent command — see ipc/schedules.rs's own doc comment).
+export async function buildSchedulesSection() {
+  const section = el('section', 'prefs-section')
+  section.append(el('h4', '', 'Schedules'))
+  section.append(el('div', 'prefs-hint', 'flows scheduled from the Flow panel — always air-gapped, all times UTC'))
+  const list = el('div', 'prefs-agents')
+  section.appendChild(list)
+
+  const describeWhen = (when) =>
+    when.kind === 'interval'
+      ? `every ${when.minutes} minute${when.minutes === 1 ? '' : 's'}`
+      : `daily at ${String(when.hour).padStart(2, '0')}:${String(when.minute).padStart(2, '0')} UTC`
+
+  const renderRows = async () => {
+    list.innerHTML = ''
+    let schedules = []
+    try {
+      schedules = await tome.schedules.list()
+    } catch (err) {
+      list.appendChild(el('div', 'prefs-hint', err.message))
+      return
+    }
+    if (!schedules.length) {
+      const empty = el('div', 'prefs-hint', 'No schedules yet — use Schedule… on a flow.')
+      empty.style.padding = '4px 0'
+      list.appendChild(empty)
+    }
+    for (const s of schedules) {
+      const r = el('div', 'prefs-row')
+      const text = el('div', 'prefs-text')
+      text.append(el('span', 'prefs-label', s.flowPath.split('/').pop()))
+      const suspendedNote = s.suspended ? ` · suspended: ${s.suspended}` : ''
+      text.append(el('span', 'prefs-hint', `${describeWhen(s.when)}${s.enabled ? '' : ' · disabled'}${suspendedNote}`))
+
+      const controls = el('div', 'prefs-inline')
+      if (s.suspended) {
+        // The flow file changed since this schedule's own last consent — a
+        // fresh schedules_set call re-reads and re-hashes it now, clearing
+        // the suspension only if that succeeds.
+        const reconsent = el('button', 'ag-btn ghost', 'Re-consent')
+        reconsent.type = 'button'
+        reconsent.addEventListener('click', async () => {
+          try {
+            await tome.schedules.set({ id: s.id, flowPath: s.flowPath, when: s.when, enabled: s.enabled })
+            await renderRows()
+            toast('schedule re-consented', 'ok')
+          } catch (err) {
+            toast(err.message)
+          }
+        })
+        controls.appendChild(reconsent)
+      } else {
+        const sw = el('button', 'prefs-switch' + (s.enabled ? ' on' : ''))
+        sw.type = 'button'
+        sw.setAttribute('role', 'switch')
+        sw.setAttribute('aria-checked', String(s.enabled))
+        sw.append(el('span', 'prefs-knob'))
+        sw.addEventListener('click', async () => {
+          try {
+            await tome.schedules.set({ id: s.id, flowPath: s.flowPath, when: s.when, enabled: !s.enabled })
+            await renderRows()
+          } catch (err) {
+            toast(err.message)
+          }
+        })
+        controls.appendChild(sw)
+      }
+      const remove = el('button', 'ag-btn ghost', 'Delete')
+      remove.type = 'button'
+      remove.addEventListener('click', async () => {
+        await tome.schedules.delete(s.id)
+        await renderRows()
+        toast('schedule deleted', 'ok')
+      })
+      controls.appendChild(remove)
+
+      r.append(text, controls)
+      list.appendChild(r)
+    }
+  }
+  await renderRows()
+  return section
+}
+
+// ---- remote sources ----
+// Consent-gated ssh destinations panels/runs.js's "Remote" section reads
+// from (remote_runs/remote_run_detail, src-tauri/src/remote.rs). Every row
+// here is a remote-sources.json entry main already hashed at
+// remote_consent time — this section only ever lists what main already
+// verified and only ever adds through that same consent path, mirroring
+// buildExportSection immediately above almost exactly (see that function's
+// doc comment for the shape this one repeats).
+export async function buildRemoteSourcesSection(closePreferences) {
+  const section = el('section', 'prefs-section')
+  section.append(el('h4', '', 'Remote sources'))
+  section.append(
+    el('div', 'prefs-hint', 'ssh-reachable machines whose flow runs show up under Runs → Remote — read-only')
+  )
+  const list = el('div', 'prefs-agents')
+  section.appendChild(list)
+
+  const renderRows = async () => {
+    list.innerHTML = ''
+    let sources = []
+    try {
+      sources = await tome.remote.sources()
+    } catch (err) {
+      list.appendChild(el('div', 'prefs-hint', err.message))
+      return
+    }
+    if (!sources.length) {
+      const empty = el('div', 'prefs-hint', 'No remote sources yet — add one below.')
+      empty.style.padding = '4px 0'
+      list.appendChild(empty)
+    }
+    for (const s of sources) {
+      const r = el('div', 'prefs-row')
+      const text = el('div', 'prefs-text')
+      text.append(el('span', 'prefs-label', s.label))
+      text.append(el('span', 'prefs-hint', `${s.host} · ${s.repoPath}`))
+      const remove = el('button', 'ag-btn ghost', 'Remove')
+      remove.type = 'button'
+      remove.addEventListener('click', async () => {
+        await tome.remote.revoke(s.id)
+        await renderRows()
+        toast(`removed ${s.label}`, 'ok')
+      })
+      r.append(text, remove)
+      list.appendChild(r)
+    }
+  }
+  await renderRows()
+
+  const add = el('button', 'ag-btn ghost', 'Add remote source…')
+  add.type = 'button'
+  add.addEventListener('click', () => {
+    // modalShell keeps exactly one overlay at a time — a nested form has to
+    // take Preferences' place, same as "Add destination…" above.
+    closePreferences?.()
+    openAddRemoteSourceModal()
+  })
+  section.appendChild(add)
+  return section
+}
+
+// Label/Host/Repository-path form on modalShell — the same field(label,
+// control) idiom openAddDestinationModal (above) uses. Submitting restates
+// exactly what will be consented to in a separate confirmModal before ever
+// calling remote_consent: main never re-verifies host/repoPath against
+// anything external (unlike the repo-allowlist flow's file hash — see
+// remote.rs's own doc comment, "self-referential, same as
+// export::Destination"), so this restatement is the only guard against a
+// typo'd host or path.
+function openAddRemoteSourceModal() {
+  const m = modalShell('Add remote source')
+  const field = (label, control) => {
+    m.body.appendChild(el('label', 'flow-field-label', label))
+    m.body.appendChild(control)
+    return control
+  }
+
+  const labelInput = field('Label', el('input'))
+  labelInput.type = 'text'
+  labelInput.placeholder = 'e.g. Build server'
+
+  const hostInput = field('Host', el('input'))
+  hostInput.type = 'text'
+  hostInput.placeholder = 'ssh alias or user@host'
+
+  const repoInput = field('Repository path', el('input'))
+  repoInput.type = 'text'
+  repoInput.placeholder = '/abs/path/on/that/host'
+
+  m.button('Continue', async () => {
+    const label = labelInput.value.trim()
+    const host = hostInput.value.trim()
+    const repoPath = repoInput.value.trim()
+    if (!label || !host || !repoPath) {
+      m.err.textContent = 'label, host, and repository path are required'
+      return
+    }
+    m.close()
+    if (!(await confirmModal('Add remote source', `${label} — ${host}:${repoPath}`, 'Add'))) return
+    try {
+      await tome.remote.consent({ label, host, repoPath })
+      toast('remote source added', 'ok')
+    } catch (err) {
+      toast(err.message)
+    }
+  })
+  m.button('Cancel', () => m.close(), 'ghost')
 }
 
 // Label on the left, control on the right.
@@ -529,6 +900,15 @@ export async function preferencesModal() {
   })
   row(security, 'Two-factor authentication', enroll, 'required to open an air-gapped pane')
   m.body.appendChild(security)
+
+  // ---------- export destinations ----------
+  m.body.appendChild(await buildExportSection(m.close))
+
+  // ---------- schedules ----------
+  m.body.appendChild(await buildSchedulesSection())
+
+  // ---------- remote sources ----------
+  m.body.appendChild(await buildRemoteSourcesSection(m.close))
 
   // ---------- voice ----------
   // Whisper availability + the launch warm-up opt-in the onboarding wizard's

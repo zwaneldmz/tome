@@ -1213,7 +1213,8 @@ body.tree-anim #tree {
 .flow-add-node,
 .flow-save,
 .flow-run,
-.flow-open-text {
+.flow-open-text,
+.flow-schedule {
   color: var(--accent);
   background: transparent;
   border: 1px solid var(--line);
@@ -1225,7 +1226,8 @@ body.tree-anim #tree {
   white-space: nowrap;
 }
 .flow-add-node:hover,
-.flow-open-text:hover {
+.flow-open-text:hover,
+.flow-schedule:hover {
   border-color: var(--accent-ring);
   background: var(--accent-soft);
 }
@@ -1569,6 +1571,14 @@ body.tree-anim #tree {
   display: contents;
 }
 .flow-model-field.hidden {
+  display: none;
+}
+/* Same toggle-handle idiom as .flow-model-field, for the Schedule… modal's
+   interval-vs-daily field groups (panels/flow.js's scheduleFlowAction). */
+.flow-schedule-field {
+  display: contents;
+}
+.flow-schedule-field.hidden {
   display: none;
 }
 .flow-modal-ports {
@@ -2423,6 +2433,17 @@ canvas.brain-graph {
   grid-column: 2;
   justify-self: end;
 }
+/* export destinations: the add-destination modal's kind-specific field
+   groups (openAddDestinationModal) — display:contents keeps each label/
+   control pair a direct flex item of .ag-body, same idiom .flow-model-field
+   (this file, flow node editor section) uses for its own Kind-driven
+   toggle. */
+.prefs-export-group {
+  display: contents;
+}
+.prefs-export-group.hidden {
+  display: none;
+}
 
 /* ---- onboarding wizard ---- */
 /* modalShell with a wider box, a dot-per-step header row, and a footer that
@@ -3093,6 +3114,23 @@ canvas.brain-graph {
   border-color: var(--line-2);
   cursor: default;
 }
+/* Same footprint as .runs-cancel, accent instead of destructive-red: this one
+   only ever copies bytes somewhere, it never touches the run itself. */
+.runs-export {
+  flex: none;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 3px 10px;
+  font: inherit;
+  font-size: var(--fs-micro);
+  cursor: pointer;
+}
+.runs-export:hover {
+  border-color: var(--accent-ring);
+  background: var(--accent-soft);
+}
 /* The pipeline can be wider than the pane — it scrolls sideways rather than
    wrapping, because a layer that wrapped would stop meaning "one column, one
    step of the graph". */
@@ -3257,6 +3295,122 @@ canvas.brain-graph {
 .runs-empty {
   color: var(--muted);
   padding: 8px 15px;
+}
+
+/* ---- remote run visibility (plan phase 3) ----
+   A second, independent section under the local runs list — one group per
+   consented remote source. Rows reuse .runs-row/.runs-badge/.runs-st-*/
+   .runs-flow/.runs-id/.runs-when/.runs-caret verbatim (the same pill styles
+   the local list already established), so a remote row and a local row read
+   as the same kind of object; only the group chrome and the expanded detail
+   body below are new.
+
+   .runs-remote itself gets its OWN scroll, capped rather than sharing
+   .runs-list's flex:1 growth budget, so a source with a long history can
+   never squeeze the local list down to nothing — same "own scroll, own cap"
+   idiom .runs-log-body already uses below. */
+.runs-remote:not(:empty) {
+  flex: 0 1 auto; /* never grows into .runs-list's flex:1 budget, but still
+                     shrinks (its own overflow-y below handles the rest) if
+                     the pane itself is too short for both regions at once */
+  max-height: 40vh;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+  padding: 6px 6px 10px;
+}
+.runs-remote-empty {
+  color: var(--muted);
+  padding: 8px 15px;
+  font-size: var(--fs-meta);
+}
+.runs-remote-group + .runs-remote-group {
+  margin-top: 10px;
+}
+.runs-remote-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+}
+.runs-remote-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--fs-meta);
+}
+/* Same divider .runs-run + .runs-run draws between local rows — reaches
+   past the (always-present, often-empty) detail div rather than a plain
+   adjacent-sibling rule, since that div sits between every pair of rows. */
+.runs-remote-detail + .runs-row {
+  border-top: 1px solid var(--line);
+}
+.runs-remote-rows .runs-row.open {
+  background: var(--hover);
+}
+/* Same disclosure affordance as .runs-row.open .runs-caret. */
+.runs-remote-rows .runs-row.open .runs-caret {
+  transform: rotate(90deg);
+}
+.runs-remote-detail:not(:empty) {
+  padding: 2px 15px 12px 37px; /* aligned under the row's flow/when text, past the caret+badge */
+  overflow-x: auto; /* a long node name must scroll the table sideways, never widen the pane */
+}
+.runs-remote-loading {
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+.runs-remote-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.runs-remote-nodes {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-micro);
+}
+.runs-remote-nodes th {
+  text-align: left;
+  color: var(--faint);
+  font-weight: 500;
+  padding: 2px 8px 2px 0;
+  border-bottom: 1px solid var(--line);
+}
+.runs-remote-nodes td {
+  padding: 3px 8px 3px 0;
+  color: var(--text);
+  border-bottom: 1px solid var(--line);
+}
+.runs-remote-node-st {
+  font-family: var(--mono);
+}
+.runs-remote-node-st.runs-st-done {
+  color: var(--g-add);
+}
+.runs-remote-node-st.runs-st-failed {
+  color: var(--g-del);
+}
+.runs-remote-products h5 {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.runs-remote-hint {
+  color: var(--faint);
+  font-size: var(--fs-micro);
+}
+.runs-remote-product-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
 }
 
 /* ================= app lock ================= */

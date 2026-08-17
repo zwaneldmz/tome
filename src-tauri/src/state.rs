@@ -198,6 +198,17 @@ pub struct AppState {
     /// borrow, never from a `tokio::spawn`'d background task outliving that
     /// borrow, so no `Arc` wrapper is needed.
     pub mentor: crate::mentor::Mentor,
+
+    /// The in-app scheduler's one 30-second tick loop —
+    /// `lib.rs::spawn_schedule_ticker` spawns it once at boot and stores its
+    /// `AbortHandle` here so `lib.rs`'s quit handshake can cancel it, the
+    /// same `Mutex<Option<AbortHandle>>` shape [`relock_timers`](Self::relock_timers)
+    /// uses for its own per-pane timers — a single slot rather than a map
+    /// here, since this crate ever spawns exactly one such ticker per
+    /// process, never one per pane. `None` until `spawn_schedule_ticker`
+    /// runs, and again after the quit handler's `Option::take` cancels it —
+    /// a second quit-path call finds nothing left to abort.
+    pub schedule_ticker: Mutex<Option<AbortHandle>>,
 }
 
 impl AppState {
@@ -219,6 +230,7 @@ impl AppState {
             flow: std::sync::Arc::new(flow::Runner::new()),
             conductor: std::sync::Arc::new(conductor::Conductor::new()),
             mentor: crate::mentor::Mentor::new(),
+            schedule_ticker: Mutex::new(None),
         }
     }
 }

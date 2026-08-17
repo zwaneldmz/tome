@@ -19,7 +19,7 @@
 pub mod env;
 pub mod spawn;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -28,7 +28,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 
 use self::env::{RunnerEnv, SandboxWrap};
-use super::{confine, model, run_plan};
+use super::{confine, model, products, run_plan};
 use crate::agent_spawn;
 
 // ---- live state ----
@@ -43,6 +43,18 @@ struct NodeState {
     ended: Option<String>,
     exit: Option<i32>,
     log: PathBuf,
+    /// Declared output names (`node.outputs[].name`, the literal string
+    /// "undefined" for an unnamed one — mirrors `compose_bootstrap_prompt`'s
+    /// own fallback, which in turn mirrors the JS twin's raw, un-fallback'd
+    /// template-literal interpolation byte for byte), filled in at plan
+    /// time. What the exit-await closure's fail-closed output contract
+    /// checks against once this node exits 0 — see `launch`'s doc comment
+    /// on that check. Load-bearing that this matches `compose_bootstrap_
+    /// prompt` exactly: this is the same string the composed brief actually
+    /// told the agent to write its output to, so a divergence here would
+    /// have the contract check a different filename than the one the agent
+    /// was ever instructed to create.
+    outputs: Vec<String>,
     /// `[cmd, ...args]` — `agent_spawn::build_headless_spawn`'s output,
     /// resolved once at `start_run` time (mirrors `node.spawn` in JS).
     inner_argv: Vec<String>,
@@ -59,6 +71,12 @@ struct RunState {
     flow_path: String,
     root: PathBuf,
     dir: PathBuf,
+    /// `dir.join("artifacts")` — where this run's nodes hand off outputs
+    /// (`.tome/flows/<flow>/runs/<id>/artifacts`), created alongside `dir`
+    /// at `start_run` time. Absolute, like `dir`/`root`; the ROOT-RELATIVE
+    /// string every composed brief actually embeds is built once, before
+    /// this even exists on disk, from the same `id` (see `start_run`).
+    artifacts_dir: PathBuf,
     gapped: bool,
     status: String,
     started: String,
@@ -74,6 +92,17 @@ struct RunState {
     /// the rest of this struct's fields): it is held across `.await` points
     /// deliberately, which a `std::sync::Mutex` guard must never be.
     scheduling_lock: Arc<tokio::sync::Mutex<()>>,
+    /// The promoted-products list — `None` until (and unless) this run
+    /// settles `"done"` AND its own background promotion
+    /// ([`products::promote_and_manifest`], spawned from
+    /// [`settle_if_done`]) finishes; stays `None` forever for any run that
+    /// settles any other way, and also on a promotion FAILURE (see
+    /// [`spawn_promotion`]'s doc comment — promotion failing never touches
+    /// `status`, so this is the only observable trace of that failure
+    /// besides the logged event). One entry per terminal-node output
+    /// actually copied into `out/<id>/` once set — see `flow::products`'s
+    /// module doc comment for the full shape.
+    products: Option<Value>,
 }
 
 struct RunnerInner {
@@ -85,6 +114,9 @@ struct RunnerInner {
     /// does. This is what makes that possible.
     order: Vec<String>,
     runs: HashMap<String, RunState>,
+    /// Ids [`new_run_id`] has minted but whose `RunState` isn't in `runs`
+    /// yet — see [`ReservedId`]'s doc comment for the race this closes.
+    reserved_ids: HashSet<String>,
 }
 
 /// The live run registry — `AppState.flow`. Every run this session has
@@ -100,6 +132,7 @@ impl Runner {
             inner: std::sync::Mutex::new(RunnerInner {
                 order: Vec::new(),
                 runs: HashMap::new(),
+                reserved_ids: HashSet::new(),
             }),
         }
     }
@@ -151,7 +184,13 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 
 /// Timestamp-based and base36, so ids sort chronologically and are safe as
 /// a directory name without escaping. The suffix loop covers two runs
-/// landing in the same millisecond.
+/// landing in the same millisecond — checked against both `inner.runs`
+/// (ids already registered) AND `inner.reserved_ids` (ids a concurrent
+/// `start_run` call has minted but not registered yet — see
+/// [`ReservedId`]'s doc comment): a caller MUST hold `runs.inner`'s lock
+/// across both this call and the matching `reserved_ids.insert`, or the
+/// whole point of checking the reservation set here is lost to the same
+/// check-then-act gap this closes in the registered-ids case.
 fn new_run_id(inner: &RunnerInner) -> String {
     let millis = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -160,11 +199,45 @@ fn new_run_id(inner: &RunnerInner) -> String {
     let base = to_base36(millis);
     let mut id = base.clone();
     let mut n = 2;
-    while inner.runs.contains_key(&id) {
+    while inner.runs.contains_key(&id) || inner.reserved_ids.contains(&id) {
         id = format!("{base}-{n}");
         n += 1;
     }
     id
+}
+
+/// Holds `id` in `runs.inner.reserved_ids` for as long as this guard is
+/// alive, releasing it on drop — whichever way `start_run` leaves: the
+/// common path (the real `RunState` lands in `inner.runs`, making the
+/// reservation redundant — dropping it right after is a no-op, never a
+/// gap, since the insert always happens first) or any of its own several
+/// early refusals between minting `id` and that insert (a node kind with
+/// no headless template, a confine failure, a mkdir failure).
+///
+/// Exists because `new_run_id` only checks collision against ids already
+/// in `inner.runs`/`inner.reserved_ids` at the INSTANT it is called —
+/// `start_run` mints `id` under a lock it releases immediately, then
+/// crosses several real `.await` points (confining and creating the run
+/// dir and artifacts dir, reading the airgap-default preference) before
+/// the matching `inner.runs.insert` far below. No caller serializes
+/// concurrent `start_run` invocations (an ordinary click on Run in the UI
+/// and the 30s schedule ticker are two independent async tasks on the same
+/// tokio runtime, gated only by `lock_gate` — a locked-app check, not a
+/// mutex) — without a reservation held across that whole span, two calls
+/// minting in the same millisecond would both compute the identical id,
+/// and the second `inner.runs.insert` would silently clobber the first
+/// run's live registry entry (its exit-await task would keep updating a
+/// `RunState` nothing can look up by that id anymore).
+struct ReservedId {
+    runs: Arc<Runner>,
+    id: String,
+}
+
+impl Drop for ReservedId {
+    fn drop(&mut self) {
+        let mut inner = self.runs.inner.lock().expect("Runner lock poisoned");
+        inner.reserved_ids.remove(&self.id);
+    }
 }
 
 fn to_base36(mut n: u128) -> String {
@@ -237,7 +310,9 @@ fn run_snapshot(r: &RunState) -> Value {
         "started": r.started,
         "ended": r.ended,
         "layers": r.plan.layers,
+        "terminals": r.plan.terminals,
         "nodes": nodes,
+        "products": r.products,
     })
 }
 
@@ -383,6 +458,31 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
         return json!({"error": "flow has a cycle — cannot run"});
     };
 
+    // Minted AND reserved under the SAME lock acquisition — see
+    // `ReservedId`'s doc comment for the concurrent-`start_run` race this
+    // closes. Every node's composed brief embeds this run's own artifacts
+    // directory (below), which needs `id` before any brief can be built.
+    // Harmless to mint this early even on a refusal further down: nothing
+    // is inserted into the VISIBLE registry until the run is actually
+    // accepted, and `_reserved`'s `Drop` releases the reservation the
+    // moment this function returns, whichever way it does.
+    let id = {
+        let mut inner = runs.inner.lock().expect("Runner lock poisoned");
+        let id = new_run_id(&inner);
+        inner.reserved_ids.insert(id.clone());
+        id
+    };
+    let _reserved = ReservedId {
+        runs: runs.clone(),
+        id: id.clone(),
+    };
+    // ROOT-RELATIVE — a headless node's spawn cwd is `root` itself (below),
+    // so this is exactly the string `compose_bootstrap_prompt` embeds in
+    // every handoff path. Run-scoped so two runs of the same flow, or a
+    // background run racing a terminal-mode one, never contend for the same
+    // handoff file.
+    let artifacts_dir_rel = format!(".tome/flows/{}/runs/{id}/artifacts", flow.name);
+
     // Every command line is built BEFORE anything is spawned or written. A
     // flow with one node whose kind has no headless template is refused
     // WHOLE and by name.
@@ -391,7 +491,7 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
     let mut specs: HashMap<String, Vec<String>> = HashMap::new();
     for node_id in &plan.order {
         let node = node_by_id[node_id.as_str()];
-        let brief = model::compose_bootstrap_prompt(&flow, node);
+        let brief = model::compose_bootstrap_prompt(&flow, node, &artifacts_dir_rel);
         match agent_spawn::build_headless_spawn(&node.kind, node.model.as_deref(), Some(&brief)) {
             Some(spawn_spec) => {
                 let mut argv = vec![spawn_spec.cmd];
@@ -412,10 +512,6 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
         }
     }
 
-    let id = {
-        let inner = runs.inner.lock().expect("Runner lock poisoned");
-        new_run_id(&inner)
-    };
     let dir = root
         .join(".tome")
         .join("flows")
@@ -429,6 +525,16 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
         return json!({"error": "could not create the run folder: run folder escapes the workspace"});
     }
     if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+        return json!({"error": format!("could not create the run folder: {e}")});
+    }
+    let artifacts_dir = dir.join("artifacts");
+    if confine::confine_real_abs(&root, &artifacts_dir, false)
+        .await
+        .is_none()
+    {
+        return json!({"error": "could not create the run folder: artifacts folder escapes the workspace"});
+    }
+    if let Err(e) = tokio::fs::create_dir_all(&artifacts_dir).await {
         return json!({"error": format!("could not create the run folder: {e}")});
     }
 
@@ -450,6 +556,11 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
                 ended: None,
                 exit: None,
                 log: dir.join(log_name(node_id, i)),
+                outputs: node
+                    .outputs
+                    .iter()
+                    .map(|o| o.name.clone().unwrap_or_else(|| "undefined".to_string()))
+                    .collect(),
                 inner_argv: specs.remove(node_id).unwrap_or_default(),
                 pid: None,
                 kill_fn: None,
@@ -472,6 +583,7 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
         flow_path: flow_path.clone(),
         root,
         dir,
+        artifacts_dir,
         gapped,
         status: "running".to_string(),
         started,
@@ -482,6 +594,7 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
         nodes,
         write_tx,
         scheduling_lock: Arc::new(tokio::sync::Mutex::new(())),
+        products: None,
     };
 
     {
@@ -601,7 +714,18 @@ fn pump(runs: Arc<Runner>, env: RunnerEnv, id: String) -> Pin<Box<dyn Future<Out
 
 async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str) {
     let pane_id = run_plan::run_pane_id(run_id, node_id);
-    let (root, gapped, inner_argv, log_path, node_name, node_kind, node_model, node_started) = {
+    let (
+        root,
+        gapped,
+        inner_argv,
+        log_path,
+        node_name,
+        node_kind,
+        node_model,
+        node_started,
+        artifacts_dir,
+        node_outputs,
+    ) = {
         let inner = runs.inner.lock().expect("Runner lock poisoned");
         let Some(r) = inner.runs.get(run_id) else {
             return;
@@ -618,6 +742,8 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
             n.kind.clone(),
             n.model.clone(),
             n.started.clone(),
+            r.artifacts_dir.clone(),
+            n.outputs.clone(),
         )
     };
 
@@ -751,6 +877,9 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
             let node_id2 = node_id.to_string();
             let pane_id2 = pane_id.clone();
             let log2 = log.clone();
+            let root2 = root.clone();
+            let artifacts_dir2 = artifacts_dir.clone();
+            let node_outputs2 = node_outputs.clone();
             let exit_rx = spawned.exit;
             tokio::spawn(async move {
                 let outcome = exit_rx.await.unwrap_or(spawn::ExitOutcome {
@@ -777,6 +906,49 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
                         }
                     }
                 }
+                // The fail-closed output contract: an exit-0 process still
+                // hasn't kept its side of the flow unless every output it
+                // DECLARED actually landed on disk with real content — the
+                // runner is the only reader positioned to check before a
+                // downstream node's own composed brief promises a file that
+                // was never really written (or was left a stale empty
+                // truncation from a crashed earlier attempt). Skipped
+                // entirely on a non-zero/signal exit: the process already
+                // failed on its own terms, and a second reason on top would
+                // only bury the one that matters in the log. `contract_lines`
+                // becoming non-empty is the ONLY new way a node's exit code
+                // can read `Some(0)` and still settle "failed" — see the
+                // status computation below.
+                let mut contract_lines: Vec<String> = Vec::new();
+                if outcome.code == Some(0) {
+                    for name in &node_outputs2 {
+                        let abs = artifacts_dir2.join(format!("{node_id2}-{name}.md"));
+                        // `must_exist: false` — the whole point is that the
+                        // file may not exist at all; this still validates
+                        // every ANCESTOR (the artifacts dir itself) is real
+                        // and inside `root2`, so a symlink swapped in after
+                        // `start_run` created it can't be used to claim a
+                        // write that never really landed inside the run.
+                        let len = match confine::confine_real_abs(&root2, &abs, false).await {
+                            Some(confined) => {
+                                tokio::fs::metadata(&confined).await.ok().map(|m| m.len())
+                            }
+                            None => None,
+                        };
+                        if len.unwrap_or(0) == 0 {
+                            let rel = artifacts_dir2
+                                .strip_prefix(&root2)
+                                .unwrap_or(&artifacts_dir2)
+                                .to_string_lossy()
+                                .into_owned();
+                            let path = model::handoff_path(&rel, &node_id2, name);
+                            contract_lines.push(format!(
+                                r#"# contract: missing or empty output "{name}" ({path})"#
+                            ));
+                        }
+                    }
+                }
+
                 let trailer = match outcome.code {
                     Some(c) => format!("# exit {c}\n"),
                     None => format!(
@@ -791,7 +963,28 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
                     let mut guard = log2.lock().await;
                     if let Some(mut f) = guard.take() {
                         use tokio::io::AsyncWriteExt;
+                        // Contract lines first, exit trailer last — the log
+                        // reads as "here's what's wrong, here's how it
+                        // ended", never the other way around.
+                        for line in &contract_lines {
+                            let _ = f.write_all(line.as_bytes()).await;
+                            let _ = f.write_all(b"\n").await;
+                        }
                         let _ = f.write_all(trailer.as_bytes()).await;
+                        // Flush before `f` drops (and before `set_status`
+                        // below flips this node's status and notifies
+                        // listeners) — same reasoning as `write_to_log`'s
+                        // own flush: a reader that opens the log the moment
+                        // it observes the status flip (the runs pane's log
+                        // tail, a remote `ssh cat`, a tight polling test)
+                        // must not find a log with neither the contract
+                        // line nor the exit trailer just because the write
+                        // was still sitting in tokio's buffer when the flip
+                        // woke it — a lost race on a loaded CI runner, and
+                        // exactly the "why did this fail? the log says
+                        // nothing" outcome the fail-closed contract exists
+                        // to prevent.
+                        let _ = f.flush().await;
                     }
                 }
                 (env2.close_agent_env)(&pane_id2);
@@ -808,7 +1001,7 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
                 // blame the flow for the user's own Cancel click.
                 let status = if canceling_now {
                     "canceled"
-                } else if outcome.code == Some(0) {
+                } else if outcome.code == Some(0) && contract_lines.is_empty() {
                     "done"
                 } else {
                     "failed"
@@ -906,7 +1099,7 @@ fn set_status(
     (env.log_event)("flow-run", fields);
 }
 
-fn settle_if_done(runs: &Runner, env: &RunnerEnv, run_id: &str) {
+fn settle_if_done(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str) {
     let settled = {
         let mut inner = runs.inner.lock().expect("Runner lock poisoned");
         let Some(r) = inner.runs.get_mut(run_id) else {
@@ -932,12 +1125,57 @@ fn settle_if_done(runs: &Runner, env: &RunnerEnv, run_id: &str) {
         r.status = final_status.to_string();
         r.ended = Some(now_iso8601());
         let flow_name = r.flow.clone();
+        // Gathered now, while `r` is still in hand, rather than a second
+        // registry lookup once this block ends — plain owned data is all
+        // `flow::products::promote_and_manifest` needs to do its whole job
+        // (see that module's doc comment on staying runner-agnostic).
+        // `None` for anything but a `"done"` settlement: a canceled or
+        // failed run has nothing worth promoting, and `products.rs`'s own
+        // binding decision is explicit that this only ever runs on
+        // success.
+        let promote_req = (final_status == "done").then(|| {
+            let mut terminal_outputs = Vec::new();
+            for tid in &r.plan.terminals {
+                if let Some(n) = r.nodes.iter().find(|n| &n.id == tid) {
+                    for name in &n.outputs {
+                        terminal_outputs.push(products::TerminalOutput {
+                            node_id: n.id.clone(),
+                            output_name: name.clone(),
+                        });
+                    }
+                }
+            }
+            products::PromoteRequest {
+                root: r.root.clone(),
+                flow_name: r.flow.clone(),
+                flow_path: PathBuf::from(r.flow_path.clone()),
+                run_id: run_id.to_string(),
+                started: r.started.clone(),
+                ended: r.ended.clone().expect("just set above"),
+                airgap: r.gapped,
+                artifacts_dir: r.artifacts_dir.clone(),
+                nodes: r
+                    .nodes
+                    .iter()
+                    .map(|n| products::ManifestNode {
+                        id: n.id.clone(),
+                        kind: n.kind.clone(),
+                        model: n.model.clone(),
+                        status: n.status.clone(),
+                        exit: n.exit,
+                        started: n.started.clone(),
+                        ended: n.ended.clone(),
+                    })
+                    .collect(),
+                terminal_outputs,
+            }
+        });
         // `r`'s mutable borrow ends here — see set_status's identical note.
         persist(&inner, run_id);
         push(env, &inner);
-        Some((flow_name, final_status.to_string()))
+        Some((flow_name, final_status.to_string(), promote_req))
     };
-    let Some((flow_name, final_status)) = settled else {
+    let Some((flow_name, final_status, promote_req)) = settled else {
         return;
     };
     (env.log_event)(
@@ -949,6 +1187,60 @@ fn settle_if_done(runs: &Runner, env: &RunnerEnv, run_id: &str) {
             ("status".to_string(), json!(final_status)),
         ],
     );
+    if let Some(req) = promote_req {
+        spawn_promotion(runs.clone(), env.clone(), run_id.to_string(), req);
+    }
+}
+
+/// Runs after a run settles `"done"` — [`products::promote_and_manifest`]
+/// copies each terminal node's declared outputs into `out/<id>/`, writes
+/// `manifest.json`, refreshes `out/latest/`, and appends `runs-index.json`
+/// (see that module's own doc comment for the full contract). Detached
+/// from `settle_if_done` itself (a `tokio::spawn`, never awaited inline):
+/// the run has already settled and been pushed by the time this is called,
+/// and promotion's own file IO — usually small, but not bounded — is not
+/// something any caller of `settle_if_done` (`pump`'s own exit-await
+/// chain among them) should have to block behind.
+///
+/// Its own failure never reaches back to `RunState.status`: on `Err` this
+/// only logs an event and leaves `RunState.products` at its default
+/// `None` ("null" over the wire, exactly as if promotion had never run at
+/// all) — a run that finished on its own terms must not be retroactively
+/// reported as failed by bookkeeping layered on top of it. On `Ok`, this
+/// is the second `persist`/`push` the binding decision calls for: the
+/// first (inside `settle_if_done`, above) already put `"done"` in front of
+/// the user; this one is what makes `run.json` and the renderer catch up
+/// with the final product list.
+fn spawn_promotion(
+    runs: Arc<Runner>,
+    env: RunnerEnv,
+    run_id: String,
+    req: products::PromoteRequest,
+) {
+    tokio::spawn(async move {
+        match products::promote_and_manifest(req).await {
+            Ok(products_value) => {
+                {
+                    let mut inner = runs.inner.lock().expect("Runner lock poisoned");
+                    if let Some(r) = inner.runs.get_mut(&run_id) {
+                        r.products = Some(products_value);
+                    }
+                }
+                persist_and_push(&runs, &env, &run_id);
+            }
+            Err(msg) => {
+                (env.log_event)(
+                    "flow-run",
+                    vec![
+                        ("event".to_string(), json!("products")),
+                        ("run".to_string(), json!(run_id)),
+                        ("status".to_string(), json!("failed")),
+                        ("error".to_string(), json!(msg)),
+                    ],
+                );
+            }
+        }
+    });
 }
 
 // ---- cancel / kill ----

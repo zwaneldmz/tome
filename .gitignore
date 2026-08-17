@@ -25,6 +25,7 @@ docs/*
 !docs/THREATMODEL.md
 !docs/perf.md
 !docs/LINUX-LANDLOCK-DESIGN.md
+!docs/remote-runner.md
 .agents/
 .superpowers/
 src-tauri/target/
