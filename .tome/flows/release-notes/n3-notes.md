@@ -1,45 +1,38 @@
-# Tome — release notes (since v0.1.0)
+# Tome — unreleased (changes since v0.2.0)
 
-**Flows now run in the background.** Run executes the whole pipeline headless:
-a node starts only once every upstream exits 0, at most two at a time, one
-`claude -p` per node — spawned argv-style, no shell near the brief, inside the
-same air gap a pane would get. Logs and `run.json` land under
-`.tome/flows/<name>/runs/<id>/`; every transition is recorded in the event log.
-Cancel signals each node's process group (SIGTERM, then SIGKILL); quitting the
-app reaps orphans.
+## Breaking changes
 
-**A new Flow runs pane** draws each run pipeline-style: layers as columns,
-status pills with connectors, live per-node log tails, air-gap state on every
-row. The status bar counts live runs. The flow panel's Run is now a split
-button — background by default, "Run in terminals" keeps the gated-pane path.
-Dirty flows save first; the runner reads the file, not the screen.
+None. One naming change to know about: the safety boundary formerly called the **air gap** is now the **containment cell** (#12) — it's an OS sandbox plus an allowlisted loopback proxy, not a true air gap, and the docs now say so. The rename is docs-only: config files (`airgap.json` and friends in the app data directory) and all settings are unchanged, and existing setups keep working.
 
-The contract is narrow and written down: a flow submits only the composed
-brief, only on Run.
+## New
 
-**Pin a model per node.** A node can pin a same-family model (claude: sonnet /
-opus / haiku / fable) — set in the node editor's Model select, shown on the
-card badge ("claude · haiku"), respawned with restored layouts. The spawn line
-is literals plus the allowlist's own copies — an incoming value is compared,
-never interpolated; off-list values fall back to the CLI default with a
-warning.
+### Mentor mode
 
-## Fixes
+Tome's assistant can now teach instead of just doing. Turn on mentor mode (per workspace, or globally as the default) and the assistant works from a catalog of bundled skills, pausing at key moments to check your understanding with short test gates — multiple choice, true/false, short answer, or code. Multiple-choice and true/false answers are scored locally; short-answer and code answers are judged by the model. A Skip button always lets you through, and a small understanding-score ring in the status bar tracks how you're doing. There's also a comprehension gate before `git commit` and `git push`: explain the change in your own words before it ships. Which gates are active is configurable in Mentor settings.
 
-- Flow panel: wiring an edge updates the toolbar's edge count, the "no nodes
-  yet" placeholder comes and goes when it should, and port labels no longer
-  print over the kind badge.
-- `brain.js` path checks no longer throw `ReferenceError` on an untested
-  branch (`sep` was never imported); the eslint globals allowlist catches up
-  with Node 18 and browser APIs.
+Mentor mode also brings a **review report**: a read-only pane that summarizes your session's local signals into an LLM-written report, which you can promote into the workspace's brain.
 
-## Docs
+### Git, without leaving the app
 
-- The how-Tome-works tour is rebuilt as one clickable worked example — empty
-  workspace to audited event log, through the shipped review-pipeline flow.
-  Self-contained, keyboard-navigable, AA-contrast in both themes.
-- The flows feature on film: a 62-second uncut recording of the real app
-  building a flow — nodes, edges, a pinned model, save — plus four current
-  stills.
+Stage files, write commits, and push from a new commit UI, with the optional mentor gate described above in front of commit and push.
 
-Suite: 254 tests green.
+### Command palette
+
+Quick-open grew into a command palette on `Cmd/Ctrl+K`: files, open panes, and app actions in one place.
+
+### Meet Viibi
+
+A small mascot now lives in the status bar and mirrors what the app is doing — resting when idle, reading while flows or chat are busy, on guard while the containment cell is holding, and visibly unhappy when something is blocked or failing. Click it for a companion popover.
+
+### More chat providers
+
+- **DeepSeek** (V4 Pro and V4 Flash) joins the built-in provider list.
+- A **custom provider** slot accepts any OpenAI- or Anthropic-compatible endpoint: set the base URL, model, and key in Preferences → Assistant. The key is stored alongside the other providers' keys in the app's store.
+
+## Fixed
+
+- **Saved layouts now restore.** A guard bug made layout restore silently do nothing on every launch. Restoring also no longer produces duplicate terminal tabs, and background tabs and slow-loading panes (like a saved flow tab) survive a restart instead of being dropped.
+
+## Internal
+
+CI was overhauled end to end — hardened GitHub workflows with format/lint/audit gates, Rust checks on macOS, macOS signing and notarization verification, a wider Linux sandbox test matrix plus a Fedora proof, and a new GitLab pipeline — alongside a tooling migration from npm to bun, dependency upgrades, a workspace-wide rustfmt pass, and refreshed docs and screenshots for the current build (#10–#13).
