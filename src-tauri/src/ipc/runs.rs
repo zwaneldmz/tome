@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
 
 use crate::flow;
+use crate::flow_env;
 use crate::lock_gate;
 use crate::state::AppState;
 
@@ -49,7 +50,7 @@ use crate::state::AppState;
 ///
 /// `airgap_default` is resolved ONCE here, then frozen into the
 /// `RunnerEnv` handed to `start_run` via
-/// [`crate::flow::runner::env::frozen_airgap_default`] — see that
+/// [`crate::flow_env::frozen_airgap_default`] — see that
 /// function's own doc comment for why re-reading the store a second,
 /// independent time (inside `start_run`) would reopen a narrow TOCTOU gap
 /// this gate is specifically meant to close.
@@ -71,10 +72,10 @@ pub async fn runs_start(
 ) -> Result<Value, String> {
     lock_gate::guard(&state, "runs:start")?;
 
-    let mut env = flow::runner::env::production_env(app.clone());
+    let mut env = flow_env::production_env(app.clone());
     let effective_gapped = (env.airgap_default)().await;
     // Freeze it — see `frozen_airgap_default`'s doc comment.
-    env.airgap_default = flow::runner::env::frozen_airgap_default(effective_gapped);
+    env.airgap_default = flow_env::frozen_airgap_default(effective_gapped);
 
     if !effective_gapped {
         let auth_configured = state
@@ -151,7 +152,7 @@ pub async fn runs_cancel(
 ) -> Result<Value, String> {
     lock_gate::guard(&state, "runs:cancel")?;
     let runs = app.state::<AppState>().inner().flow.clone();
-    let env = flow::runner::env::production_env(app);
+    let env = flow_env::production_env(app);
     Ok(flow::runner::cancel_run(&runs, &env, &id))
 }
 
@@ -177,7 +178,7 @@ mod tests {
     // `pty_authority::unrestricted_spawn_needs_reauth`) is reused, not
     // duplicated, from `ipc::pty`/`pty_authority`, which carry that
     // logic's own test coverage; `frozen_airgap_default`'s own test
-    // (`flow::runner::env::tests`) covers the one piece of genuinely new
+    // (`flow_env::tests`) covers the one piece of genuinely new
     // logic this command adds. A `#[tauri::command]` fn cannot be called
     // directly without a live `AppHandle`/`State` (this crate enables no
     // `tauri` `test` feature — see `confine.rs`'s doc comment on the same

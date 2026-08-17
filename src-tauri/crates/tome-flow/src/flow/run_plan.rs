@@ -106,16 +106,24 @@ pub struct RunPlan {
     pub layers: Vec<Vec<String>>,
     pub order: Vec<String>,
     pub parents: HashMap<String, Vec<String>>,
+    /// Node ids with no outgoing edge — the run's own sinks — in `order`
+    /// order. A dangling edge doesn't count as "outgoing" any more than it
+    /// counts toward `parents` below: the node on its `from` end never
+    /// really depends on anything downstream of a reference `validateFlow`
+    /// already refused.
+    pub terminals: Vec<String>,
 }
 
 pub fn run_plan(node_ids: &[String], edges: &[(String, String)]) -> Option<RunPlan> {
     let ls = layers(node_ids, edges)?;
     let mut parents: HashMap<String, Vec<String>> =
         node_ids.iter().map(|id| (id.clone(), Vec::new())).collect();
+    let mut has_outgoing: HashSet<String> = HashSet::new();
     for (from, to) in edges {
         if !parents.contains_key(to) || !parents.contains_key(from) {
             continue; // dangling, as above
         }
+        has_outgoing.insert(from.clone());
         let list = parents.get_mut(to).expect("checked above");
         // Two edges between the same pair (different ports) are one
         // dependency, not two.
@@ -123,11 +131,17 @@ pub fn run_plan(node_ids: &[String], edges: &[(String, String)]) -> Option<RunPl
             list.push(from.clone());
         }
     }
-    let order = ls.iter().flatten().cloned().collect();
+    let order: Vec<String> = ls.iter().flatten().cloned().collect();
+    let terminals: Vec<String> = order
+        .iter()
+        .filter(|id| !has_outgoing.contains(id.as_str()))
+        .cloned()
+        .collect();
     Some(RunPlan {
         layers: ls,
         order,
         parents,
+        terminals,
     })
 }
 
@@ -462,6 +476,44 @@ mod tests {
     fn run_plan_is_none_for_a_cycle() {
         let (ids, edges) = graph(&["n1", "n2"], &[("n1", "n2"), ("n2", "n1")]);
         assert!(run_plan(&ids, &edges).is_none());
+    }
+
+    // ---- run_plan — terminals ----
+
+    #[test]
+    fn run_plan_terminals_is_every_node_when_there_are_no_edges_at_all() {
+        let (ids, edges) = graph(&["n1", "n2", "n3"], &[]);
+        let plan = run_plan(&ids, &edges).unwrap();
+        assert_eq!(plan.terminals, vec!["n1", "n2", "n3"]);
+    }
+
+    #[test]
+    fn run_plan_terminals_is_only_the_fan_in_sink_not_the_fan_out_nodes() {
+        let (ids, edges) = graph(
+            &["n1", "n2", "n3", "n4"],
+            &[("n1", "n2"), ("n1", "n3"), ("n2", "n4"), ("n3", "n4")],
+        );
+        let plan = run_plan(&ids, &edges).unwrap();
+        assert_eq!(plan.terminals, vec!["n4".to_string()]);
+    }
+
+    #[test]
+    fn run_plan_terminals_lists_every_leaf_of_a_branching_graph_in_order_order() {
+        // n1 -> n2, n1 -> n3: two leaves, n2 and n3, both terminal.
+        let (ids, edges) = graph(&["n1", "n2", "n3"], &[("n1", "n2"), ("n1", "n3")]);
+        let plan = run_plan(&ids, &edges).unwrap();
+        assert_eq!(plan.terminals, vec!["n2".to_string(), "n3".to_string()]);
+    }
+
+    #[test]
+    fn run_plan_terminals_ignores_a_dangling_edge_so_the_real_node_still_counts() {
+        // n1's only edge points at a node that doesn't exist — validateFlow
+        // already refuses a flow shaped like this, but this function stays
+        // total rather than crediting n1 with an outgoing edge it doesn't
+        // really have.
+        let (ids, edges) = graph(&["n1", "n2"], &[("n1", "ghost")]);
+        let plan = run_plan(&ids, &edges).unwrap();
+        assert_eq!(plan.terminals, vec!["n1".to_string(), "n2".to_string()]);
     }
 
     // ---- next_actions — what may start ----

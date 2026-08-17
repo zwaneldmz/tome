@@ -272,19 +272,25 @@ export function topoSort(flow) {
   return order.map((id) => nodeById.get(id))
 }
 
-function handoffPath(flowName, nodeId, outputName) {
-  return `.tome/flows/${flowName}/${nodeId}-${outputName}.md`
+// `artifactsDir` is a ROOT-RELATIVE directory string — a spawned node's cwd
+// is the flow root (flowRoot below), so every handoff path is relative to
+// it. Run-scoped (".tome/flows/<flow>/runs/<runId>/artifacts", minted by
+// runFlow/runInTerminals below) so two runs of the same flow — background or
+// terminal-mode, one after another or racing each other — never contend for
+// the same handoff file.
+function handoffPath(artifactsDir, nodeId, outputName) {
+  return `${artifactsDir}/${nodeId}-${outputName}.md`
 }
 
 // Where Run spawns its terminals. composeBootstrapPrompt's handoff paths
-// (".tome/flows/<name>/<node>-<output>.md") are relative to whatever folder
-// contains this flow's own ".tome" — not to the flow.json's own folder,
-// which is two levels deeper (".tome/flows/"). A flow saved under a
-// workspace's .tome walks back up to that workspace root; a hand-placed
-// flow.json that was never put under a .tome at all (e.g. a test fixture, or
-// one dragged in from elsewhere) falls back to its own directory so Run
-// still has *some* cwd to spawn into, even though the handoff paths it types
-// won't resolve to anything meaningful in that case.
+// (".tome/flows/<name>/runs/<runId>/artifacts/<node>-<output>.md") are
+// relative to whatever folder contains this flow's own ".tome" — not to the
+// flow.json's own folder, which is two levels deeper (".tome/flows/"). A
+// flow saved under a workspace's .tome walks back up to that workspace root;
+// a hand-placed flow.json that was never put under a .tome at all (e.g. a
+// test fixture, or one dragged in from elsewhere) falls back to its own
+// directory so Run still has *some* cwd to spawn into, even though the
+// handoff paths it types won't resolve to anything meaningful in that case.
 export function flowRoot(path) {
   const marker = '/.tome/'
   // lastIndexOf, not indexOf: a flow.json can sit inside a nested workspace
@@ -305,8 +311,10 @@ export function flowRoot(path) {
 // (they already know how to write a file), is inspectable on disk, and
 // needs nothing beyond the existing pty.write. Incoming-edge lines point at
 // the *upstream* node's handoff path so a downstream agent knows exactly
-// which file to read instead of guessing a name.
-export function composeBootstrapPrompt(flow, node) {
+// which file to read instead of guessing a name. `artifactsDir` — see
+// handoffPath above — is threaded straight through to every handoff path
+// this brief embeds, upstream and downstream alike.
+export function composeBootstrapPrompt(flow, node, artifactsDir) {
   const nodeById = new Map(flow.nodes.map((n) => [n.id, n]))
   const incoming = flow.edges.filter((e) => e.to === node.id)
   const outputs = node.outputs || []
@@ -321,7 +329,7 @@ export function composeBootstrapPrompt(flow, node) {
   for (const edge of incoming) {
     const upstream = nodeById.get(edge.from)
     const upstreamName = upstream ? upstream.name : edge.from
-    const path = handoffPath(flow.name, edge.from, edge.fromOutput)
+    const path = handoffPath(artifactsDir, edge.from, edge.fromOutput)
     // The label is optional and in practice almost always missing — the
     // edge-drag UI writes label: '' (flow.js) and nothing edits it afterwards
     // — so it can't be interpolated unconditionally: that typed a literal
@@ -340,11 +348,11 @@ export function composeBootstrapPrompt(flow, node) {
   lines.push('')
   if (outputs.length === 0) {
     lines.push(
-      `Hand off by writing each output to .tome/flows/${flow.name}/${node.id}-<output name>.md, then tell the user when you're done.`
+      `Hand off by writing each output to ${artifactsDir}/${node.id}-<output name>.md, then tell the user when you're done.`
     )
   } else {
     for (const output of outputs) {
-      const path = handoffPath(flow.name, node.id, output.name)
+      const path = handoffPath(artifactsDir, node.id, output.name)
       lines.push(`Hand off "${output.name}" by writing it to ${path}, then tell the user when you're done.`)
     }
   }

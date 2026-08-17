@@ -23,11 +23,32 @@
 
 /// Every `app_data_dir` filename main itself writes outside the JSON store:
 /// the egress allowlist (`airgap.json`), the auth file (`airgap-auth.json`),
-/// the repo-consent file (`airgap-repo-consents.json`), and the persistent
-/// event log (`events.jsonl`, `events.rs`). None may ever be named by a
-/// store key, at any lock state — a `store_set` on one of these would let
+/// the repo-consent file (`airgap-repo-consents.json`), the export
+/// destinations file (`export-destinations.json`, `export.rs` — hash-pinned
+/// consent records for where a finished run's promoted products may be
+/// copied), the persistent event log (`events.jsonl`, `events.rs`), and the
+/// in-app scheduler's own hash-pinned schedule store
+/// (`flow-schedules.json`, `schedule.rs` — a `store_set` on this key could
+/// otherwise forge a schedule whose `flowSha1` was never actually verified
+/// against the flow file it claims to match, or silently flip
+/// `enabled`/clear `suspended` without going through `schedules_set`'s
+/// re-hash), and the remote-run-visibility source list
+/// (`remote-sources.json`, `remote.rs` — same shape of risk: a `store_set`
+/// on this key could forge a consented ssh destination whose `hash` was
+/// never actually verified against the record it claims to match, letting
+/// `remote_runs`/`remote_run_detail` be pointed at an arbitrary host/path
+/// without ever going through `remote_consent`). None may ever be named by
+/// a store key, at any lock state — a `store_set` on one of these would let
 /// the renderer overwrite a file main treats as its own.
-pub const RESERVED_KEYS: &[&str] = &["airgap", "airgap-auth", "airgap-repo-consents", "events"];
+pub const RESERVED_KEYS: &[&str] = &[
+    "airgap",
+    "airgap-auth",
+    "airgap-repo-consents",
+    "events",
+    "export-destinations",
+    "flow-schedules",
+    "remote-sources",
+];
 
 /// The only store key any pre-auth UI actually reads: the renderer boots
 /// theme state before lock-screen auth so the lock overlay paints in the

@@ -509,6 +509,12 @@ describe('flowRoot', () => {
 })
 
 describe('composeBootstrapPrompt', () => {
+  // Run-scoped, same shape flow-runner mints under
+  // .tome/flows/<name>/runs/<runId>/artifacts — a fixed stand-in run id here
+  // since these tests only care that whatever artifactsDir is passed in
+  // reaches every handoff path unchanged, not the id-minting scheme itself.
+  const ARTIFACTS_DIR = '.tome/flows/review-pipeline/runs/r1/artifacts'
+
   function pipeline() {
     const flow = createFlow('review-pipeline')
     const researcher = addNode(flow, {
@@ -535,23 +541,23 @@ describe('composeBootstrapPrompt', () => {
 
   it('opens with the node-name + flow-name header', () => {
     const { flow, editor } = pipeline()
-    expect(composeBootstrapPrompt(flow, editor)).toContain(
+    expect(composeBootstrapPrompt(flow, editor, ARTIFACTS_DIR)).toContain(
       'You are "Editor" in a Tome flow "review-pipeline".'
     )
   })
 
   it('includes an Instructions line', () => {
     const { flow, editor } = pipeline()
-    expect(composeBootstrapPrompt(flow, editor)).toContain('Instructions: Polish the report.')
+    expect(composeBootstrapPrompt(flow, editor, ARTIFACTS_DIR)).toContain('Instructions: Polish the report.')
   })
 
   it('lists each incoming edge under "You receive", pointing at the upstream handoff path', () => {
     const { flow, editor } = pipeline()
-    const prompt = composeBootstrapPrompt(flow, editor)
+    const prompt = composeBootstrapPrompt(flow, editor, ARTIFACTS_DIR)
     expect(prompt).toContain('You receive:')
     expect(prompt).toContain('The findings report from research.')
     expect(prompt).toContain(
-      '- "report" from Researcher: findings report (read from .tome/flows/review-pipeline/n1-report.md)'
+      `- "report" from Researcher: findings report (read from ${ARTIFACTS_DIR}/n1-report.md)`
     )
   })
 
@@ -561,8 +567,8 @@ describe('composeBootstrapPrompt', () => {
     // this is the line every real run actually pastes into the terminal.
     const { flow, editor } = pipeline()
     flow.edges[0].label = ''
-    const prompt = composeBootstrapPrompt(flow, editor)
-    expect(prompt).toContain('- "report" from Researcher (read from .tome/flows/review-pipeline/n1-report.md)')
+    const prompt = composeBootstrapPrompt(flow, editor, ARTIFACTS_DIR)
+    expect(prompt).toContain(`- "report" from Researcher (read from ${ARTIFACTS_DIR}/n1-report.md)`)
     expect(prompt).not.toContain('undefined')
   })
 
@@ -570,21 +576,21 @@ describe('composeBootstrapPrompt', () => {
     // The hand-written flow.json shape — the key simply isn't there.
     const { flow, editor } = pipeline()
     delete flow.edges[0].label
-    const prompt = composeBootstrapPrompt(flow, editor)
-    expect(prompt).toContain('- "report" from Researcher (read from .tome/flows/review-pipeline/n1-report.md)')
+    const prompt = composeBootstrapPrompt(flow, editor, ARTIFACTS_DIR)
+    expect(prompt).toContain(`- "report" from Researcher (read from ${ARTIFACTS_DIR}/n1-report.md)`)
     expect(prompt).not.toContain('undefined')
   })
 
   it('has no incoming-edge line for a node with no incoming edges', () => {
     const { flow, researcher } = pipeline()
-    const prompt = composeBootstrapPrompt(flow, researcher)
+    const prompt = composeBootstrapPrompt(flow, researcher, ARTIFACTS_DIR)
     expect(prompt).toContain('You receive:')
     expect(prompt).not.toContain('read from') // the marker unique to an edge-mapping line
   })
 
   it('lists produces + output names under "You must produce"', () => {
     const { flow, editor } = pipeline()
-    const prompt = composeBootstrapPrompt(flow, editor)
+    const prompt = composeBootstrapPrompt(flow, editor, ARTIFACTS_DIR)
     expect(prompt).toContain('You must produce:')
     expect(prompt).toContain('An edited report.')
     expect(prompt).toContain('- edited')
@@ -592,11 +598,11 @@ describe('composeBootstrapPrompt', () => {
 
   it('gives the handoff instruction with <nodeId>-<outputName>.md', () => {
     const { flow, editor, researcher } = pipeline()
-    expect(composeBootstrapPrompt(flow, editor)).toContain(
-      'Hand off "edited" by writing it to .tome/flows/review-pipeline/n2-edited.md, then tell the user when you\'re done.'
+    expect(composeBootstrapPrompt(flow, editor, ARTIFACTS_DIR)).toContain(
+      `Hand off "edited" by writing it to ${ARTIFACTS_DIR}/n2-edited.md, then tell the user when you're done.`
     )
-    expect(composeBootstrapPrompt(flow, researcher)).toContain(
-      'Hand off "report" by writing it to .tome/flows/review-pipeline/n1-report.md, then tell the user when you\'re done.'
+    expect(composeBootstrapPrompt(flow, researcher, ARTIFACTS_DIR)).toContain(
+      `Hand off "report" by writing it to ${ARTIFACTS_DIR}/n1-report.md, then tell the user when you're done.`
     )
   })
 
@@ -614,8 +620,89 @@ describe('composeBootstrapPrompt', () => {
       inputs: [{ name: 'in', description: 'anything' }],
       outputs: [],
     })
-    expect(composeBootstrapPrompt(flow, sink)).toContain(
-      'Hand off by writing each output to .tome/flows/sink-flow/n1-<output name>.md, then tell the user when you\'re done.'
+    const sinkArtifactsDir = '.tome/flows/sink-flow/runs/r1/artifacts'
+    expect(composeBootstrapPrompt(flow, sink, sinkArtifactsDir)).toContain(
+      `Hand off by writing each output to ${sinkArtifactsDir}/n1-<output name>.md, then tell the user when you're done.`
+    )
+  })
+
+  // ---- GOLDEN PROMPT — twin-drift guard ----
+  //
+  // The exact same fixture and exact same expected string are ALSO asserted
+  // in model.rs's own compose_bootstrap_prompt_golden_matches_the_js_twin_
+  // byte_for_byte, against the Rust composer. If the two ever disagree, one
+  // language's runner is pasting a different brief into a live agent than
+  // the other would have for the identical flow.json — this is the one test
+  // whose failure means exactly that, in either direction.
+  it('GOLDEN: composes the byte-identical prompt the Rust twin also pins', () => {
+    const flow = createFlow('demo')
+    addNode(flow, { kind: 'claude', name: 'Researcher', outputs: [{ name: 'notes' }] })
+    const writer = addNode(flow, {
+      kind: 'claude',
+      name: 'Writer',
+      instructions: 'Turn notes into a summary.',
+      expects: 'Notes on the topic.',
+      produces: 'A short summary.',
+      inputs: [{ name: 'notes' }],
+      outputs: [{ name: 'summary' }],
+    })
+    addEdge(flow, { from: 'n1', to: 'n2', fromOutput: 'notes', toInput: 'notes' })
+    const prompt = composeBootstrapPrompt(flow, writer, '.tome/flows/demo/runs/r1/artifacts')
+    expect(prompt).toBe(
+      [
+        'You are "Writer" in a Tome flow "demo".',
+        '',
+        'Instructions: Turn notes into a summary.',
+        '',
+        'You receive:',
+        'Notes on the topic.',
+        '- "notes" from Researcher (read from .tome/flows/demo/runs/r1/artifacts/n1-notes.md)',
+        '',
+        'You must produce:',
+        'A short summary.',
+        '- summary',
+        '',
+        "Hand off \"summary\" by writing it to .tome/flows/demo/runs/r1/artifacts/n2-summary.md, then tell the user when you're done.",
+      ].join('\n')
+    )
+  })
+
+  // The same twin-drift guard above, for the one gap it can't see: every
+  // node/output in that fixture is explicitly named, so a Rust composer
+  // that quietly swapped in a `name || id` (or `''`) fallback for this raw,
+  // un-fallback'd interpolation would still pass it. This fixture leaves
+  // every name field unset instead — the exact shape a hand-edited or
+  // tool-generated flow.json can legally have (validateFlow only warns,
+  // never errors, on a missing name) — and pins the literal "undefined"
+  // text a bare `${node.name}` etc. stringifies to. Also asserted in
+  // model.rs's own
+  // compose_bootstrap_prompt_golden_matches_the_js_twin_byte_for_byte_when_unnamed.
+  it('GOLDEN: composes the byte-identical prompt the Rust twin also pins, when unnamed', () => {
+    const flow = createFlow('shape')
+    addNode(flow, { kind: 'claude', outputs: [{}] }) // no name, no output name
+    const downstream = addNode(flow, {
+      kind: 'claude',
+      inputs: [{ name: 'in' }],
+      outputs: [{}], // no name, no output name
+    })
+    addEdge(flow, { from: 'n1', to: 'n2', toInput: 'in' }) // no fromOutput
+    const prompt = composeBootstrapPrompt(flow, downstream, '.tome/flows/shape/runs/r1/artifacts')
+    expect(prompt).toBe(
+      [
+        'You are "undefined" in a Tome flow "shape".',
+        '',
+        'Instructions: (none given)',
+        '',
+        'You receive:',
+        '(nothing declared)',
+        '- "undefined" from undefined (read from .tome/flows/shape/runs/r1/artifacts/n1-undefined.md)',
+        '',
+        'You must produce:',
+        '(nothing declared)',
+        '- undefined',
+        '',
+        "Hand off \"undefined\" by writing it to .tome/flows/shape/runs/r1/artifacts/n2-undefined.md, then tell the user when you're done.",
+      ].join('\n')
     )
   })
 })

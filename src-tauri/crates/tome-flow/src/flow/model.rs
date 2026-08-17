@@ -281,9 +281,9 @@ pub fn validate_flow(flow: &FlowDoc) -> ValidateResult {
 // ---- flowRoot ----
 
 /// Where Run spawns its nodes. `composeBootstrapPrompt`'s handoff paths
-/// (`.tome/flows/<name>/<node>-<output>.md`) are relative to whatever folder
-/// contains this flow's own `.tome` — not the `flow.json`'s own folder, two
-/// levels deeper.
+/// (`.tome/flows/<name>/runs/<runId>/artifacts/<node>-<output>.md`) are
+/// relative to whatever folder contains this flow's own `.tome` — not the
+/// `flow.json`'s own folder, two levels deeper.
 pub fn flow_root(path: &str) -> String {
     let marker = "/.tome/";
     if let Some(i) = path.rfind(marker) {
@@ -297,23 +297,42 @@ pub fn flow_root(path: &str) -> String {
 
 // ---- composeBootstrapPrompt ----
 
-fn handoff_path(flow_name: &str, node_id: &str, output_name: &str) -> String {
-    format!(".tome/flows/{flow_name}/{node_id}-{output_name}.md")
+/// `artifacts_dir` is a ROOT-RELATIVE directory string (a headless node's
+/// spawn cwd is the flow root — `flow_root` above) — `runner::start_run`
+/// mints one per run (`.tome/flows/<flow>/runs/<runId>/artifacts`) so two
+/// runs of the same flow, or a run racing a terminal-mode one, never
+/// contend for the same handoff file.
+pub fn handoff_path(artifacts_dir: &str, node_id: &str, output_name: &str) -> String {
+    format!("{artifacts_dir}/{node_id}-{output_name}.md")
 }
 
 /// Builds the text a headless node runs `-p` with — byte for byte what the
 /// canvas types into a terminal-mode Run, per this module's own contract
 /// (`flow-model.js`'s header: "the runs pane and this file share one
-/// definition of the brief").
-pub fn compose_bootstrap_prompt(flow: &FlowDoc, node: &FlowNode) -> String {
+/// definition of the brief"). `artifacts_dir` — see [`handoff_path`] — is
+/// threaded straight through to every handoff path this brief embeds,
+/// upstream and downstream alike.
+pub fn compose_bootstrap_prompt(flow: &FlowDoc, node: &FlowNode, artifacts_dir: &str) -> String {
     let node_by_id: HashMap<&str, &FlowNode> =
         flow.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
     let incoming: Vec<&FlowEdge> = flow.edges.iter().filter(|e| e.to == node.id).collect();
 
+    // `.unwrap_or("undefined")` below — not `.unwrap_or("")`, and not
+    // `display_name()`'s `name || id` — mirrors the JS twin exactly: a bare
+    // `${node.name}`/`${output.name}`/`${edge.fromOutput}` template-literal
+    // interpolation with no fallback of its own, which JS stringifies to
+    // the literal text "undefined" when the field is simply absent (every
+    // `name` field in the schema is optional — `validateFlow` only warns,
+    // never errors, on a missing one). Byte parity with the JS composer is
+    // this function's own documented contract (see the doc comment above),
+    // so an unnamed node/output/edge must render the same "undefined" text
+    // in both engines rather than Rust quietly being "nicer" about it and
+    // drifting from what the JS-composed brief — and this module's own
+    // GOLDEN tests below — actually say.
     let mut lines = Vec::new();
     lines.push(format!(
         "You are \"{}\" in a Tome flow \"{}\".",
-        node.display_name(),
+        node.name.as_deref().unwrap_or("undefined"),
         flow.name
     ));
     lines.push(String::new());
@@ -336,12 +355,12 @@ pub fn compose_bootstrap_prompt(flow: &FlowDoc, node: &FlowNode) -> String {
     for edge in &incoming {
         let upstream_name = node_by_id
             .get(edge.from.as_str())
-            .map(|n| n.display_name())
+            .map(|n| n.name.as_deref().unwrap_or("undefined"))
             .unwrap_or(edge.from.as_str());
         let path = handoff_path(
-            &flow.name,
+            artifacts_dir,
             &edge.from,
-            edge.from_output.as_deref().unwrap_or(""),
+            edge.from_output.as_deref().unwrap_or("undefined"),
         );
         let described = edge
             .label
@@ -351,7 +370,7 @@ pub fn compose_bootstrap_prompt(flow: &FlowDoc, node: &FlowNode) -> String {
             .unwrap_or_default();
         lines.push(format!(
             "- \"{}\" from {upstream_name}{described} (read from {path})",
-            edge.from_output.as_deref().unwrap_or("")
+            edge.from_output.as_deref().unwrap_or("undefined")
         ));
     }
     lines.push(String::new());
@@ -364,18 +383,21 @@ pub fn compose_bootstrap_prompt(flow: &FlowDoc, node: &FlowNode) -> String {
             .to_string(),
     );
     for output in &node.outputs {
-        lines.push(format!("- {}", output.name.as_deref().unwrap_or("")));
+        lines.push(format!(
+            "- {}",
+            output.name.as_deref().unwrap_or("undefined")
+        ));
     }
     lines.push(String::new());
     if node.outputs.is_empty() {
         lines.push(format!(
-            "Hand off by writing each output to .tome/flows/{}/{}-<output name>.md, then tell the user when you're done.",
-            flow.name, node.id
+            "Hand off by writing each output to {artifacts_dir}/{}-<output name>.md, then tell the user when you're done.",
+            node.id
         ));
     } else {
         for output in &node.outputs {
-            let name = output.name.as_deref().unwrap_or("");
-            let path = handoff_path(&flow.name, &node.id, name);
+            let name = output.name.as_deref().unwrap_or("undefined");
+            let path = handoff_path(artifacts_dir, &node.id, name);
             lines.push(format!(
                 "Hand off \"{name}\" by writing it to {path}, then tell the user when you're done."
             ));
@@ -563,13 +585,18 @@ mod tests {
     #[test]
     fn compose_bootstrap_prompt_includes_the_identity_line_and_handoff_path() {
         let mut n1 = node("n1", "claude");
+        // Named explicitly (rather than left `None`, `node()`'s default) —
+        // this test is about the identity line and handoff path showing up
+        // at all, not about the separate unnamed-fallback behavior the
+        // GOLDEN (unnamed) test below pins on its own.
+        n1.name = Some("n1".to_string());
         n1.outputs = vec![FlowPort {
             name: Some("out".to_string()),
         }];
         let f = doc("shape", vec![n1.clone()], vec![]);
-        let brief = compose_bootstrap_prompt(&f, &n1);
+        let brief = compose_bootstrap_prompt(&f, &n1, ".tome/flows/shape/runs/r1/artifacts");
         assert!(brief.contains("You are \"n1\" in a Tome flow \"shape\"."));
-        assert!(brief.contains(".tome/flows/shape/n1-out.md"));
+        assert!(brief.contains(".tome/flows/shape/runs/r1/artifacts/n1-out.md"));
     }
 
     #[test]
@@ -592,20 +619,129 @@ mod tests {
             label: None,
         };
         let f = doc("pipeline", vec![upstream, downstream.clone()], vec![edge]);
-        let brief = compose_bootstrap_prompt(&f, &downstream);
+        let brief =
+            compose_bootstrap_prompt(&f, &downstream, ".tome/flows/pipeline/runs/r1/artifacts");
         assert!(brief.contains("from Researcher"));
-        assert!(brief.contains(".tome/flows/pipeline/n1-notes.md"));
+        assert!(brief.contains(".tome/flows/pipeline/runs/r1/artifacts/n1-notes.md"));
     }
 
     #[test]
     fn compose_bootstrap_prompt_defaults_declare_nothing_when_absent() {
         let n1 = node("n1", "claude");
         let f = doc("x", vec![n1.clone()], vec![]);
-        let brief = compose_bootstrap_prompt(&f, &n1);
+        let brief = compose_bootstrap_prompt(&f, &n1, ".tome/flows/x/runs/r1/artifacts");
         assert!(brief.contains("(none given)"));
         assert!(brief.contains("(nothing declared)"));
-        assert!(
-            brief.contains("Hand off by writing each output to .tome/flows/x/n1-<output name>.md")
+        assert!(brief.contains(
+            "Hand off by writing each output to .tome/flows/x/runs/r1/artifacts/n1-<output name>.md"
+        ));
+    }
+
+    // ---- GOLDEN PROMPT — twin-drift guard ----
+    //
+    // The exact same fixture and exact same expected string are ALSO
+    // asserted in test/flow.test.js's own composeBootstrapPrompt describe
+    // block, against the JS composer. If the two ever disagree, one
+    // language's runner is pasting a different brief into a live agent
+    // than the other would have for the identical flow.json — this is the
+    // one test whose failure means exactly that, in either direction.
+    #[test]
+    fn compose_bootstrap_prompt_golden_matches_the_js_twin_byte_for_byte() {
+        let mut researcher = node("n1", "claude");
+        researcher.name = Some("Researcher".to_string());
+        researcher.outputs = vec![FlowPort {
+            name: Some("notes".to_string()),
+        }];
+        let mut writer = node("n2", "claude");
+        writer.name = Some("Writer".to_string());
+        writer.instructions = Some("Turn notes into a summary.".to_string());
+        writer.expects = Some("Notes on the topic.".to_string());
+        writer.produces = Some("A short summary.".to_string());
+        writer.inputs = vec![FlowPort {
+            name: Some("notes".to_string()),
+        }];
+        writer.outputs = vec![FlowPort {
+            name: Some("summary".to_string()),
+        }];
+        let edge = FlowEdge {
+            id: Some("e1".to_string()),
+            from: "n1".to_string(),
+            to: "n2".to_string(),
+            from_output: Some("notes".to_string()),
+            to_input: Some("notes".to_string()),
+            label: None,
+        };
+        let f = doc("demo", vec![researcher, writer.clone()], vec![edge]);
+        let brief = compose_bootstrap_prompt(&f, &writer, ".tome/flows/demo/runs/r1/artifacts");
+        assert_eq!(
+            brief,
+            concat!(
+                "You are \"Writer\" in a Tome flow \"demo\".\n",
+                "\n",
+                "Instructions: Turn notes into a summary.\n",
+                "\n",
+                "You receive:\n",
+                "Notes on the topic.\n",
+                "- \"notes\" from Researcher (read from .tome/flows/demo/runs/r1/artifacts/n1-notes.md)\n",
+                "\n",
+                "You must produce:\n",
+                "A short summary.\n",
+                "- summary\n",
+                "\n",
+                "Hand off \"summary\" by writing it to .tome/flows/demo/runs/r1/artifacts/n2-summary.md, then tell the user when you're done.",
+            )
+        );
+    }
+
+    // ---- GOLDEN PROMPT (unnamed) — the same twin-drift guard above, for
+    // the one gap it can't see: every node/output in that fixture is
+    // explicitly named, so a Rust composer that quietly swapped in
+    // `display_name()`'s `name || id` (or `.unwrap_or("")`) for the JS
+    // twin's raw, un-fallback'd interpolation still passed it. This
+    // fixture leaves every name field unset instead — the exact shape a
+    // hand-edited or tool-generated `flow.json` can legally have
+    // (`validateFlow` only warns, never errors, on a missing name) — and
+    // pins the literal "undefined" text JS's own `${node.name}` etc.
+    // stringify to. Expected string reconfirmed by actually running
+    // `composeBootstrapPrompt` from `src/shared/flow-model.js` against this
+    // identical fixture, not hand-derived.
+    #[test]
+    fn compose_bootstrap_prompt_golden_matches_the_js_twin_byte_for_byte_when_unnamed() {
+        let mut upstream = node("n1", "claude"); // no `name`
+        upstream.outputs = vec![FlowPort { name: None }]; // no output `name`
+        let mut downstream = node("n2", "claude"); // no `name`
+        downstream.inputs = vec![FlowPort {
+            name: Some("in".to_string()),
+        }];
+        downstream.outputs = vec![FlowPort { name: None }]; // no output `name`
+        let edge = FlowEdge {
+            id: Some("e1".to_string()),
+            from: "n1".to_string(),
+            to: "n2".to_string(),
+            from_output: None, // no `fromOutput`
+            to_input: Some("in".to_string()),
+            label: None,
+        };
+        let f = doc("shape", vec![upstream, downstream.clone()], vec![edge]);
+        let brief =
+            compose_bootstrap_prompt(&f, &downstream, ".tome/flows/shape/runs/r1/artifacts");
+        assert_eq!(
+            brief,
+            concat!(
+                "You are \"undefined\" in a Tome flow \"shape\".\n",
+                "\n",
+                "Instructions: (none given)\n",
+                "\n",
+                "You receive:\n",
+                "(nothing declared)\n",
+                "- \"undefined\" from undefined (read from .tome/flows/shape/runs/r1/artifacts/n1-undefined.md)\n",
+                "\n",
+                "You must produce:\n",
+                "(nothing declared)\n",
+                "- undefined\n",
+                "\n",
+                "Hand off \"undefined\" by writing it to .tome/flows/shape/runs/r1/artifacts/n2-undefined.md, then tell the user when you're done.",
+            )
         );
     }
 }

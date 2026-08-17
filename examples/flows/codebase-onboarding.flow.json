@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "name": "codebase-onboarding",
+  "nodes": [
+    {
+      "id": "n1",
+      "kind": "claude",
+      "name": "map-architecture",
+      "model": "haiku",
+      "instructions": "Map the codebase's shape: entry points, the main directories and what lives in each, and how the pieces talk to each other (imports, IPC, HTTP — whatever this repo uses).\nAnswer only \"how is this built\" — conventions and gotchas belong to your sibling nodes. Cite a real file path for every claim.",
+      "expects": "nothing — reads the repo directly",
+      "produces": "an architecture map: entry points, directory roles, how the pieces connect",
+      "inputs": [],
+      "outputs": [{ "name": "architecture" }],
+      "x": 40,
+      "y": 40
+    },
+    {
+      "id": "n2",
+      "kind": "claude",
+      "name": "map-conventions",
+      "model": "haiku",
+      "instructions": "Extract the working conventions: how to build, test, and lint (read the actual scripts, don't guess), naming and file-layout patterns the code already follows, and anything a CONTRIBUTING or CLAUDE.md file demands.\nAnswer only \"how do I work here\" — architecture and gotchas belong to your sibling nodes.",
+      "expects": "nothing — reads the repo directly",
+      "produces": "the working conventions: build/test/lint commands, patterns the code follows",
+      "inputs": [],
+      "outputs": [{ "name": "conventions" }],
+      "x": 40,
+      "y": 160
+    },
+    {
+      "id": "n3",
+      "kind": "claude",
+      "name": "find-gotchas",
+      "model": "haiku",
+      "instructions": "Hunt for what will bite a newcomer: TODO/HACK/FIXME comments that mark known ceilings, invariants enforced by comment rather than code, setup steps that fail silently when skipped, and any file where the comments warn you about the code.\nAnswer only \"what will surprise me\" — one line per gotcha with its file path.",
+      "expects": "nothing — reads the repo directly",
+      "produces": "a gotcha list: footguns, fragile invariants, setup traps — one line each with a path",
+      "inputs": [],
+      "outputs": [{ "name": "gotchas" }],
+      "x": 40,
+      "y": 280
+    },
+    {
+      "id": "n4",
+      "kind": "claude",
+      "name": "synthesize",
+      "instructions": "Merge the three reports into a single onboarding guide for a contributor's first day, ordered by when they'll need each piece: setup first, then a guided tour of the architecture, then the conventions, with gotchas woven in where a newcomer would hit them — not dumped in an appendix.\nCut anything the three reports disagree on rather than guessing which reader was right; note the disagreement in one line instead. Keep it under 200 lines.",
+      "expects": "three focused reports: architecture, conventions, gotchas",
+      "produces": "a first-day onboarding guide, ordered by when a newcomer needs each piece",
+      "inputs": [{ "name": "architecture" }, { "name": "conventions" }, { "name": "gotchas" }],
+      "outputs": [{ "name": "guide" }],
+      "x": 340,
+      "y": 160
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from": "n1", "to": "n4", "fromOutput": "architecture", "toInput": "architecture" },
+    { "id": "e2", "from": "n2", "to": "n4", "fromOutput": "conventions", "toInput": "conventions" },
+    { "id": "e3", "from": "n3", "to": "n4", "fromOutput": "gotchas", "toInput": "gotchas" }
+  ]
+}

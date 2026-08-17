@@ -15,8 +15,15 @@
 // pushed over runs:changed (or fetched by runs.list()), and the layers and
 // parents in it are the scheduler's own, so the picture cannot disagree with
 // what actually ran.
+//
+// Below the local list, a second "Remote" section (plan phase 3, remote.rs)
+// gives the same read-only visibility into ANOTHER consented machine's flow
+// runs, fetched fresh over ssh — see the "remote run visibility" methods
+// near the bottom of this class for that half; it shares this pane only for
+// screen real estate, not any state with the local list above it.
 
 import { tome, el, toast } from '../util.js'
+import { choiceModal } from '../modals.js'
 import { runningCount, elapsedMs, formatElapsed } from '../../shared/flow-run-plan.js'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
@@ -66,7 +73,8 @@ export class RunsPanel {
         <span class="runs-title">flow runs</span>
         <button class="runs-refresh" title="Refresh">⟳</button>
       </div>
-      <div class="runs-list"></div>`
+      <div class="runs-list"></div>
+      <div class="runs-remote"></div>`
     this.runs = []
     // Rows are reconciled rather than rebuilt (see render): a run's log is a
     // scrolled element inside its row, and re-creating the row on every push
@@ -77,10 +85,16 @@ export class RunsPanel {
     this.logPath = null // the log we are tailing, if any
     this.logWatched = false // …and whether main actually gave us a watch on it
     this.tailPinned = true // stick to the bottom until the reader scrolls up
+    // Remote run visibility (plan phase 3, remote.rs): one group per
+    // consented source, fetched on pane open and on that group's own
+    // Refresh button only — see loadRemoteSources's doc comment for why
+    // there is deliberately no push here.
+    this.remoteGroups = new Map() // source id -> { source, runs, root, rowsEl, rows, openRunId }
   }
 
   init() {
     this.listEl = this.element.querySelector('.runs-list')
+    this.remoteEl = this.element.querySelector('.runs-remote')
     this.element.querySelector('.runs-refresh').addEventListener('click', () => this.load())
     // Same shape as the event pane's subscription: an unsubscribe kept for
     // dispose, so a closed pane stops receiving pushes.
@@ -91,6 +105,7 @@ export class RunsPanel {
     // counts up without disturbing a log the user is reading.
     this.timer = setInterval(() => this.tick(), 1000)
     this.load()
+    this.loadRemoteSources()
   }
 
   async load() {
@@ -189,8 +204,21 @@ export class RunsPanel {
       if (res?.error) toast(res.error)
     })
 
+    // Only a settled run has products to copy anywhere (updateRow hides
+    // this until run.status === 'done') — captures run.id, not run itself:
+    // a row is built once per id and never rebuilt (see the class doc
+    // comment), so the id below never goes stale even as later snapshots
+    // repaint everything else about this row in place.
+    const exportBtn = el('button', 'runs-export', 'Export…')
+    exportBtn.type = 'button'
+    exportBtn.title = "Copy this run's promoted products to a destination or folder"
+    exportBtn.addEventListener('click', (e) => {
+      e.stopPropagation() // the row's own click would collapse the pipeline
+      this.exportRun(run.id)
+    })
+
     const bar = el('div', 'runs-rowbar')
-    bar.append(head, cancel)
+    bar.append(head, cancel, exportBtn)
     const body = el('div', 'runs-body') // pipeline + log, only while expanded
     // Run ids are base36 timestamps with an optional `-2` suffix, so they are
     // already safe as an id — and unique, which is what aria-controls needs to
@@ -198,7 +226,7 @@ export class RunsPanel {
     body.id = `runs-body-${run.id}`
     head.setAttribute('aria-controls', body.id)
     root.append(bar, body)
-    return { root, head, badge, gap, when, cancel, body, pills: null, logBox: null, logNode: null }
+    return { root, head, badge, gap, when, cancel, exportBtn, body, pills: null, logBox: null, logNode: null }
   }
 
   // Everything below is deliberately in-place. A run pushes a snapshot on
@@ -232,6 +260,9 @@ export class RunsPanel {
     row.cancel.style.display = run.status === 'running' ? '' : 'none'
     row.cancel.disabled = canceling
     row.cancel.textContent = canceling ? 'Canceling…' : 'Cancel'
+    // Only a settled run has a products directory to export at all — see
+    // ipc::runs::runs_export's own doc comment for the exact convention.
+    row.exportBtn.style.display = run.status === 'done' ? '' : 'none'
     row.head.setAttribute('aria-expanded', open ? 'true' : 'false')
     row.head.classList.toggle('open', open)
     row.head.title = run.flowPath || ''
@@ -406,6 +437,221 @@ export class RunsPanel {
       this.armWatch()
     }
     this.render()
+  }
+
+  // Export…: a choice of every consented destination plus "Save to
+  // folder…", then main does the actual copy — this pane never sees (or
+  // needs) a host/url/target itself, only an id or a folder the user just
+  // picked. Read-only otherwise (the class doc comment), and this is no
+  // exception: it doesn't change what ran, only where a copy of what
+  // already ran ends up.
+  async exportRun(runId) {
+    let destinations = []
+    try {
+      destinations = await tome.exportDest.list()
+    } catch (err) {
+      toast(err.message)
+      return
+    }
+    const choices = destinations.map((d) => ({
+      label: `${d.label} (${d.kind})`,
+      value: { destinationId: d.id },
+    }))
+    choices.push({ label: 'Save to folder…', value: { local: true }, cls: 'ghost' })
+    const picked = await choiceModal('Export run', 'Where should this run’s products go?', choices)
+    if (!picked) return
+    let localPath = null
+    if (picked.local) {
+      localPath = await tome.pickFolder()
+      if (!localPath) return
+    }
+    try {
+      await tome.runs.export(runId, picked.destinationId, localPath)
+      toast('run exported', 'ok')
+    } catch (err) {
+      toast(err.message)
+    }
+  }
+
+  // ---- remote run visibility (plan phase 3) ----
+  //
+  // A second, independent section under the local runs list: one group per
+  // consented remote source (Settings → Remote sources), each holding its
+  // own flattened run list fetched fresh over ssh. Deliberately NOT wired to
+  // any push/onChanged the way the local list above is — main never watches
+  // a remote host, so there is nothing to push, and re-fetching on every
+  // pane open plus an explicit per-group Refresh button (mirroring the
+  // local pane's own .runs-refresh) is the whole contract. Remote rows never
+  // get a Cancel or Export button: nothing here can be cancelled (main isn't
+  // running it) and a remote run's products already live on the machine
+  // that made them.
+
+  // Sources first (remote_sources never touches the network — it just lists
+  // main's own consented, hash-verified records), then one runs() fetch per
+  // source. A source with nothing consented yet renders an empty-state hint
+  // pointing at Settings rather than an empty section.
+  async loadRemoteSources() {
+    let sources = []
+    try {
+      sources = await tome.remote.sources()
+    } catch (err) {
+      this.remoteEl.replaceChildren(el('div', 'runs-err', err.message))
+      return
+    }
+    this.remoteGroups.clear()
+    this.remoteEl.replaceChildren()
+    if (!sources.length) {
+      this.remoteEl.appendChild(
+        el('div', 'runs-remote-empty', 'no remote sources yet — add one in Settings → Remote sources')
+      )
+      return
+    }
+    for (const source of sources) {
+      const group = this.buildRemoteGroup(source)
+      this.remoteGroups.set(source.id, group)
+      this.remoteEl.appendChild(group.root)
+      this.refreshRemoteGroup(source.id)
+    }
+  }
+
+  buildRemoteGroup(source) {
+    const root = el('div', 'runs-remote-group')
+    const head = el('div', 'runs-remote-head')
+    head.append(el('span', 'runs-remote-label', `${source.label} — ${source.host}`))
+    const refresh = el('button', 'runs-refresh', '⟳')
+    refresh.type = 'button'
+    refresh.title = 'Refresh'
+    refresh.addEventListener('click', () => this.refreshRemoteGroup(source.id))
+    head.appendChild(refresh)
+    const rowsEl = el('div', 'runs-remote-rows')
+    root.append(head, rowsEl)
+    return { source, runs: [], root, rowsEl, rows: new Map(), openRunId: null }
+  }
+
+  // Re-fetches ONE group's run list. Rows are rebuilt wholesale on every
+  // refresh (unlike the local list's reconciled rows) — there is no log
+  // tailing or per-second tick to preserve here, and a remote fetch already
+  // happens only on an explicit user action, never several times a second.
+  async refreshRemoteGroup(sourceId) {
+    const group = this.remoteGroups.get(sourceId)
+    if (!group) return
+    let runs
+    try {
+      runs = await tome.remote.runs(sourceId)
+    } catch (err) {
+      group.rowsEl.replaceChildren(el('div', 'runs-err', err.message))
+      return
+    }
+    group.runs = Array.isArray(runs) ? runs : []
+    group.rows.clear()
+    group.openRunId = null
+    group.rowsEl.replaceChildren()
+    if (!group.runs.length) {
+      group.rowsEl.appendChild(el('div', 'runs-empty', 'no runs yet'))
+      return
+    }
+    for (const entry of group.runs) {
+      const row = this.buildRemoteRow(group, entry)
+      group.rows.set(entry.id, row)
+      group.rowsEl.append(row.head, row.detail)
+    }
+  }
+
+  // Same head/body split the local pane's buildRow/updateRow use, minus
+  // Cancel/Export (the class doc comment: nothing here can be stopped, and a
+  // remote run's products already live where they were made) and minus the
+  // pipeline graph (main never sees this run live — layers are a scheduler
+  // artifact of a LIVE run, not something a settled run.json carries).
+  buildRemoteRow(group, entry) {
+    const head = el('button', 'runs-row')
+    head.type = 'button'
+    head.setAttribute('aria-expanded', 'false')
+    const caret = el('span', 'runs-caret', '›')
+    caret.setAttribute('aria-hidden', 'true')
+    const badge = el('span', `runs-badge runs-st-${entry.status}`, RUN_TEXT[entry.status] || entry.status)
+    const flow = el('span', 'runs-flow', entry.flow || '(unknown flow)')
+    const id = el('span', 'runs-id', `#${entry.id}`)
+    const when = el('span', 'runs-when', shortTime(entry.started))
+    head.append(caret, badge, flow, id, when)
+    const detail = el('div', 'runs-remote-detail')
+    head.addEventListener('click', () => this.toggleRemoteRow(group, entry, head, detail))
+    return { head, detail }
+  }
+
+  async toggleRemoteRow(group, entry, head, detail) {
+    const wasOpen = group.openRunId === entry.id
+    // Only one remote run open per group at a time — same "one pipeline
+    // visible" simplicity the local pane's openRun enforces.
+    if (group.openRunId && group.openRunId !== entry.id) {
+      const prev = group.rows.get(group.openRunId)
+      if (prev) {
+        prev.head.setAttribute('aria-expanded', 'false')
+        prev.head.classList.remove('open')
+        prev.detail.replaceChildren()
+      }
+    }
+    group.openRunId = wasOpen ? null : entry.id
+    head.classList.toggle('open', !wasOpen)
+    head.setAttribute('aria-expanded', String(!wasOpen))
+    if (wasOpen) {
+      detail.replaceChildren()
+      return
+    }
+    detail.replaceChildren(el('div', 'runs-remote-loading', 'loading…'))
+    let payload
+    try {
+      payload = await tome.remote.runDetail(group.source.id, entry.flow, entry.id)
+    } catch (err) {
+      // A row can close (or a different one open) while this was in flight —
+      // never paint over whatever the reader is looking at now.
+      if (group.openRunId === entry.id) detail.replaceChildren(el('div', 'runs-err', err.message))
+      return
+    }
+    if (group.openRunId === entry.id) detail.replaceChildren(this.buildRemoteDetail(payload))
+  }
+
+  // A node table (id/kind/model/status/exit — the same facts each pill's
+  // title string carries locally, laid out as rows instead since there is
+  // no live pipeline graph to place pills on) plus the product list from
+  // the manifest, if the run has been promoted yet (flow::products only
+  // writes manifest.json once a run settles "done" AND every declared
+  // output is confirmed on disk — see that module's doc comment; a run
+  // still in progress on the remote end legitimately has none).
+  buildRemoteDetail(payload) {
+    const wrap = el('div', 'runs-remote-detail-body')
+    const nodes = Array.isArray(payload?.run?.nodes) ? payload.run.nodes : []
+    const table = el('table', 'runs-remote-nodes')
+    const head = el('tr')
+    head.append(el('th', '', 'node'), el('th', '', 'kind'), el('th', '', 'status'), el('th', '', 'exit'))
+    table.append(head)
+    for (const n of nodes) {
+      const tr = el('tr')
+      tr.append(
+        el('td', '', n.name || n.id),
+        el('td', '', n.model ? `${n.kind} · ${n.model}` : n.kind),
+        el('td', `runs-remote-node-st runs-st-${n.status}`, n.status),
+        el('td', '', n.exit == null ? '' : String(n.exit))
+      )
+      table.append(tr)
+    }
+    wrap.appendChild(table)
+
+    const products = Array.isArray(payload?.manifest?.products) ? payload.manifest.products : null
+    const productsBox = el('div', 'runs-remote-products')
+    productsBox.appendChild(el('h5', '', 'Products'))
+    if (!products) {
+      productsBox.appendChild(el('div', 'runs-remote-hint', 'not promoted yet'))
+    } else if (!products.length) {
+      productsBox.appendChild(el('div', 'runs-remote-hint', 'this flow declares no terminal outputs'))
+    } else {
+      const list = el('ul', 'runs-remote-product-list')
+      for (const p of products) {
+        list.appendChild(el('li', '', `${p.file} — ${p.bytes.toLocaleString()} bytes`))
+      }
+      productsBox.appendChild(list)
+    }
+    wrap.appendChild(productsBox)
+    return wrap
   }
 
   // Refcounted and debounced in main, so a tail is a watch plus a re-read

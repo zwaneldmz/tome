@@ -36,13 +36,24 @@ fn tmp_outside() -> PathBuf {
         .keep()
 }
 
+// No declared outputs by default. The fail-closed output contract (a node
+// that exits 0 must have written every output it DECLARES — see mod.rs's
+// `launch` doc comment) would otherwise fail every fixture node below that
+// exits via a plain "exit 0"/"echo ..." script without actually writing one
+// — none of them do, because this fixture predates the contract and exists
+// only to exercise scheduling. Tests that need to exercise the contract
+// itself declare their own outputs explicitly (see the `contract_*` tests
+// further down). Edges still wire `fromOutput: "out"`/`toInput: "in"` —
+// scheduling reads `from`/`to` only, never a port name, so a name with no
+// matching declared port is a harmless (unchecked-by-these-tests) warning,
+// not a refusal.
 fn flow_doc(name: &str, ids: &[&str], pairs: &[(&str, &str)]) -> Value {
     json!({
         "version": 1,
         "name": name,
         "nodes": ids.iter().map(|id| json!({
             "id": id, "name": id, "kind": "claude", "instructions": format!("do {id}"),
-            "outputs": [{"name": "out"}], "inputs": [{"name": "in"}],
+            "outputs": [], "inputs": [{"name": "in"}],
         })).collect::<Vec<_>>(),
         "edges": pairs.iter().enumerate().map(|(i, (from, to))| json!({
             "id": format!("e{}", i + 1), "from": from, "to": to, "fromOutput": "out", "toInput": "in",
@@ -453,7 +464,9 @@ async fn spawns_an_argv_array_with_the_composed_brief_as_one_element_cwd_at_flow
     let mut scripts = HashMap::new();
     scripts.insert("n1".to_string(), "exit 0".to_string());
     let e = build_env(&recorders, scripts, None, true);
-    let path = write_flow(&root, &flow_doc("shape", &["n1"], &[]));
+    let mut doc = flow_doc("shape", &["n1"], &[]);
+    doc["nodes"][0]["outputs"] = json!([{"name": "out"}]);
+    let path = write_flow(&root, &doc);
     let runs = new_runs();
     let result = start_run(runs.clone(), e, path).await;
     let id = result["id"].as_str().unwrap().to_string();
@@ -464,7 +477,10 @@ async fn spawns_an_argv_array_with_the_composed_brief_as_one_element_cwd_at_flow
     assert_eq!(seen[0].cmd, "claude");
     assert_eq!(seen[0].args[0], "-p");
     assert!(seen[0].args[1].contains("You are \"n1\" in a Tome flow \"shape\"."));
-    assert!(seen[0].args[1].contains(".tome/flows/shape/n1-out.md"));
+    // Run-scoped: the id is only known once start_run mints it, so the
+    // composed brief's handoff path is asserted against it rather than a
+    // fixed literal.
+    assert!(seen[0].args[1].contains(&format!(".tome/flows/shape/runs/{id}/artifacts/n1-out.md")));
     assert_eq!(seen[0].args.len(), 2);
     assert_eq!(seen[0].cwd, root);
     assert!(seen[0]
@@ -1308,6 +1324,7 @@ async fn concurrent_pump_calls_never_double_launch_a_shared_fan_in_node() {
             ended: None,
             exit: None,
             log: root.join(format!("{id}.log")),
+            outputs: vec![],
             inner_argv: vec!["claude".to_string(), "-p".to_string(), "hi".to_string()],
             pid: None,
             kill_fn: None,
@@ -1320,6 +1337,7 @@ async fn concurrent_pump_calls_never_double_launch_a_shared_fan_in_node() {
             flow_path: "irrelevant-for-this-test".to_string(),
             root: root.clone(),
             dir: root.clone(),
+            artifacts_dir: root.clone(),
             gapped: false,
             status: "running".to_string(),
             started: "2026-01-01T00:00:00.000Z".to_string(),
@@ -1334,6 +1352,7 @@ async fn concurrent_pump_calls_never_double_launch_a_shared_fan_in_node() {
             ],
             write_tx,
             scheduling_lock: Arc::new(tokio::sync::Mutex::new(())),
+            products: None,
         };
         let runs = new_runs();
         {
@@ -1422,4 +1441,484 @@ async fn snapshot_all_is_plain_data_with_no_spawn_field_newest_first() {
     let all = snapshot_all(&runs);
     assert!(!serde_json::to_string(&all).unwrap().contains("\"spawn\""));
     assert_eq!(all[0]["id"], json!(id));
+}
+
+// ======================================================================
+// start_run id-minting — two concurrent callers must never mint the
+// identical run id (no caller serializes `start_run`; see `ReservedId`'s
+// doc comment in mod.rs)
+// ======================================================================
+
+/// Directly reproduces the race: an id "reserved" (minted, `RunState` not
+/// registered yet — exactly the gap a concurrent `start_run` call would be
+/// sitting in) a moment before this call mints its own. Without the
+/// reservation, `new_run_id` would compute the identical `base36(millis)`
+/// string for both and the second `inner.runs.insert` would silently
+/// clobber the first run's live registry entry. No wall-clock trickery
+/// needed to prove it: reserving `start_run`'s own next id by hand, the
+/// same way a concurrent in-flight call would have, is a faithful and
+/// fully deterministic stand-in for "another caller got there first this
+/// millisecond."
+#[tokio::test]
+async fn start_run_never_reuses_an_id_another_call_has_already_reserved() {
+    let root = workspace();
+    let runs = new_runs();
+    let would_be_id = {
+        let inner = runs.inner.lock().unwrap();
+        super::new_run_id(&inner)
+    };
+    {
+        let mut inner = runs.inner.lock().unwrap();
+        inner.reserved_ids.insert(would_be_id.clone());
+    }
+
+    let mut scripts = HashMap::new();
+    scripts.insert("n1".to_string(), "exit 0".to_string());
+    let e = build_env(&Recorders::default(), scripts, None, true);
+    let path = write_flow(&root, &flow_doc("reserved-race", &["n1"], &[]));
+    let result = start_run(runs.clone(), e, path).await;
+    let id = result["id"].as_str().unwrap().to_string();
+    assert_ne!(
+        id, would_be_id,
+        "start_run must not mint an id another in-flight call already reserved"
+    );
+
+    let run = settled(&runs, &id, 8000).await;
+    assert_eq!(run["status"], json!("done"));
+    // The still-simulated in-flight caller's own reservation is untouched —
+    // only the id `start_run` itself minted is ever released by its own
+    // guard.
+    assert!(runs
+        .inner
+        .lock()
+        .unwrap()
+        .reserved_ids
+        .contains(&would_be_id));
+}
+
+// ======================================================================
+// the fail-closed output contract — an exit-0 node that didn't write what
+// it declared is "failed", not "done" (plan steps 1.1-1.3)
+// ======================================================================
+
+// The run id isn't known until AFTER start_run mints it — well after the
+// script strings below have to be frozen into the `scripts` map a test
+// hands to build_env — so a script that needs to write into its OWN
+// run-scoped artifacts directory reads the id back out of $TOME_TEST_PANE
+// (`run:<runId>:<nodeId>`, the same env var build_env's build_agent_env
+// stub injects for every node — see scripted_spawn) rather than guessing it.
+fn write_artifact_script(flow: &str, node_id: &str, output: &str, content: &str) -> String {
+    format!(
+        r#"rid=$(echo "$TOME_TEST_PANE" | cut -d: -f2); echo {content} > .tome/flows/{flow}/runs/$rid/artifacts/{node_id}-{output}.md"#
+    )
+}
+
+fn touch_artifact_script(flow: &str, node_id: &str, output: &str) -> String {
+    format!(
+        r#"rid=$(echo "$TOME_TEST_PANE" | cut -d: -f2); touch .tome/flows/{flow}/runs/$rid/artifacts/{node_id}-{output}.md"#
+    )
+}
+
+#[tokio::test]
+async fn contract_a_node_that_exits_0_without_writing_a_declared_output_fails_and_skips_downstream()
+{
+    let root = workspace();
+    let mut doc = flow_doc("contract-missing", &["n1", "n2"], &[("n1", "n2")]);
+    doc["nodes"][0]["outputs"] = json!([{"name": "out"}]);
+    let mut scripts = HashMap::new();
+    scripts.insert("n1".to_string(), "exit 0".to_string()); // never writes n1-out.md
+    scripts.insert("n2".to_string(), "echo n2-ran >> ran.txt".to_string());
+    let e = build_env(&Recorders::default(), scripts, None, true);
+    let path = write_flow(&root, &doc);
+    let runs = new_runs();
+    let result = start_run(runs.clone(), e, path).await;
+    let id = result["id"].as_str().unwrap().to_string();
+    let run = settled(&runs, &id, 8000).await;
+
+    let st = statuses_of(&run);
+    assert_eq!(st["n1"], "failed");
+    assert_eq!(st["n2"], "skipped");
+    assert_eq!(run["status"], json!("failed"));
+    let n1 = run["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == json!("n1"))
+        .unwrap();
+    // The exit code is untouched by the contract check — it really did exit
+    // 0; the contract is what turned that into a failed node.
+    assert_eq!(n1["exit"], json!(0));
+    let log = std::fs::read_to_string(n1["log"].as_str().unwrap()).unwrap();
+    let contract_line = format!(
+        r#"# contract: missing or empty output "out" (.tome/flows/contract-missing/runs/{id}/artifacts/n1-out.md)"#
+    );
+    assert!(log.contains(&contract_line));
+    // The contract line reads BEFORE the exit trailer, not after.
+    assert!(log.find(&contract_line).unwrap() < log.find("# exit 0").unwrap());
+    assert!(!root.join("ran.txt").exists());
+}
+
+#[tokio::test]
+async fn contract_b_a_node_that_writes_its_declared_output_before_exiting_is_done() {
+    let root = workspace();
+    let mut doc = flow_doc("contract-written", &["n1"], &[]);
+    doc["nodes"][0]["outputs"] = json!([{"name": "out"}]);
+    let mut scripts = HashMap::new();
+    scripts.insert(
+        "n1".to_string(),
+        write_artifact_script("contract-written", "n1", "out", "written"),
+    );
+    let e = build_env(&Recorders::default(), scripts, None, true);
+    let path = write_flow(&root, &doc);
+    let runs = new_runs();
+    let result = start_run(runs.clone(), e, path).await;
+    let id = result["id"].as_str().unwrap().to_string();
+    let run = settled(&runs, &id, 8000).await;
+
+    assert_eq!(statuses_of(&run)["n1"], "done");
+    assert_eq!(run["status"], json!("done"));
+    let n1 = run["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == json!("n1"))
+        .unwrap();
+    let log = std::fs::read_to_string(n1["log"].as_str().unwrap()).unwrap();
+    assert!(!log.contains("# contract:"));
+    let artifact = root
+        .join(".tome/flows/contract-written/runs")
+        .join(&id)
+        .join("artifacts/n1-out.md");
+    assert_eq!(std::fs::read_to_string(artifact).unwrap().trim(), "written");
+}
+
+#[tokio::test]
+async fn contract_c_a_node_with_no_declared_outputs_is_done_on_a_plain_exit_0() {
+    let root = workspace();
+    let doc = flow_doc("contract-none", &["n1"], &[]); // flow_doc's default: no declared outputs
+    let mut scripts = HashMap::new();
+    scripts.insert("n1".to_string(), "exit 0".to_string());
+    let e = build_env(&Recorders::default(), scripts, None, true);
+    let path = write_flow(&root, &doc);
+    let runs = new_runs();
+    let result = start_run(runs.clone(), e, path).await;
+    let id = result["id"].as_str().unwrap().to_string();
+    let run = settled(&runs, &id, 8000).await;
+
+    assert_eq!(statuses_of(&run)["n1"], "done");
+    assert_eq!(run["status"], json!("done"));
+    let n1 = run["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == json!("n1"))
+        .unwrap();
+    let log = std::fs::read_to_string(n1["log"].as_str().unwrap()).unwrap();
+    assert!(!log.contains("# contract:"));
+}
+
+#[tokio::test]
+async fn contract_d_a_zero_length_output_file_is_treated_the_same_as_a_missing_one() {
+    let root = workspace();
+    let mut doc = flow_doc("contract-empty", &["n1"], &[]);
+    doc["nodes"][0]["outputs"] = json!([{"name": "out"}]);
+    let mut scripts = HashMap::new();
+    scripts.insert(
+        "n1".to_string(),
+        touch_artifact_script("contract-empty", "n1", "out"),
+    );
+    let e = build_env(&Recorders::default(), scripts, None, true);
+    let path = write_flow(&root, &doc);
+    let runs = new_runs();
+    let result = start_run(runs.clone(), e, path).await;
+    let id = result["id"].as_str().unwrap().to_string();
+    let run = settled(&runs, &id, 8000).await;
+
+    assert_eq!(statuses_of(&run)["n1"], "failed");
+    assert_eq!(run["status"], json!("failed"));
+    let n1 = run["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == json!("n1"))
+        .unwrap();
+    assert_eq!(n1["exit"], json!(0));
+    let log = std::fs::read_to_string(n1["log"].as_str().unwrap()).unwrap();
+    assert!(log.contains(&format!(
+        r#"# contract: missing or empty output "out" (.tome/flows/contract-empty/runs/{id}/artifacts/n1-out.md)"#
+    )));
+}
+
+/// An unnamed declared output can never actually reach `launch`'s
+/// fail-closed contract check through `start_run` at all:
+/// `model::validate_flow`'s own `safe_segment_opt` check on `output.name`
+/// is a hard ERROR (not a warning — unlike a missing `node.name`, which
+/// `validate_flow` never inspects at all), and `start_run` refuses on the
+/// first validation error before a single node is planned or scheduled.
+/// Pins that boundary directly, which is exactly why `NodeState.outputs`'s
+/// own "undefined" fallback (mirroring `compose_bootstrap_prompt`'s
+/// identical one — see that field's doc comment in mod.rs) is a
+/// consistency guard for a shape this crate's real `start_run` path
+/// cannot currently produce, not a bug reachable end to end today.
+#[tokio::test]
+async fn refuses_a_flow_whose_declared_output_has_no_name_before_any_node_runs() {
+    let root = workspace();
+    let mut doc = flow_doc("contract-unnamed", &["n1"], &[]);
+    doc["nodes"][0]["outputs"] = json!([{}]); // no "name"
+    let e = build_env(&Recorders::default(), HashMap::new(), None, true);
+    let path = write_flow(&root, &doc);
+    let runs = new_runs();
+    let result = start_run(runs.clone(), e, path).await;
+    assert!(
+        result.get("id").is_none(),
+        "an unnamed output must never actually start a run: {result:?}"
+    );
+    assert_eq!(
+        result["error"],
+        json!(
+            r#"node "n1" output name "undefined" can't be used in a handoff path (no "/", "\", ":", control characters, or a leading "-")"#
+        )
+    );
+}
+
+#[tokio::test]
+async fn contract_reports_one_line_per_missing_output_but_says_nothing_about_the_ones_written() {
+    let root = workspace();
+    let mut doc = flow_doc("contract-partial", &["n1"], &[]);
+    doc["nodes"][0]["outputs"] = json!([{"name": "a"}, {"name": "b"}]);
+    let mut scripts = HashMap::new();
+    // Writes "a", never touches "b".
+    scripts.insert(
+        "n1".to_string(),
+        write_artifact_script("contract-partial", "n1", "a", "written"),
+    );
+    let e = build_env(&Recorders::default(), scripts, None, true);
+    let path = write_flow(&root, &doc);
+    let runs = new_runs();
+    let result = start_run(runs.clone(), e, path).await;
+    let id = result["id"].as_str().unwrap().to_string();
+    let run = settled(&runs, &id, 8000).await;
+
+    assert_eq!(statuses_of(&run)["n1"], "failed");
+    let n1 = run["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == json!("n1"))
+        .unwrap();
+    let log = std::fs::read_to_string(n1["log"].as_str().unwrap()).unwrap();
+    assert!(!log.contains(&format!(
+        r#"missing or empty output "a" (.tome/flows/contract-partial/runs/{id}/artifacts/n1-a.md)"#
+    )));
+    assert!(log.contains(&format!(
+        r#"# contract: missing or empty output "b" (.tome/flows/contract-partial/runs/{id}/artifacts/n1-b.md)"#
+    )));
+    // Exactly one contract line, not one per declared output.
+    assert_eq!(log.matches("# contract:").count(), 1);
+}
+
+#[tokio::test]
+async fn contract_check_never_runs_for_a_non_zero_exit_the_process_already_failed_on_its_own() {
+    let root = workspace();
+    let mut doc = flow_doc("contract-moot", &["n1"], &[]);
+    doc["nodes"][0]["outputs"] = json!([{"name": "out"}]);
+    let mut scripts = HashMap::new();
+    scripts.insert("n1".to_string(), "exit 3".to_string());
+    let e = build_env(&Recorders::default(), scripts, None, true);
+    let path = write_flow(&root, &doc);
+    let runs = new_runs();
+    let result = start_run(runs.clone(), e, path).await;
+    let id = result["id"].as_str().unwrap().to_string();
+    let run = settled(&runs, &id, 8000).await;
+
+    assert_eq!(statuses_of(&run)["n1"], "failed");
+    let n1 = run["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == json!("n1"))
+        .unwrap();
+    assert_eq!(n1["exit"], json!(3));
+    let log = std::fs::read_to_string(n1["log"].as_str().unwrap()).unwrap();
+    // The exit code alone explains the failure — piling a contract line on
+    // top of an already-nonzero exit would only bury the reason that
+    // actually matters.
+    assert!(!log.contains("# contract:"));
+    assert!(log.contains("# exit 3"));
+}
+
+// ======================================================================
+// products promotion — plan step 1.4: a run that settles "done" gets its
+// terminal nodes' declared outputs promoted into out/<id>/, a
+// manifest.json, a refreshed out/latest/, and an appended runs-index.json
+// (`flow::products::promote_and_manifest`'s own #[cfg(test)] suite covers
+// that module directly and in depth — copy/hash correctness, gitignore,
+// out/latest/ rebuild, runs-index cap/newest-first/dedupe, git provenance.
+// These are the WIRING tests: the real scheduler, through the real
+// `settle_if_done` hook, actually reaches it end to end.)
+// ======================================================================
+
+/// Polls the snapshot until this run's own `"products"` key stops being
+/// `null`. `settled()` only waits for the run's STATUS to leave
+/// `"running"`, which `settle_if_done` flips (and pushes) BEFORE
+/// promotion is even spawned (`runner::spawn_promotion`'s own doc
+/// comment) — this is the second wait a caller that cares about the
+/// PRODUCT list, not just the run's own status, needs on top of it.
+async fn products_settled(runs: &Runner, id: &str, timeout_ms: u64) -> Value {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+    loop {
+        let snap = snapshot_all(runs);
+        if let Some(run) = snap
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == json!(id))
+        {
+            if run["status"] != json!("running") && !run["products"].is_null() {
+                return run.clone();
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() <= deadline,
+            "run's products never settled: {id}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+    }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[tokio::test]
+async fn products_e2e_promotes_only_the_terminal_nodes_output_with_gitignore_and_a_matching_hash()
+{
+    let root = workspace();
+    let mut doc = flow_doc("products-e2e", &["n1", "n2"], &[("n1", "n2")]);
+    doc["nodes"][0]["outputs"] = json!([{"name": "notes"}]);
+    doc["nodes"][1]["outputs"] = json!([{"name": "summary"}]);
+    let mut scripts = HashMap::new();
+    scripts.insert(
+        "n1".to_string(),
+        write_artifact_script("products-e2e", "n1", "notes", "upstream-notes"),
+    );
+    scripts.insert(
+        "n2".to_string(),
+        write_artifact_script("products-e2e", "n2", "summary", "final-summary"),
+    );
+    let e = build_env(&Recorders::default(), scripts, None, true);
+    let path = write_flow(&root, &doc);
+    let runs = new_runs();
+    let result = start_run(runs.clone(), e, path).await;
+    let id = result["id"].as_str().unwrap().to_string();
+    let run = products_settled(&runs, &id, 8000).await;
+
+    assert_eq!(run["status"], json!("done"));
+    let products = run["products"].as_array().unwrap();
+    assert_eq!(
+        products.len(),
+        1,
+        "only n2 is terminal — n1's output is a handoff, not a product"
+    );
+    assert_eq!(products[0]["node"], json!("n2"));
+    assert_eq!(products[0]["output"], json!("summary"));
+    assert_eq!(products[0]["file"], json!("n2-summary.md"));
+
+    let out_dir = root.join(".tome/flows/products-e2e/out");
+    assert_eq!(
+        std::fs::read_to_string(out_dir.join(".gitignore")).unwrap(),
+        "*\n"
+    );
+    let product_file = out_dir.join(&id).join("n2-summary.md");
+    assert_eq!(
+        std::fs::read_to_string(&product_file).unwrap().trim(),
+        "final-summary"
+    );
+    // n1's own handoff is a means to an end, never itself a product.
+    assert!(!out_dir.join(&id).join("n1-notes.md").exists());
+
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string(out_dir.join(&id).join("manifest.json")).unwrap(),
+    )
+    .unwrap();
+    let expected_sha = sha256_hex(&std::fs::read(&product_file).unwrap());
+    assert_eq!(manifest["products"][0]["sha256"], json!(expected_sha));
+    assert_eq!(products[0]["sha256"], json!(expected_sha));
+    assert_eq!(manifest["run"]["id"], json!(id));
+    assert_eq!(manifest["run"]["airgap"], json!(true));
+    assert_eq!(manifest["flow"]["name"], json!("products-e2e"));
+    assert_eq!(manifest["nodes"].as_array().unwrap().len(), 2); // n1 AND n2, not just the terminal
+
+    let index: Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join(".tome/flows/products-e2e/runs-index.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(index["runs"][0]["id"], json!(id));
+    assert_eq!(index["runs"][0]["status"], json!("done"));
+    assert_eq!(index["runs"][0]["products"], json!(["n2-summary.md"]));
+    assert_eq!(
+        index["runs"][0]["manifest"],
+        json!(format!("out/{id}/manifest.json"))
+    );
+}
+
+#[tokio::test]
+async fn products_e2e_out_latest_and_runs_index_both_advance_on_a_second_run_of_the_same_flow() {
+    let root = workspace();
+    let mut doc = flow_doc("products-latest", &["n1"], &[]);
+    doc["nodes"][0]["outputs"] = json!([{"name": "out"}]);
+    let path = write_flow(&root, &doc);
+    let runs = new_runs();
+
+    let mut scripts1 = HashMap::new();
+    scripts1.insert(
+        "n1".to_string(),
+        write_artifact_script("products-latest", "n1", "out", "first-run"),
+    );
+    let e1 = build_env(&Recorders::default(), scripts1, None, true);
+    let result1 = start_run(runs.clone(), e1, path.clone()).await;
+    let id1 = result1["id"].as_str().unwrap().to_string();
+    products_settled(&runs, &id1, 8000).await;
+
+    let latest = root.join(".tome/flows/products-latest/out/latest");
+    assert_eq!(
+        std::fs::read_to_string(latest.join("n1-out.md"))
+            .unwrap()
+            .trim(),
+        "first-run"
+    );
+
+    let mut scripts2 = HashMap::new();
+    scripts2.insert(
+        "n1".to_string(),
+        write_artifact_script("products-latest", "n1", "out", "second-run"),
+    );
+    let e2 = build_env(&Recorders::default(), scripts2, None, true);
+    let result2 = start_run(runs.clone(), e2, path).await;
+    let id2 = result2["id"].as_str().unwrap().to_string();
+    products_settled(&runs, &id2, 8000).await;
+
+    assert_eq!(
+        std::fs::read_to_string(latest.join("n1-out.md"))
+            .unwrap()
+            .trim(),
+        "second-run",
+        "out/latest/ must be rebuilt from the newest run, not merged with the old one"
+    );
+
+    let index: Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join(".tome/flows/products-latest/runs-index.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    let ids: Vec<&str> = index["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec![id2.as_str(), id1.as_str()], "newest run first");
 }

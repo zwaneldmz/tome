@@ -336,6 +336,50 @@
       cancel: (id) => call('runs_cancel', { id }),
       list: () => call('runs_list'),
       onChanged: (cb) => onWithUnsub('runs:changed', cb),
+      // Copies a settled run's promoted products to a consented destination
+      // (destinationId) or a dialog-picked local folder (localPath) — never
+      // both, never a bare host/url/target (main resolves that from the
+      // consented record; see ipc/export.rs's own doc comment).
+      export: (id, destinationId, localPath) => call('runs_export', { id, destinationId, localPath }),
+    },
+
+    // Export destinations: consent-gated remote/local targets a finished
+    // run's promoted products may be copied to (runs.export above). main
+    // hashes and persists each record (export-destinations.json, 0600) at
+    // consent time; the renderer never sends a hash, and list() never gets
+    // a bearer token back — only whether one is set (export.rs's own doc
+    // comment).
+    exportDest: {
+      list: () => call('export_destinations'),
+      consent: (payload) => call('export_consent', payload),
+      revoke: (id) => call('export_revoke', { id }),
+    },
+
+    // In-app flow scheduler (schedule.rs): main owns flow-schedules.json
+    // (0600) and the 30s tick loop that starts a due schedule's run — always
+    // air-gapped, re-verified against the flow file's current hash on every
+    // tick. schedules_set is the only way to (re)consent — creating a
+    // schedule, editing one, flipping enabled, or clearing a hash-mismatch
+    // suspension all round-trip through it (see ipc/schedules.rs's own doc
+    // comment); the renderer never sends a hash, only a flowPath.
+    schedules: {
+      list: () => call('schedules_list'),
+      set: (payload) => call('schedules_set', payload),
+      delete: (id) => call('schedules_delete', { id }),
+    },
+
+    // Remote run visibility (plan phase 3, remote.rs): read-only, ssh-backed
+    // visibility into another consented machine's flow-run history. main
+    // resolves host/repoPath from a hash-verified remote-sources.json record
+    // — the renderer only ever sends a sourceId, never a bare host/path (see
+    // remote.rs's own doc comment). No push: runs() is fetched on pane open
+    // and on the panel's own Refresh button only.
+    remote: {
+      sources: () => call('remote_sources'),
+      consent: (payload) => call('remote_consent', payload),
+      revoke: (id) => call('remote_revoke', { id }),
+      runs: (sourceId) => call('remote_runs', { sourceId }),
+      runDetail: (sourceId, flow, runId) => call('remote_run_detail', { sourceId, flow, runId }),
     },
 
     stt: {

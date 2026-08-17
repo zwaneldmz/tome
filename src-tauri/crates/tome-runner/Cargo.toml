@@ -1,0 +1,36 @@
+[package]
+name = "tome-runner"
+version = "0.1.0"
+edition = "2021"
+description = "Headless flow runner: executes one flow.json to completion outside the desktop app, for a server-side git checkout driven by systemd --user timers. See docs/remote-runner.md."
+
+[[bin]]
+name = "tome-runner"
+path = "src/main.rs"
+
+[dependencies]
+# The same tauri-free background flow-run engine (DAG scheduling, the live
+# run registry, realpath confinement, product promotion, agent spawn-policy
+# allowlists, and the air-gap subsystem) the desktop app's own `runs:*`
+# commands are built on — see that crate's own `lib.rs` doc comment for its
+# full membership. This binary supplies its own `RunnerEnv` wiring
+# (`runner_env.rs`) in place of the main crate's `flow_env.rs`, which reaches
+# `tauri::AppHandle`/`AppState` and is therefore off limits to a binary with
+# no Tauri dependency at all (see `docs/remote-runner.md` for why a
+# server-side runner deliberately carries no webview/IPC stack).
+tome-flow = { path = "../tome-flow" }
+# Same version pin as every other crate in this workspace (root `tome`
+# crate's own `Cargo.toml`, `tome-flow`'s) — `"full"` because this binary
+# needs the multi-threaded runtime (`#[tokio::main]`), process spawning
+# (transitively, via `tome_flow::flow::runner::spawn`), async fs, and
+# `time::sleep` for the completion-poll loop in `run_cmd.rs`.
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+
+# No `tempfile`, no `clap`, no `dirs`/`directories`: this slice's brief
+# grants exactly `tome-flow`, `tokio`, `serde_json`. Argv is hand-parsed
+# (`cli.rs`, mirroring `crates/tome-shim/src/args.rs`'s precedent — this
+# workspace has no `clap`), `$HOME`-relative paths are resolved by reading
+# `$HOME` directly (`home.rs`), and every test that needs a scratch
+# directory builds one under `std::env::temp_dir()` by hand rather than
+# pulling in `tempfile` for it.

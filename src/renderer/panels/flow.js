@@ -339,7 +339,15 @@ export class FlowPanel {
     const openText = el('button', 'flow-open-text', 'Open as text')
     openText.type = 'button'
     openText.addEventListener('click', () => this.openAsText())
-    actions.append(addBtn, saveBtn, runSplit, openText)
+    // Schedule…: a background run kicked off by main on a timer rather than
+    // a click — see scheduleFlowAction's own doc comment for the consent
+    // shape (a form, then a confirmModal restating exactly what is being
+    // granted, before schedules_set is ever called).
+    const scheduleBtn = el('button', 'flow-schedule', 'Schedule…')
+    scheduleBtn.type = 'button'
+    scheduleBtn.title = 'Run this flow automatically, on a timer — always air-gapped'
+    scheduleBtn.addEventListener('click', () => this.scheduleFlowAction())
+    actions.append(addBtn, saveBtn, runSplit, openText, scheduleBtn)
     bar.appendChild(actions)
     return bar
   }
@@ -1115,6 +1123,103 @@ export class FlowPanel {
     toast(`${this.flow.name} running — open Flow runs to watch`, 'ok')
   }
 
+  // Schedule… (plan §Flow products pipeline step 1.7): hand the flow to
+  // main's scheduler instead of running it once — a form for the repeat
+  // (every N minutes, or a daily UTC time), then a confirmModal that states
+  // verbatim what is being granted, exactly the two-step shape
+  // preferences.js's openAddDestinationModal already uses for a fresh
+  // consent. Reads (and, if dirty, saves) the file on disk first, same as
+  // runFlow: a schedule's own hash is taken at schedules_set time, so a
+  // stale save would get consented instead of what the canvas shows.
+  async scheduleFlowAction() {
+    if (!this.runGuards()) return
+    if (this.isDirty()) {
+      const ok = await confirmModal(
+        'Save and schedule?',
+        'A schedule reads the file on disk, so this canvas has to be saved before it can be scheduled.',
+        'Save and schedule',
+        this.element.ownerDocument
+      )
+      if (!ok) return
+      await this.save()
+      if (this.isDirty()) return // the save failed and already said so
+    }
+
+    const doc = this.element.ownerDocument
+    const m = modalShell('Schedule this flow', undefined, doc)
+    const field = (label, control) => {
+      m.body.appendChild(el('label', 'flow-field-label', label))
+      m.body.appendChild(control)
+      return control
+    }
+
+    const kindSelect = field('Repeats', el('select'))
+    for (const [value, text] of [
+      ['interval', 'Every N minutes'],
+      ['daily', 'Daily at (UTC)'],
+    ]) {
+      const opt = el('option', null, text)
+      opt.value = value
+      kindSelect.appendChild(opt)
+    }
+
+    const intervalGroup = el('div', 'flow-schedule-field')
+    const minutesInput = el('input')
+    minutesInput.type = 'number'
+    minutesInput.min = '1'
+    minutesInput.value = '60'
+    intervalGroup.append(el('label', 'flow-field-label', 'Minutes'), minutesInput)
+    m.body.appendChild(intervalGroup)
+
+    const dailyGroup = el('div', 'flow-schedule-field')
+    const timeInput = el('input')
+    timeInput.type = 'time'
+    timeInput.value = '09:00'
+    dailyGroup.append(el('label', 'flow-field-label', 'Time (UTC)'), timeInput)
+    m.body.appendChild(dailyGroup)
+
+    const paintKind = () => {
+      intervalGroup.classList.toggle('hidden', kindSelect.value !== 'interval')
+      dailyGroup.classList.toggle('hidden', kindSelect.value !== 'daily')
+    }
+    kindSelect.addEventListener('change', paintKind)
+    paintKind()
+
+    m.button('Continue', async () => {
+      let when
+      if (kindSelect.value === 'interval') {
+        const minutes = Math.max(1, Math.round(Number(minutesInput.value) || 0))
+        when = { kind: 'interval', minutes }
+      } else {
+        const [hour, minute] = timeInput.value.split(':').map(Number)
+        if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+          m.err.textContent = 'pick a time'
+          return
+        }
+        when = { kind: 'daily', hour, minute }
+      }
+      m.close()
+      const restated =
+        when.kind === 'interval'
+          ? `every ${when.minutes} minute${when.minutes === 1 ? '' : 's'}`
+          : `daily at ${timeInput.value} UTC`
+      const ok = await confirmModal(
+        'Schedule this flow?',
+        `${this.flow.name} — ${restated}. This schedule always runs air-gapped, even if "Spawn agents air-gapped" is off in Settings, and suspends itself the moment the flow file changes on disk.`,
+        'Schedule',
+        this.element.ownerDocument
+      )
+      if (!ok) return
+      try {
+        await tome.schedules.set({ flowPath: this.path, when, enabled: true })
+        toast(`${this.flow.name} scheduled — manage it under Settings`, 'ok')
+      } catch (err) {
+        toast(err.message)
+      }
+    })
+    m.button('Cancel', () => m.close(), 'ghost')
+  }
+
   // The original Run, now an explicit choice behind the ▾ (plan §3): topo-sort
   // the graph, spawn one terminal per node stacked as tabs in a single group,
   // and type each node's bootstrap prompt into its terminal without submitting
@@ -1132,11 +1237,18 @@ export class FlowPanel {
     // folder from this panel's path so the spawned agents' cwd lines up with
     // the paths their prompts tell them to read and write.
     const root = flowRoot(this.path)
+    // Run-scoped, the same shape the background runner mints under
+    // .tome/flows/<name>/runs/<runId>/artifacts (runner/mod.rs's start_run)
+    // — so a terminal-mode Run never contends for handoff files with a
+    // background Run of the same flow, or with an earlier terminal-mode Run
+    // of it either.
+    const runId = 'term-' + Date.now().toString(36)
+    const artifactsDir = `.tome/flows/${this.flow.name}/runs/${runId}/artifacts`
     try {
       // Agents write their handoff outputs here as soon as they finish, so
       // the directory needs to exist before any prompt referencing it is
       // typed — not lazily created by whichever node happens to finish first.
-      await tome.fs.mkdir(`${root}/.tome/flows/${this.flow.name}`)
+      await tome.fs.mkdir(`${root}/${artifactsDir}`)
     } catch (err) {
       toast(`could not prepare handoff folder: ${err.message}`)
       return
@@ -1177,7 +1289,7 @@ export class FlowPanel {
       // must produce:…"), and the typed prompt is exactly what the user is
       // asked to review — so flatten newlines to single spaces first and
       // let typeIntoPanel's strip stay a pure conductor-mirror.
-      const prompt = composeBootstrapPrompt(this.flow, node).replace(/\s*\n+\s*/g, ' ')
+      const prompt = composeBootstrapPrompt(this.flow, node, artifactsDir).replace(/\s*\n+\s*/g, ' ')
       setTimeout(() => typeIntoPanel(panel, prompt), delay)
     })
 
