@@ -377,7 +377,11 @@ fn runs_index_lock() -> &'static tokio::sync::Mutex<()> {
 /// newest-first is therefore just "insert at the front", never a sort: the
 /// run this call is promoting is by definition the most recent one there
 /// is.
-async fn update_runs_index(root: &Path, flow_dir: &Path, entry: RunsIndexEntry) -> Result<(), String> {
+async fn update_runs_index(
+    root: &Path,
+    flow_dir: &Path,
+    entry: RunsIndexEntry,
+) -> Result<(), String> {
     let _guard = runs_index_lock().lock().await;
 
     let path = flow_dir.join("runs-index.json");
@@ -484,7 +488,11 @@ async fn git_provenance(root: &Path) -> (Option<String>, bool) {
 
 // ---- json write ----
 
-async fn write_json_confined<T: Serialize>(root: &Path, path: &Path, value: &T) -> Result<(), String> {
+async fn write_json_confined<T: Serialize>(
+    root: &Path,
+    path: &Path,
+    value: &T,
+) -> Result<(), String> {
     let confined = confine::confine_real_abs(root, path, false)
         .await
         .ok_or_else(|| format!("{} escapes the workspace", path.display()))?;
@@ -585,7 +593,10 @@ mod tests {
             "*\n"
         );
         let product_path = out_dir.join("run1").join("n1-out.md");
-        assert_eq!(std::fs::read_to_string(&product_path).unwrap(), "hello world");
+        assert_eq!(
+            std::fs::read_to_string(&product_path).unwrap(),
+            "hello world"
+        );
 
         let mut hasher = Sha256::new();
         hasher.update(b"hello world");
@@ -619,11 +630,7 @@ mod tests {
         let root = workspace();
         seed_run(&root, "demo", "run1", "content");
         std::fs::create_dir_all(root.join(".tome/flows/demo/out")).unwrap();
-        std::fs::write(
-            root.join(".tome/flows/demo/out/.gitignore"),
-            "custom\n",
-        )
-        .unwrap();
+        std::fs::write(root.join(".tome/flows/demo/out/.gitignore"), "custom\n").unwrap();
 
         promote_and_manifest(base_request(&root, "demo", "run1"))
             .await
@@ -747,22 +754,21 @@ mod tests {
             r#"{"version":1,"name":"demo","nodes":[],"edges":[]}"#,
         )
         .unwrap();
-        std::fs::create_dir_all(
-            root.join(".tome/flows/demo/runs/run1/artifacts"),
-        )
-        .unwrap();
+        std::fs::create_dir_all(root.join(".tome/flows/demo/runs/run1/artifacts")).unwrap();
 
         let err = promote_and_manifest(base_request(&root, "demo", "run1"))
             .await
             .unwrap_err();
         assert!(err.contains("n1-out.md"));
-        assert!(!root.join(".tome/flows/demo/out").exists() || {
-            // ensure_dir/gitignore may have landed before the missing-file
-            // error — either way, no manifest and no runs-index entry.
-            !root
-                .join(".tome/flows/demo/out/run1/manifest.json")
-                .exists()
-        });
+        assert!(
+            !root.join(".tome/flows/demo/out").exists() || {
+                // ensure_dir/gitignore may have landed before the missing-file
+                // error — either way, no manifest and no runs-index entry.
+                !root
+                    .join(".tome/flows/demo/out/run1/manifest.json")
+                    .exists()
+            }
+        );
         assert!(!root.join(".tome/flows/demo/runs-index.json").exists());
     }
 

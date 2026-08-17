@@ -1201,12 +1201,18 @@ async fn runs_changed_sends_the_full_snapshot_array_on_every_transition() {
     let result = start_run(runs.clone(), e.clone(), path).await;
     let id = result["id"].as_str().unwrap().to_string();
     settled(&runs, &id, 8000).await;
+    // The products promotion runs as its own spawned task after the run
+    // settles, ending in one more persist+push (the snapshot where
+    // "products" stops being null). Await it, or this count races the
+    // promotion — green on a fast disk, red on CI.
+    products_settled(&runs, &id, 8000).await;
 
     {
         let pushes = recorders.pushes.lock().unwrap();
         // One per transition and no more: the run starting, each node
-        // going running then done, and the run settling.
-        assert_eq!(pushes.len(), 6);
+        // going running then done, the run settling, and the settled
+        // run's products landing.
+        assert_eq!(pushes.len(), 7);
         let first_run = pushes[0]
             .as_array()
             .unwrap()
@@ -1241,6 +1247,11 @@ async fn runs_changed_sends_the_full_snapshot_array_on_every_transition() {
     .await;
     let two_id = two["id"].as_str().unwrap().to_string();
     settled(&runs, &two_id, 8000).await;
+    // Same race as above: the final push under comparison must be the
+    // post-promotion one for BOTH runs, or snapshot_all (live, already
+    // promoted) can outrun the last recorded push.
+    products_settled(&runs, &id, 8000).await;
+    products_settled(&runs, &two_id, 8000).await;
     let pushes = recorders.pushes.lock().unwrap();
     let ids_in_last: Vec<&str> = pushes
         .last()
@@ -1790,12 +1801,15 @@ fn sha256_hex(bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 #[tokio::test]
-async fn products_e2e_promotes_only_the_terminal_nodes_output_with_gitignore_and_a_matching_hash()
-{
+async fn products_e2e_promotes_only_the_terminal_nodes_output_with_gitignore_and_a_matching_hash() {
     let root = workspace();
     let mut doc = flow_doc("products-e2e", &["n1", "n2"], &[("n1", "n2")]);
     doc["nodes"][0]["outputs"] = json!([{"name": "notes"}]);
@@ -1910,8 +1924,7 @@ async fn products_e2e_out_latest_and_runs_index_both_advance_on_a_second_run_of_
     );
 
     let index: Value = serde_json::from_str(
-        &std::fs::read_to_string(root.join(".tome/flows/products-latest/runs-index.json"))
-            .unwrap(),
+        &std::fs::read_to_string(root.join(".tome/flows/products-latest/runs-index.json")).unwrap(),
     )
     .unwrap();
     let ids: Vec<&str> = index["runs"]

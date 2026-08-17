@@ -248,7 +248,7 @@ pub fn next_due(when: &When, last_run: Option<i64>, now: i64) -> Option<i64> {
             let slot = day_start + i64::from(*hour) * HOUR_MS + i64::from(*minute) * MINUTE_MS;
             if now < slot {
                 return None; // today's slot has not arrived yet — a stale
-                              // last_run from a previous day never fires it early
+                             // last_run from a previous day never fires it early
             }
             match last_run {
                 Some(lr) if lr >= slot => None, // already ran for today's slot
@@ -455,7 +455,13 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn sched(id: &str, when: When, enabled: bool, suspended: Option<&str>, last_run: Option<i64>) -> Schedule {
+    fn sched(
+        id: &str,
+        when: When,
+        enabled: bool,
+        suspended: Option<&str>,
+        last_run: Option<i64>,
+    ) -> Schedule {
         Schedule {
             id: id.to_string(),
             flow_path: "/ws/.tome/flows/x.flow.json".to_string(),
@@ -472,14 +478,20 @@ mod tests {
     #[test]
     fn next_due_interval_never_run_is_due_immediately() {
         let now = 10 * DAY_MS;
-        assert_eq!(next_due(&When::Interval { minutes: 30 }, None, now), Some(now));
+        assert_eq!(
+            next_due(&When::Interval { minutes: 30 }, None, now),
+            Some(now)
+        );
     }
 
     #[test]
     fn next_due_interval_not_yet_due_before_the_boundary() {
         let last_run = 10 * DAY_MS;
         let now = last_run + 29 * MINUTE_MS;
-        assert_eq!(next_due(&When::Interval { minutes: 30 }, Some(last_run), now), None);
+        assert_eq!(
+            next_due(&When::Interval { minutes: 30 }, Some(last_run), now),
+            None
+        );
     }
 
     #[test]
@@ -507,14 +519,20 @@ mod tests {
     #[test]
     fn next_due_daily_not_due_before_todays_slot() {
         let now = 10 * DAY_MS + 8 * HOUR_MS; // 08:00, slot is 09:00
-        assert_eq!(next_due(&When::Daily { hour: 9, minute: 0 }, None, now), None);
+        assert_eq!(
+            next_due(&When::Daily { hour: 9, minute: 0 }, None, now),
+            None
+        );
     }
 
     #[test]
     fn next_due_daily_due_after_slot_when_never_run() {
         let now = 10 * DAY_MS + 14 * HOUR_MS;
         let slot = 10 * DAY_MS + 9 * HOUR_MS;
-        assert_eq!(next_due(&When::Daily { hour: 9, minute: 0 }, None, now), Some(slot));
+        assert_eq!(
+            next_due(&When::Daily { hour: 9, minute: 0 }, None, now),
+            Some(slot)
+        );
     }
 
     #[test]
@@ -523,7 +541,11 @@ mod tests {
         let slot = 10 * DAY_MS + 9 * HOUR_MS;
         let yesterdays_run = 9 * DAY_MS + 9 * HOUR_MS;
         assert_eq!(
-            next_due(&When::Daily { hour: 9, minute: 0 }, Some(yesterdays_run), now),
+            next_due(
+                &When::Daily { hour: 9, minute: 0 },
+                Some(yesterdays_run),
+                now
+            ),
             Some(slot)
         );
     }
@@ -543,10 +565,14 @@ mod tests {
         // Just past midnight, before today's slot — a run from LATE
         // yesterday (which is itself after YESTERDAY's slot) must not make
         // today's not-yet-arrived slot fire early.
-        let now = 10 * DAY_MS + 1 * HOUR_MS;
+        let now = 10 * DAY_MS + HOUR_MS;
         let late_yesterday = 9 * DAY_MS + 23 * HOUR_MS;
         assert_eq!(
-            next_due(&When::Daily { hour: 9, minute: 0 }, Some(late_yesterday), now),
+            next_due(
+                &When::Daily { hour: 9, minute: 0 },
+                Some(late_yesterday),
+                now
+            ),
             None
         );
     }
@@ -558,8 +584,20 @@ mod tests {
         let now = 10 * DAY_MS;
         let schedules = vec![
             sched("a", When::Interval { minutes: 5 }, true, None, None),
-            sched("b-disabled", When::Interval { minutes: 5 }, false, None, None),
-            sched("c-suspended", When::Interval { minutes: 5 }, true, Some("hash-mismatch"), None),
+            sched(
+                "b-disabled",
+                When::Interval { minutes: 5 },
+                false,
+                None,
+                None,
+            ),
+            sched(
+                "c-suspended",
+                When::Interval { minutes: 5 },
+                true,
+                Some("hash-mismatch"),
+                None,
+            ),
         ];
         assert_eq!(due_schedule_ids(&schedules, now), vec!["a".to_string()]);
     }
@@ -569,7 +607,13 @@ mod tests {
         let now = 10 * DAY_MS;
         let schedules = vec![
             sched("a", When::Interval { minutes: 5 }, true, None, None),
-            sched("b-not-due", When::Interval { minutes: 5 }, true, None, Some(now)),
+            sched(
+                "b-not-due",
+                When::Interval { minutes: 5 },
+                true,
+                None,
+                Some(now),
+            ),
         ];
         let plan = plan_tick(&schedules, true, now);
         assert_eq!(
@@ -584,7 +628,13 @@ mod tests {
     #[test]
     fn plan_tick_locked_with_nothing_due_reports_zero() {
         let now = 10 * DAY_MS;
-        let schedules = vec![sched("a", When::Interval { minutes: 5 }, true, None, Some(now))];
+        let schedules = vec![sched(
+            "a",
+            When::Interval { minutes: 5 },
+            true,
+            None,
+            Some(now),
+        )];
         assert_eq!(
             plan_tick(&schedules, true, now),
             TickPlan {
@@ -612,7 +662,10 @@ mod tests {
     #[test]
     fn decide_due_schedule_suspends_on_hash_mismatch() {
         let s = sched("a", When::Interval { minutes: 5 }, true, None, None);
-        assert_eq!(decide_due_schedule(&s, "not-the-stored-hash", false), DueOutcome::Suspend);
+        assert_eq!(
+            decide_due_schedule(&s, "not-the-stored-hash", false),
+            DueOutcome::Suspend
+        );
     }
 
     #[test]
@@ -626,14 +679,20 @@ mod tests {
     fn decide_due_schedule_skips_when_the_same_flow_is_already_running() {
         let mut s = sched("a", When::Interval { minutes: 5 }, true, None, None);
         s.flow_sha1 = "matching".to_string();
-        assert_eq!(decide_due_schedule(&s, "matching", true), DueOutcome::AlreadyRunning);
+        assert_eq!(
+            decide_due_schedule(&s, "matching", true),
+            DueOutcome::AlreadyRunning
+        );
     }
 
     #[test]
     fn decide_due_schedule_starts_when_hash_matches_and_nothing_is_running() {
         let mut s = sched("a", When::Interval { minutes: 5 }, true, None, None);
         s.flow_sha1 = "matching".to_string();
-        assert_eq!(decide_due_schedule(&s, "matching", false), DueOutcome::Start);
+        assert_eq!(
+            decide_due_schedule(&s, "matching", false),
+            DueOutcome::Start
+        );
     }
 
     // ---- flow_path_has_a_running_run ----
@@ -646,7 +705,10 @@ mod tests {
         ]);
         assert!(flow_path_has_a_running_run(&snapshot, "/ws/a.flow.json"));
         assert!(!flow_path_has_a_running_run(&snapshot, "/ws/b.flow.json"));
-        assert!(!flow_path_has_a_running_run(&snapshot, "/ws/nope.flow.json"));
+        assert!(!flow_path_has_a_running_run(
+            &snapshot,
+            "/ws/nope.flow.json"
+        ));
     }
 
     #[test]
@@ -658,9 +720,14 @@ mod tests {
 
     #[tokio::test]
     async fn scheduled_run_airgap_is_unconditionally_frozen_true() {
-        assert!(SCHEDULED_RUN_AIRGAP);
+        // Compile-time, not runtime: flipping the constant can never even
+        // build, let alone pass CI.
+        const { assert!(SCHEDULED_RUN_AIRGAP) };
         let frozen = crate::flow_env::frozen_airgap_default(SCHEDULED_RUN_AIRGAP);
-        assert!((frozen)().await, "a scheduled run's air gap must never resolve false");
+        assert!(
+            (frozen)().await,
+            "a scheduled run's air gap must never resolve false"
+        );
     }
 
     // ---- validate_when ----
@@ -672,14 +739,26 @@ mod tests {
 
     #[test]
     fn validate_when_rejects_an_out_of_range_daily_time() {
-        assert!(validate_when(&When::Daily { hour: 24, minute: 0 }).is_err());
-        assert!(validate_when(&When::Daily { hour: 0, minute: 60 }).is_err());
+        assert!(validate_when(&When::Daily {
+            hour: 24,
+            minute: 0
+        })
+        .is_err());
+        assert!(validate_when(&When::Daily {
+            hour: 0,
+            minute: 60
+        })
+        .is_err());
     }
 
     #[test]
     fn validate_when_accepts_good_values() {
         assert!(validate_when(&When::Interval { minutes: 1 }).is_ok());
-        assert!(validate_when(&When::Daily { hour: 23, minute: 59 }).is_ok());
+        assert!(validate_when(&When::Daily {
+            hour: 23,
+            minute: 59
+        })
+        .is_ok());
         assert!(validate_when(&When::Daily { hour: 0, minute: 0 }).is_ok());
     }
 
@@ -716,10 +795,10 @@ mod tests {
         for bad in [
             "",
             "not a date",
-            "2024-02-29T12:34:56.789",   // missing trailing Z
-            "2024-02-29 12:34:56.789Z",  // missing T
-            "2024-13-01T00:00:00.000Z",  // month 13
-            "2024-02-29T12:34:56.78Z",   // millis too short -> wrong length
+            "2024-02-29T12:34:56.789",  // missing trailing Z
+            "2024-02-29 12:34:56.789Z", // missing T
+            "2024-13-01T00:00:00.000Z", // month 13
+            "2024-02-29T12:34:56.78Z",  // millis too short -> wrong length
         ] {
             assert_eq!(parse_iso8601_ms(bad), None, "should reject {bad:?}");
         }
@@ -736,7 +815,13 @@ mod tests {
     #[test]
     fn new_schedule_id_avoids_a_forced_collision() {
         let forced = new_schedule_id(&[]);
-        let existing = vec![sched(&forced, When::Interval { minutes: 5 }, true, None, None)];
+        let existing = vec![sched(
+            &forced,
+            When::Interval { minutes: 5 },
+            true,
+            None,
+            None,
+        )];
         assert_ne!(new_schedule_id(&existing), forced);
     }
 
@@ -748,7 +833,10 @@ mod tests {
         let mut store = Schedules::default();
         store.schedules.push(sched(
             "sched-1",
-            When::Daily { hour: 9, minute: 30 },
+            When::Daily {
+                hour: 9,
+                minute: 30,
+            },
             true,
             None,
             None,

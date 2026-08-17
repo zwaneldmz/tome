@@ -151,10 +151,7 @@ pub async fn schedules_delete(
 /// to thread between them.
 pub(crate) async fn run_tick(app: &AppHandle) {
     let state = app.state::<AppState>();
-    let locked = *state
-        .locked
-        .read()
-        .expect("AppState.locked lock poisoned");
+    let locked = *state.locked.read().expect("AppState.locked lock poisoned");
     let Ok(dir) = app.path().app_data_dir() else {
         return;
     };
