@@ -565,7 +565,7 @@ mod tests {
         // Just past midnight, before today's slot — a run from LATE
         // yesterday (which is itself after YESTERDAY's slot) must not make
         // today's not-yet-arrived slot fire early.
-        let now = 10 * DAY_MS + 1 * HOUR_MS;
+        let now = 10 * DAY_MS + HOUR_MS;
         let late_yesterday = 9 * DAY_MS + 23 * HOUR_MS;
         assert_eq!(
             next_due(
@@ -720,7 +720,9 @@ mod tests {
 
     #[tokio::test]
     async fn scheduled_run_airgap_is_unconditionally_frozen_true() {
-        assert!(SCHEDULED_RUN_AIRGAP);
+        // Compile-time, not runtime: flipping the constant can never even
+        // build, let alone pass CI.
+        const { assert!(SCHEDULED_RUN_AIRGAP) };
         let frozen = crate::flow_env::frozen_airgap_default(SCHEDULED_RUN_AIRGAP);
         assert!(
             (frozen)().await,

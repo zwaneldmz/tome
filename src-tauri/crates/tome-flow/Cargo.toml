@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 description = "Tauri-free background flow-run engine: DAG scheduling, the live run registry, realpath confinement, product promotion, agent spawn-policy allowlists, and the air-gap subsystem."
 
+# The runner's `RunnerEnv` is a dependency-injection seam whose fields are
+# `Arc<dyn Fn(...) + Send + Sync>` callbacks — same deliberate allow, with the
+# same rationale, as the root `tome` crate's own [lints.clippy] table.
+[lints.clippy]
+type_complexity = "allow"
+
 [lib]
 name = "tome_flow"
 path = "src/lib.rs"
