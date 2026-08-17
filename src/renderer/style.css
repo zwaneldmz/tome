@@ -3299,8 +3299,9 @@ canvas.brain-graph {
 
 /* ---- remote run visibility (plan phase 3) ----
    A second, independent section under the local runs list — one group per
-   consented remote source. Rows reuse .runs-row/.runs-badge/.runs-st-*/
-   .runs-flow/.runs-id/.runs-when/.runs-caret verbatim (the same pill styles
+   consented remote source. Rows reuse .runs-row, .runs-badge, the
+   .runs-st- pills, .runs-flow/.runs-id/.runs-when/.runs-caret verbatim
+   (the same pill styles
    the local list already established), so a remote row and a local row read
    as the same kind of object; only the group chrome and the expanded detail
    body below are new.
