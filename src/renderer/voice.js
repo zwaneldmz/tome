@@ -44,6 +44,8 @@ let reply = '' // accumulated deltas of the current assistant turn
 let spokenUpTo = 0 // reply prefix already handed to speechSynthesis
 let speakingNow = false // an utterance is currently playing
 let useApple = false // stream via Apple's on-device recognizer (set in initVoice)
+let streamReady = false // this utterance's streaming session is live (per-utterance)
+let beginPromise = null // the in-flight stt.begin for the current utterance
 let heardSoFar = '' // latest streaming partial, for push-to-talk live-write
 let composerPrefix = '' // composer value before the current utterance began
 
@@ -224,18 +226,31 @@ async function startListening() {
     onSpeechStart: () => {
       utter = []
       heardSoFar = ''
+      streamReady = false
       // The composer contents at the moment this utterance began — streaming
       // partials and the final text both rewrite `prefix + ' ' + <heard>`
       // over it, so a user's already-typed text is never clobbered.
       composerPrefix = pane()?.input?.value ?? ''
       // Stream when Apple's recognizer is the engine: open a fresh session at
-      // the mic's actual rate (every utterance = one session). If begin fails
-      // (not authorized/available after all), drop to the batch path for the
-      // rest of this session rather than hard-failing the whole voice toggle.
+      // the mic's actual rate (every utterance = one session). `begin` reports
+      // failure as a RESOLVED `{ error }` value, not a rejection, so the
+      // result shape is checked here — not just `.catch` — before `streamReady`
+      // flips. A failed/unavailable begin degrades to the batch path.
       if (useApple) {
-        tome.stt.begin(rec.ctx.sampleRate).catch(() => {
-          useApple = false
-        })
+        beginPromise = tome.stt
+          .begin(rec.ctx.sampleRate)
+          .then((r) => {
+            if (r?.error) {
+              useApple = false
+              streamReady = false
+            } else {
+              streamReady = true
+            }
+          })
+          .catch(() => {
+            useApple = false
+            streamReady = false
+          })
       }
       // Barge-in: talking over the assistant cancels TTS and becomes the
       // next user turn. The mic is live during 'speaking' precisely so this
@@ -261,7 +276,9 @@ async function startListening() {
       // Stream the live chunk to the Apple recognizer as 16-bit PCM; a
       // failed append is not worth surfacing (the utterance is already being
       // collected in `utter`, so the batch fallback still has the audio).
-      if (useApple) tome.stt.append(floatToPcm16(c)).catch(() => {})
+      // Only once the session is actually live — a begin that hasn't settled
+      // (or resolved `{ error }`) must not feed a recognizer that isn't there.
+      if (useApple && streamReady) tome.stt.append(floatToPcm16(c)).catch(() => {})
     } else if (state === 'speaking' && bargeIn) {
       vad.push(c) // only listening for the barge-in onset
     }
@@ -290,7 +307,14 @@ async function endUtterance() {
   if (!total) return
   setState('transcribing')
   let res
-  if (useApple) {
+  if (useApple && beginPromise) {
+    // Wait for this utterance's begin to settle before deciding. Its outcome
+    // (a resolved `{ error }` value or a rejection) already flipped
+    // streamReady / useApple, so a failed begin leaves streamReady false and
+    // falls through to the batch path below instead of hard-failing.
+    await beginPromise
+  }
+  if (useApple && streamReady) {
     // Streaming: the chunks already went to main via stt.append; end the
     // session and take its final transcription (same { text } / { error }
     // shape the batch path produces, so the handling below is shared).
@@ -467,6 +491,7 @@ export function stopVoice() {
   // A live streaming session is abandoned mid-utterance — cancel it so the
   // recognizer stops consuming audio; the result (if any) is dropped.
   if (useApple) tome.stt.cancel().catch(() => {})
+  streamReady = false
   // The pane (if open) keeps whatever partial reply it rendered — it
   // finalizes it when its own chat:done lands. Our copy flushes directly.
   if (!pane()) flushHistory(VOICE_CHAT_ID, history)
