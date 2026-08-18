@@ -18,7 +18,7 @@
 // (fs:readDir(p), store:get(key), conductor:allowRun(v), …); Electron IPC
 // has no named-argument concept for a bare scalar, so this shim wraps each
 // in a descriptive single-key object (see the per-call comments below).
-// Tauri's JS→Rust argument convention is camelCase-in/snake_case-out (e.g.
+// Tauri's JS→Rust argument convention is camelCase-in/snake_case-out (for example
 // `{ paneId }` reaches a Rust parameter named `pane_id`), so whichever task
 // writes the matching #[tauri::command] signatures needs to match the key
 // names chosen here — they are a judgment call, not read off any contract.

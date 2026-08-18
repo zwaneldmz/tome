@@ -616,7 +616,7 @@ export async function restoreLayout() {
     } catch {}
     return
   }
-  // Panels that failed to deserialize (e.g. a doc iframe with a null content
+  // Panels that failed to deserialize (for example a doc iframe with a null content
   // element) come back without a renderer-side instance — drop them. A panel
   // whose content element exists but isn't connected yet is NOT stale: that
   // is a background tab (dockview's 'onlyWhenVisible' renderer keeps its

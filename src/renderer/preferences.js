@@ -73,7 +73,7 @@ export async function buildAgentsSection() {
 
   // Enabled/disabled picker — the same 'agents-disabled' key the onboarding
   // wizard's Agents step writes and the ＋ menu reads. Built-ins first, then
-  // customs; an unavailable CLI can be toggled here (it will simply offer
+  // customs; an unavailable CLI can be toggled here (it simply offers
   // itself grayed-out when it lands back in the menu).
   const disabled = new Set((await tome.store.get('agents-disabled')) || [])
   if (listed.length) {
@@ -202,8 +202,8 @@ export async function buildAgentsSection() {
 // `export-destinations.json` entry main hashed at consent time
 // (export_consent, src-tauri/src/export.rs) — this section only ever lists
 // what main already verified and only ever adds through that same consent
-// path, so a destination shown here can never disagree with what main will
-// actually use.
+// path, so a destination shown here can never disagree with what main
+// actually uses.
 export async function buildExportSection(closePreferences) {
   const section = el('section', 'prefs-section')
   section.append(el('h4', '', 'Export destinations'))
@@ -266,7 +266,7 @@ export async function buildExportSection(closePreferences) {
 // Custom multi-field form built directly on modalShell (the shared
 // prompt/choice/confirm helpers each cover a single value, not a form this
 // shaped) — the same field(label, control) idiom panels/flow.js's node
-// editor modal uses. Submitting restates exactly what will be consented to
+// editor modal uses. Submitting restates exactly what is consented to
 // in a separate confirmModal before ever calling export_consent — the same
 // "state it back before granting" discipline repo-egress.js's consentModal
 // applies to the repo-allowlist flow, except here the content being
@@ -521,7 +521,7 @@ export async function buildRemoteSourcesSection(closePreferences) {
 
 // Label/Host/Repository-path form on modalShell — the same field(label,
 // control) idiom openAddDestinationModal (above) uses. Submitting restates
-// exactly what will be consented to in a separate confirmModal before ever
+// exactly what is consented to in a separate confirmModal before ever
 // calling remote_consent: main never re-verifies host/repoPath against
 // anything external (unlike the repo-allowlist flow's file hash — see
 // remote.rs's own doc comment, "self-referential, same as

@@ -136,7 +136,7 @@ export async function egressModal(paneId) {
   setTimeout(() => field.focus(), 0)
 }
 
-// Second-factor re-auth before main will spawn an UNSANDBOXED (ungapped) pane
+// Second-factor re-auth before main spawns an UNSANDBOXED (ungapped) pane
 // (TOME-001). Main answers pty:create with { reauth: true } and spawns nothing
 // until it gets back a verified passphrase/TOTP. Resolves to the credentials to
 // retry with, or null if the user dismisses (Escape/scrim/Cancel) — in which
