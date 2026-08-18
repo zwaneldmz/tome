@@ -235,7 +235,7 @@ pub(crate) async fn complete_once(
 /// for the provider-resolution/tool-loop split with `conductor::chat`.
 #[tauri::command]
 #[allow(unused_variables)] // brain_ws: accepted for wire-shape completeness, unused this phase — see module doc comment
-#[allow(clippy::too_many_arguments)] // Tauri command args map 1:1 to the renderer's wire shape; a struct would break the contract
+#[allow(clippy::too_many_arguments)] // kept flat for consistency with the existing verbose/gate args; a struct arg would deserialize fine but is churn mid-contract
 pub async fn chat_send(
     app: AppHandle,
     state: State<'_, AppState>,
