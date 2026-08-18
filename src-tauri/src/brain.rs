@@ -53,12 +53,12 @@ fn brains_root() -> PathBuf {
 
 /// Ports `safe(ws)`: workspace names are free renderer text, not vetted
 /// like `pty:create`'s `kind` — sanitize before using in a path. `/`, `\`,
-/// `:`, `.` all become `_` (collisions, e.g. "a/b" and "a.b" both -> "a_b",
+/// `:`, `.` all become `_` (collisions, for example "a/b" and "a.b" both -> "a_b",
 /// are accepted — same tradeoff the JS original documents). Only a
 /// genuinely empty *input* can produce an empty result here (the
 /// replacement is character-for-character, never shortening), matching the
 /// JS original's `|| 'workspace'` fallback firing only on that case — a
-/// string of e.g. three dots becomes `"___"`, not `"workspace"`.
+/// string of, for example, three dots becomes `"___"`, not `"workspace"`.
 fn sanitize_ws(ws: &str) -> String {
     let cleaned: String = ws
         .chars()
@@ -392,7 +392,7 @@ fn build_index(ws: &str) -> Index {
 /// `must_exist = false` (write-style targets): the target may not exist
 /// yet, so the nearest *existing* ancestor of its parent directory is
 /// confined instead — this is what catches a symlink anywhere in the
-/// already-existing part of the path (e.g. `root/link -> /etc` with a
+/// already-existing part of the path (for example `root/link -> /etc` with a
 /// not-yet-created `root/link/new.md`). Unlike the `must_exist = true`
 /// case, landing exactly on `root` itself is valid here (a note written
 /// directly into the vault root): `Path::starts_with` already treats

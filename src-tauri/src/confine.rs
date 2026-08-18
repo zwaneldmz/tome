@@ -254,7 +254,7 @@ pub fn confined_real_path(state: &State<'_, AppState>, path: &Path) -> Result<Pa
 /// [`confined_real_path_core`]. Unlike the real-path resolver (which
 /// requires the target to EXIST, since `canonicalize` is `realpath(3)` and
 /// `realpath` fails on a missing file), a write tool must be able to CREATE
-/// a fresh file (e.g. a new test), so the existence check moves one level
+/// a fresh file (for example a new test), so the existence check moves one level
 /// up: the PARENT directory must exist and canonically resolve inside a
 /// confined root, while the final file name itself is a not-yet-resolvable
 /// leaf appended back onto that resolved parent. A symlinked parent whose

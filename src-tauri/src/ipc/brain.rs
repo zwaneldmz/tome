@@ -44,7 +44,7 @@ pub async fn brain_open(
 /// resolved value (`panels/brain.js`'s `dispose()` calls it without
 /// awaiting/using the result), so this returns `null` — the same
 /// undefined-over-IPC convention already used elsewhere in this crate
-/// (e.g. `ipc::fs::fs_write_file`).
+/// (for example `ipc::fs::fs_write_file`).
 #[tauri::command]
 pub async fn brain_close(state: State<'_, AppState>, ws: String) -> Result<Value, String> {
     lock_gate::guard(&state, "brain:close")?;

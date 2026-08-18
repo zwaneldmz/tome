@@ -35,7 +35,7 @@ pub struct Skill {
     /// Frontmatter `description`; `""` when absent or unparseable.
     pub description: String,
     /// Path relative to the skills root, WITHOUT the trailing `SKILL.md`
-    /// (e.g. `orchestration`, `mattpocock/tdd`).
+    /// (for example `orchestration`, `mattpocock/tdd`).
     pub rel: String,
 }
 

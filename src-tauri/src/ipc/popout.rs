@@ -5,7 +5,7 @@
 //! `ipcMain.handle('popout:close', ...)` (~1131): not calling this is how
 //! "cancel" works — the window simply stays open.
 //!
-//! The `id` argument is the Tauri window LABEL of the popout (e.g.
+//! The `id` argument is the Tauri window LABEL of the popout (for example
 //! `popout-dock-3`). Under Electron it was a numeric `BrowserWindow.id`;
 //! Tauri has no numeric window ids, and labels are the lookup key
 //! (`app.get_webview_window(label)`), so the renderer shim sends the label

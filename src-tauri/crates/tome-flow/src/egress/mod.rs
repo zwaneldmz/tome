@@ -209,7 +209,7 @@ pub enum RepoAllowlistReport {
         /// Patterns that did not, each with a reason.
         rejected: Vec<RejectedPattern>,
         /// Whether a currently-stored consent for this root's hash matches
-        /// THIS read's hash — i.e. whether the user has already agreed to
+        /// THIS read's hash — that is whether the user has already agreed to
         /// exactly this file content.
         consented: bool,
     },
@@ -284,7 +284,7 @@ struct Inner {
     /// root -> hosts CURRENTLY folded into the effective allowlist —
     /// mirrors `appliedRepos`. Distinct from `repo_consents` for the same
     /// reason the original keeps two maps: a consent can exist for a root
-    /// whose hosts are not (yet, or no longer) applied, e.g. mid-reapply.
+    /// whose hosts are not (yet, or no longer) applied, for example, mid-reapply.
     applied_repos: HashMap<String, Vec<String>>,
     /// Set once by [`EgressState::load_repo_consents`] (mirrors the JS
     /// original's module-level `consentsFile`, set once at boot from
@@ -429,7 +429,7 @@ impl EgressState {
     /// never holds (see the top doc comment). The integrator calls this
     /// first to get the authoritative new mode, then walks the pane's real
     /// tunnels itself, keeping only those `pane_mode` no longer needs to
-    /// explain (i.e. ones independently allowed by the compiled matcher).
+    /// explain (that is ones independently allowed by the compiled matcher).
     pub fn relock_pane(&self, id: &str) -> bool {
         let mut inner = self.lock();
         let Some(record) = inner.panes.get_mut(id) else {
@@ -788,7 +788,7 @@ impl Default for EgressState {
 
 /// sha1 hex digest of `text` — used to fingerprint a repo's `.tome/
 /// egress.json` RAW TEXT (not its parsed form) for consent pinning. `pub`
-/// so a future caller (e.g. a UI-facing diagnostic, or `ipc::egress`'s real
+/// so a future caller (for example a UI-facing diagnostic, or `ipc::egress`'s real
 /// implementation) never needs to reimplement this one line.
 pub fn sha1_hex(text: &str) -> String {
     let digest = Sha1::digest(text.as_bytes());

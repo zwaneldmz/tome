@@ -34,7 +34,7 @@
 //! the child, and raw `fork()` in a multithreaded process is exactly the
 //! footgun `Command` exists to paper over) to start the REAL agent shell as
 //! a CHILD process, dropping capabilities and arming `PR_SET_PDEATHSIG` in
-//! that child via `pre_exec` — i.e. between the fork and the child's own
+//! that child via `pre_exec` — that is between the fork and the child's own
 //! `execve`, exactly where the plan's ordering says. `tome-shim` itself
 //! then supervises: forwards `SIGTERM`/`SIGINT` to the child, waits for it,
 //! and exits with its translated exit status. This IS the "PID 1 of the
@@ -146,7 +146,7 @@ pub fn run(args: ShimArgs) -> ! {
     // this module's top doc comment and self_unshare's TODO(landlock)).
     // Say so loudly, on THIS process's own stderr, every time either path
     // is actually present — not only in a source comment a future spawn's
-    // operator will never read: the network-namespace egress kill below is
+    // operator never reads: the network-namespace egress kill below is
     // real; the config-dir-hidden / auth-file-hidden half of the posture
     // bwrap's rung 1 and macOS's seatbelt profile both provide is NOT, on
     // this rung, yet.
@@ -392,7 +392,7 @@ const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
 /// Drops every capability from this process's effective/permitted/
 /// inheritable sets — `capset(2)` with all-zero data, equivalent to what
 /// `libcap`'s `cap_set_proc(cap_init())` does. Called from
-/// [`run`]'s `pre_exec` closure, i.e. in the forked child, immediately
+/// [`run`]'s `pre_exec` closure, that is in the forked child, immediately
 /// before it execs the real agent shell: `tome-shim` itself needed
 /// `cap_net_admin` (from bwrap's `--cap-add cap_net_admin`) to bring `lo`
 /// up and bind inside the netns, but the agent process that's about to

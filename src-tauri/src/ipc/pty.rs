@@ -1456,7 +1456,7 @@ mod tests {
     #[test]
     fn build_pty_command_env_is_exactly_what_was_given_not_merged_with_this_process() {
         // Seed a known value into THIS process's env first, so the leak-check
-        // below stays meaningful even on a minimal CI container (e.g. fedora)
+        // below stays meaningful even on a minimal CI container (for example fedora)
         // that sets neither USER nor LOGNAME.
         std::env::set_var("USER", "tome-test-user");
         let env = vec![

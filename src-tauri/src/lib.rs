@@ -73,7 +73,7 @@ fn truthy_env(name: &str) -> bool {
 /// Builds the plugin that injects `window.__TOME_BOOT__` before any page
 /// script runs, on every window (including the config-declared main
 /// window). Mirrors `src/preload/index.js`'s `home`/`shotMode`/`profile`
-/// properties — those were computed at Electron preload time (i.e. before
+/// properties — those were computed at Electron preload time (that is before
 /// the renderer's own script ran), which a plugin's `js_init_script` is the
 /// Tauri equivalent of. `WebviewWindowBuilder::initialization_script`
 /// would NOT reach the main window here, since that window comes from

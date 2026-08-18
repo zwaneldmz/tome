@@ -419,7 +419,7 @@ pub fn format_iso8601_ms(ms: i64) -> String {
 /// that exact fixed-width shape byte-for-byte — deliberately strict (see
 /// this section's own doc comment on why a lenient general parser is not
 /// needed): a `lastRun` that fails to parse is treated as `None` by
-/// [`due_schedule_ids`]'s caller, i.e. "never run", which is the safe
+/// [`due_schedule_ids`]'s caller, that is "never run", which is the safe
 /// direction to fail in (it makes a schedule MORE eager to run again, never
 /// silently stuck refusing forever on a value this module itself wrote).
 pub fn parse_iso8601_ms(s: &str) -> Option<i64> {

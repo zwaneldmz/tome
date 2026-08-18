@@ -25,7 +25,7 @@ pub const TAIL: usize = 200;
 /// scope — see this slice's task notes), so a `serde_json::Map` iterates
 /// key-sorted, not insertion-ordered. Several vitest assertions pin the
 /// exact on-disk JSON text (`ts` first, then `kind`, then the caller's field
-/// order — e.g. `{"ts":"t1","kind":"egress:blocked","paneId":"pty-2","host":"evil.com"}`),
+/// order — for example `{"ts":"t1","kind":"egress:blocked","paneId":"pty-2","host":"evil.com"}`),
 /// so this type carries that order explicitly and serializes it by hand
 /// (see the `Serialize` impl below) instead of going through
 /// `Value::Object`.

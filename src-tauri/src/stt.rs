@@ -539,7 +539,7 @@ mod tests {
 
     /// Exercises the real binary end to end. Ignored by default: neither
     /// `whisper-cli` nor the ~140MB `ggml-base.en.bin` model is available
-    /// on a fresh checkout or a CI runner. Run manually, e.g.:
+    /// on a fresh checkout or a CI runner. Run manually, for example:
     ///
     /// ```text
     /// TOME_WHISPER_BIN=/opt/homebrew/bin/whisper-cli \

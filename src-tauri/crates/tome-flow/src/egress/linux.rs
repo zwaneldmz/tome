@@ -210,7 +210,7 @@ pub struct GappedSpawnSpec {
 /// Assembles the exact `bwrap` argv THE DESIGN specifies for a gapped
 /// pane. Pure string/`Vec` construction — no shell is ever involved in
 /// running the result (a future integrator execs `argv[0]` with `argv[1..]`
-/// directly, e.g. via `portable_pty::CommandBuilder`, the same way
+/// directly, for example, via `portable_pty::CommandBuilder`, the same way
 /// `ipc::pty::build_pty_command` already wraps `sandbox-exec` on macOS —
 /// see that function's doc comment for the parallel), so no element here
 /// is ever shell-quoted or needs to be: a path containing a space is just
@@ -409,7 +409,7 @@ pub enum SandboxStrategy {
 /// refusal WHEN rung 2 itself then fails, happens inside `tome-shim`'s own
 /// attempt at spawn time (MECHANISM — a different slice's file); this
 /// function's `SelfUnshare` verdict is the integration layer's cue to try
-/// that rung next, not a promise that it will succeed.
+/// that rung next, not a promise that it succeeds.
 pub fn decide_sandbox_strategy(bwrap_present: bool, userns_allowed: bool) -> SandboxStrategy {
     if bwrap_present {
         SandboxStrategy::Bwrap

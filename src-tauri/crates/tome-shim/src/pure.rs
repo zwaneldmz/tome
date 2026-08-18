@@ -39,7 +39,7 @@ pub fn exit_code_from(code: Option<i32>, signal: Option<i32>) -> i32 {
 /// Formats one line of `/proc/self/{uid,gid}_map` content — `self_unshare`
 /// (fallback-ladder step 2, `linux.rs`) writes exactly one such line to
 /// each file, mapping `inside` (the id this process appears to have once
-/// inside the fresh user namespace — always `0`, i.e. it looks like root
+/// inside the fresh user namespace — always `0`, that is it looks like root
 /// to itself, at every real call site) to `outside` (the real,
 /// already-unprivileged host id this process actually runs as — `1`
 /// meaning "a single id", never a range, since `tome-shim` only ever needs

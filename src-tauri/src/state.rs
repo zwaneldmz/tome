@@ -50,7 +50,7 @@ pub struct AppState {
     pub auth_unlocked: RwLock<bool>,
     /// The renderer's open workspace folders, synced via the `ws_sync`
     /// command (Electron's `ws:sync`) — the confinement root set
-    /// `confine::confined_real_path` will check paths against.
+    /// `confine::confined_real_path` checks paths against.
     pub open_folders: RwLock<Vec<PathBuf>>,
     /// Whether `open_folders` has received its first sync from the renderer
     /// this session, distinguishing "no folders reported yet" from
