@@ -89,7 +89,7 @@ function setupScreen(tome, toast, resolve) {
     el(
       'p',
       'ag-note',
-      'Set a passphrase to lock Tome at launch. It also arms the air-gap unlock. You can enroll an authenticator app (2FA) right after — the air gap will then ask for a code instead of the passphrase.'
+      'Set a passphrase to lock Tome at launch. It also arms the egress unlock. You can enroll an authenticator app (2FA) right after — the egress will then ask for a code instead of the passphrase.'
     )
   )
   const p1 = el('input')
@@ -110,9 +110,9 @@ function setupScreen(tome, toast, resolve) {
   set.addEventListener('click', async () => {
     if (p1.value.length < 8) return (err.textContent = 'Too short — 8 characters minimum.')
     if (p1.value !== p2.value) return (err.textContent = 'Passphrases differ.')
-    const r = await tome.airgap.setup(p1.value)
+    const r = await tome.egress.setup(p1.value)
     if (!r.ok) return (err.textContent = r.error)
-    toast('Passphrase set — enable 2FA from any air-gap strip', 'ok')
+    toast('Passphrase set — enable 2FA from any egress strip', 'ok')
     root.remove()
     resolve()
   })

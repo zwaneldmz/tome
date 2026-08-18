@@ -4,10 +4,10 @@
 // workspaces — shape: { workspaces: [{ name, folders: [] }], active: index }
 export const wsState = { ws: { workspaces: [], active: -1 }, activeRoot: null }
 
-// air gap / conductor preferences (persisted via the store)
-export const prefs = { airgapDefault: true, conductorRun: false }
+// egress / conductor preferences (persisted via the store)
+export const prefs = { egressDefault: true, conductorRun: false }
 
-// live air-gap state mirrored from main
+// live egress state mirrored from main
 export const agState = {
   panes: {},
   defaultMinutes: 15,

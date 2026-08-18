@@ -44,8 +44,8 @@ async fn main() {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
     let blocked: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let blocked2 = blocked.clone();
-    let proxy = tome_lib::airgap::proxy::PaneProxy::spawn(
-        tome_lib::airgap::allowlist::DEFAULT_ALLOW
+    let proxy = tome_lib::egress::proxy::PaneProxy::spawn(
+        tome_lib::egress::allowlist::DEFAULT_ALLOW
             .iter()
             .map(|s| s.to_string())
             .collect(),
@@ -65,7 +65,7 @@ async fn main() {
     // `-p` is exactly the "unbound variable" parse error the first run
     // of this example hit. Production (`pty.rs`) passes the profile
     // string inline the same way.
-    let profile = tome_lib::airgap::seatbelt::seatbelt_profile(&dir);
+    let profile = tome_lib::egress::seatbelt::seatbelt_profile(&dir);
 
     // 3. spawn a login zsh under sandbox-exec with the pane's proxy env.
     let pty_system = native_pty_system();

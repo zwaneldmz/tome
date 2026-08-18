@@ -766,10 +766,10 @@ body.tree-collapsed #btn-sidebar .chev {
 #sb-runs:hover {
   color: var(--bright);
 }
-#sb-airgap.sb-open {
+#sb-egress.sb-open {
   color: var(--spark);
 }
-#sb-airgap.sb-shut {
+#sb-egress.sb-shut {
   color: var(--accent);
 }
 /* understanding score ring (mentor mode) */
@@ -1936,18 +1936,18 @@ canvas.brain-graph {
   background: var(--accent-soft);
 }
 
-/* ================= air gap ================= */
-.panel-terminal.airgapped {
+/* ================= egress ================= */
+.panel-terminal.egressped {
   display: flex;
   flex-direction: column;
   padding: 0;
 }
-.panel-terminal.airgapped .termbox {
+.panel-terminal.egressped .termbox {
   flex: 1;
   min-height: 0;
   padding: 6px 0 0 8px;
 }
-.airgap-strip {
+.egress-strip {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1960,28 +1960,28 @@ canvas.brain-graph {
   background: var(--accent-soft);
   border-bottom: 1px solid var(--accent-ring);
 }
-.airgap-strip:hover {
+.egress-strip:hover {
   filter: brightness(1.06);
 }
-.airgap-strip.open {
+.egress-strip.open {
   color: var(--spark);
   background: var(--spark-soft);
   border-bottom-color: var(--spark);
 }
-.airgap-strip .ag-flash {
+.egress-strip .ag-flash {
   color: var(--g-del);
   opacity: 0;
 }
 /* persistent blocked-attempt tally — cleared on click or unlock/relock */
-.airgap-strip .ag-count {
+.egress-strip .ag-count {
   color: var(--g-del);
   font-family: var(--mono);
   font-size: var(--fs-micro);
 }
-.airgap-strip .ag-count:empty {
+.egress-strip .ag-count:empty {
   display: none;
 }
-.airgap-strip .ag-flash.show {
+.egress-strip .ag-flash.show {
   animation: agflash 4s ease-out 1;
 }
 @keyframes agflash {
@@ -1996,7 +1996,7 @@ canvas.brain-graph {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .airgap-strip .ag-flash.show {
+  .egress-strip .ag-flash.show {
     animation: none;
     opacity: 1;
   }
@@ -3016,7 +3016,7 @@ canvas.brain-graph {
 .runs-row:hover {
   background: var(--hover);
 }
-/* The row's disclosure affordance — same idiom as .airgap-strip.open: the
+/* The row's disclosure affordance — same idiom as .egress-strip.open: the
    state lives on the row, the glyph turns with it. Blockified by the flex
    parent, which is what makes the transform apply at all to a span. */
 .runs-caret {
@@ -3073,7 +3073,7 @@ canvas.brain-graph {
   font-family: var(--mono);
   font-size: var(--fs-micro);
 }
-/* Whether the run's agents were sandboxed. Same treatment #sb-airgap uses for
+/* Whether the run's agents were sandboxed. Same treatment #sb-egress uses for
    the same fact — accent for gated, --spark for open — so "on the open
    internet" reads identically wherever the app admits to it. */
 .runs-gap {

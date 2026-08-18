@@ -30,18 +30,18 @@
 //!   allows. Verified tauri-free the same way every other module here was.
 //! - [`agent_env`] / [`login_env`] — the pty/headless-node environment
 //!   allowlist and the cached login-shell PATH/secrets harvest.
-//! - [`airgap`] — the air-gap state machine, host allowlist compiler, pane
+//! - [`egress`] — the egress state machine, host allowlist compiler, pane
 //!   proxy, Linux sandbox argv assembly, and macOS seatbelt profile
 //!   builder.
 //!
 //! `tome_lib` re-exports every one of these at its own pre-extraction
 //! paths (`crate::flow`, `crate::agent_spawn`, `crate::custom_agents`,
-//! `crate::agent_env`, `crate::login_env`, `crate::airgap`) via `pub use`
+//! `crate::agent_env`, `crate::login_env`, `crate::egress`) via `pub use`
 //! shims, so no caller elsewhere in that crate needed to change.
 
 pub mod agent_env;
 pub mod agent_spawn;
-pub mod airgap;
 pub mod custom_agents;
+pub mod egress;
 pub mod flow;
 pub mod login_env;

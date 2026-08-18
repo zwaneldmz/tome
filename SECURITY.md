@@ -21,12 +21,12 @@ invariants live in [docs/THREATMODEL.md](docs/THREATMODEL.md).
    (`src-tauri/src/store_keys.rs`) and can never reach the credential file
    or the egress allowlist (`RESERVED_KEYS`).
 2. **Agent pane ↔ host.** Agent CLIs run under the macOS seatbelt
-   (`sandbox-exec`, profile built in `src-tauri/src/airgap/seatbelt.rs`) or
-   the Linux bubblewrap/unshare ladder (`src-tauri/src/airgap/linux.rs`)
+   (`sandbox-exec`, profile built in `src-tauri/src/egress/seatbelt.rs`) or
+   the Linux bubblewrap/unshare ladder (`src-tauri/src/egress/linux.rs`)
    with all direct egress denied, DNS included. The only way out is a
    per-pane CONNECT proxy on `127.0.0.1`
-   (`src-tauri/src/airgap/proxy.rs`) enforcing the model-provider
-   allowlist (`src-tauri/src/airgap/allowlist.rs`). Freeing a pane widens
+   (`src-tauri/src/egress/proxy.rs`) enforcing the model-provider
+   allowlist (`src-tauri/src/egress/allowlist.rs`). Freeing a pane widens
    the *proxy*, never the sandbox — the seatbelt profile / bwrap wrap is
    fixed at spawn and no code path weakens it afterward; the proxy remains
    the only route out even when open.
@@ -63,11 +63,11 @@ invariants live in [docs/THREATMODEL.md](docs/THREATMODEL.md).
   login shell (`src-tauri/src/login_env.rs`) and merged into the env of
   agent panes only; the chat API key lives in the Rust backend and never
   enters the renderer.
-- **Repo allowlists are untrusted input.** A repo's `.tome/airgap.json` is
+- **Repo allowlists are untrusted input.** A repo's `.tome/egress.json` is
   validated by the same wildcard compiler as the user allowlist (over-broad
-  patterns refused, `src-tauri/src/airgap/allowlist.rs`), and honored only
+  patterns refused, `src-tauri/src/egress/allowlist.rs`), and honored only
   after user consent. Consent is verified and stored in the backend
-  (`src-tauri/src/airgap/mod.rs`), pinned to the file's SHA-1: the backend
+  (`src-tauri/src/egress/mod.rs`), pinned to the file's SHA-1: the backend
   re-hashes the file at consent time, at every boot, and at every workspace
   sync — a post-consent edit re-prompts, and deleting the file is a real
   revocation. A compromised renderer can only *ask* the backend to re-check
@@ -107,7 +107,7 @@ auto-run guard.
 
 **Out of scope:** `TOME_SHOT` dev mode — a lock-gate bypass that exists for
 development screenshots, gated on `tauri::is_dev()` (see
-`src-tauri/src/lib.rs`'s `boot_auth_and_airgap`) and documented in the
+`src-tauri/src/lib.rs`'s `boot_auth_and_egress`) and documented in the
 threat model; issues requiring physical access or an already-compromised
 host; the `xlsx` package's CDN distribution pin (deliberate, integrity-pinned
 — see [docs/THREATMODEL.md](docs/THREATMODEL.md)).

@@ -196,13 +196,13 @@ mod tests {
     fn tally_events_counts_kinds_and_skips_records_without_one() {
         let text = concat!(
             "{\"ts\":\"t1\",\"kind\":\"conductor:tool\"}\n",
-            "{\"ts\":\"t2\",\"kind\":\"airgap:unlock\"}\n",
+            "{\"ts\":\"t2\",\"kind\":\"egress:unlock\"}\n",
             "{\"ts\":\"t3\",\"kind\":\"conductor:tool\"}\n",
             "{\"ts\":\"t4\",\"note\":\"no kind\"}\n"
         );
         let counts = tally_events(text);
         assert_eq!(counts.get("conductor:tool"), Some(&2));
-        assert_eq!(counts.get("airgap:unlock"), Some(&1));
+        assert_eq!(counts.get("egress:unlock"), Some(&1));
         assert_eq!(counts.len(), 2);
     }
 

@@ -11,8 +11,8 @@
 //! and `ipc::store`), which used to mean ANY well-shaped key was
 //! readable/writable before login: chat transcripts (`chat-log-*`), policy
 //! toggles (`chat-provider`, `custom-agents`, ...), even
-//! `airgap-repo-consents` — the SAME `app_data_dir` filename `store.rs`'s
-//! sibling `airgap` module (Phase 3) uses for its own egress-consent file,
+//! `egress-repo-consents` — the SAME `app_data_dir` filename `store.rs`'s
+//! sibling `egress` module (Phase 3) uses for its own egress-consent file,
 //! so an unauthenticated `store_set` on that key could forge consent for
 //! main to load on next boot. Two things are enforced here: which
 //! `app_data_dir` filenames are main's own and may never be named by a store
@@ -22,8 +22,8 @@
 //! `store.rs`'s `get`/`set` are the only callers.
 
 /// Every `app_data_dir` filename main itself writes outside the JSON store:
-/// the egress allowlist (`airgap.json`), the auth file (`airgap-auth.json`),
-/// the repo-consent file (`airgap-repo-consents.json`), the export
+/// the egress allowlist (`egress.json`), the auth file (`egress-auth.json`),
+/// the repo-consent file (`egress-repo-consents.json`), the export
 /// destinations file (`export-destinations.json`, `export.rs` — hash-pinned
 /// consent records for where a finished run's promoted products may be
 /// copied), the persistent event log (`events.jsonl`, `events.rs`), and the
@@ -41,9 +41,9 @@
 /// a store key, at any lock state — a `store_set` on one of these would let
 /// the renderer overwrite a file main treats as its own.
 pub const RESERVED_KEYS: &[&str] = &[
-    "airgap",
-    "airgap-auth",
-    "airgap-repo-consents",
+    "egress",
+    "egress-auth",
+    "egress-repo-consents",
     "events",
     "export-destinations",
     "flow-schedules",
@@ -108,8 +108,8 @@ mod tests {
 
     #[test]
     fn rejects_every_main_owned_user_data_filename() {
-        // airgap.json (egress allowlist), airgap-auth.json (credentials),
-        // airgap-repo-consents.json (repo egress consent), events.jsonl (the
+        // egress.json (egress allowlist), egress-auth.json (credentials),
+        // egress-repo-consents.json (repo egress consent), events.jsonl (the
         // persistent event log) — none of these are store values.
         for key in RESERVED_KEYS.iter().copied() {
             assert!(is_reserved_key(key), "{key} should be reserved");
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn rejects_traversal_and_non_slug_characters() {
-        assert!(!is_valid_store_key("../airgap-auth"));
+        assert!(!is_valid_store_key("../egress-auth"));
         assert!(!is_valid_store_key("a/b"));
         assert!(!is_valid_store_key("a.json"));
         assert!(!is_valid_store_key("UPPER"));
@@ -153,19 +153,19 @@ mod tests {
     // ---- isStoreKeyAllowed() / is_store_key_allowed() ----
 
     #[test]
-    fn rejects_airgap_repo_consents_at_any_lock_state() {
+    fn rejects_egress_repo_consents_at_any_lock_state() {
         // A pre-auth store_set on this exact key is what let an
-        // unauthenticated renderer write the file the (Phase 3) airgap
+        // unauthenticated renderer write the file the (Phase 3) egress
         // module's repo-consent loader reads on next boot — forged egress
         // consent without ever logging in.
-        assert!(!is_store_key_allowed("airgap-repo-consents", true));
-        assert!(!is_store_key_allowed("airgap-repo-consents", false));
+        assert!(!is_store_key_allowed("egress-repo-consents", true));
+        assert!(!is_store_key_allowed("egress-repo-consents", false));
     }
 
     #[test]
-    fn rejects_airgap_auth_at_any_lock_state() {
-        assert!(!is_store_key_allowed("airgap-auth", true));
-        assert!(!is_store_key_allowed("airgap-auth", false));
+    fn rejects_egress_auth_at_any_lock_state() {
+        assert!(!is_store_key_allowed("egress-auth", true));
+        assert!(!is_store_key_allowed("egress-auth", false));
     }
 
     #[test]
@@ -181,7 +181,7 @@ mod tests {
     #[test]
     fn denies_policy_keys_while_locked() {
         for key in [
-            "airgap-default",
+            "egress-default",
             "conductor-run",
             "chat-provider",
             "chat-model",

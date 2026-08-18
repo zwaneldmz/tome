@@ -28,8 +28,8 @@
 //! not to touch. What IS shared, and reused directly rather than
 //! reimplemented, is every lower-level PUBLIC primitive both paths are
 //! built from: `agent_env::compose_agent_env`, `login_env::login_env`,
-//! `airgap::seatbelt::seatbelt_profile`, every `airgap::linux` builder, and
-//! `ipc::airgap::create_gapped_pane_proxy`/`close_pane_and_proxy` (both
+//! `egress::seatbelt::seatbelt_profile`, every `egress::linux` builder, and
+//! `ipc::egress::create_gapped_pane_proxy`/`close_pane_and_proxy` (both
 //! `pub(crate)`, reachable from here). The one genuinely NEW piece —
 //! `GappedSpawnSpec::headless: true` and `SandboxWrap::Full` for Linux —
 //! is new because `ipc::pty::pty_create` has never had a headless caller
@@ -130,17 +130,17 @@ fn shim_path_in(dir: &Path, target_triple: Option<&str>) -> PathBuf {
 }
 
 /// Real-environment fallback-ladder verdict — duplicated wrapper around
-/// `airgap::linux::probe_sandbox_strategy` for the same reason
+/// `egress::linux::probe_sandbox_strategy` for the same reason
 /// `ipc::pty::current_linux_sandbox_strategy` exists there and is private.
-/// See `airgap::linux`'s own "Verification boundary" doc comment: this
+/// See `egress::linux`'s own "Verification boundary" doc comment: this
 /// specific line is never type-checked by this crate's native macOS gates.
 #[cfg(target_os = "linux")]
-fn current_linux_sandbox_strategy() -> crate::airgap::linux::SandboxStrategy {
-    crate::airgap::linux::probe_sandbox_strategy()
+fn current_linux_sandbox_strategy() -> crate::egress::linux::SandboxStrategy {
+    crate::egress::linux::probe_sandbox_strategy()
 }
 #[cfg(not(target_os = "linux"))]
-fn current_linux_sandbox_strategy() -> crate::airgap::linux::SandboxStrategy {
-    crate::airgap::linux::SandboxStrategy::Refuse {
+fn current_linux_sandbox_strategy() -> crate::egress::linux::SandboxStrategy {
+    crate::egress::linux::SandboxStrategy::Refuse {
         reason: String::new(),
     }
 }
@@ -150,7 +150,7 @@ fn current_linux_sandbox_strategy() -> crate::airgap::linux::SandboxStrategy {
 /// `inner_argv` is the node's own already-resolved `[cmd, ...args]`
 /// (`agent_spawn::build_headless_spawn`'s output) — threaded straight into
 /// the Linux wrap's `GappedSpawnSpec::inner_argv` with `headless: true`
-/// (THE first headless caller of `airgap::linux` in this tree).
+/// (THE first headless caller of `egress::linux` in this tree).
 async fn build_production_agent_env(
     app: &AppHandle,
     pane_id: &str,
@@ -177,14 +177,14 @@ async fn build_production_agent_env(
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
 
     if cfg!(target_os = "macos") {
-        let proxy = crate::ipc::airgap::create_gapped_pane_proxy(app, state.inner(), pane_id, None)
+        let proxy = crate::ipc::egress::create_gapped_pane_proxy(app, state.inner(), pane_id, None)
             .await
             .map_err(|e| e.to_string())?;
         extras.proxy_port = Some(proxy.port());
         let env = crate::agent_env::compose_agent_env(&process_env, &extras)
             .into_iter()
             .collect();
-        let profile = crate::airgap::seatbelt::seatbelt_profile(&dir);
+        let profile = crate::egress::seatbelt::seatbelt_profile(&dir);
         return Ok(BuiltEnv {
             env,
             sandbox: Some(SandboxWrap::Prefix {
@@ -196,18 +196,18 @@ async fn build_production_agent_env(
 
     if cfg!(target_os = "linux") {
         let strategy = current_linux_sandbox_strategy();
-        if let crate::airgap::linux::SandboxStrategy::Refuse { reason } = &strategy {
+        if let crate::egress::linux::SandboxStrategy::Refuse { reason } = &strategy {
             // Fail closed BEFORE anything is created — no proxy to tear
             // down, matching pty_create's own rung-3 refusal ordering.
             return Err(reason.clone());
         }
-        let sock_path = crate::airgap::linux::pane_socket_path_from_env(pane_id)
+        let sock_path = crate::egress::linux::pane_socket_path_from_env(pane_id)
             .ok_or_else(|| "gapped flow node refused: pane id is not a valid loopback-bridge socket path component".to_string())?;
         if let Some(parent) = sock_path.parent() {
-            crate::airgap::linux::ensure_pane_socket_dir(parent).map_err(|e| e.to_string())?;
+            crate::egress::linux::ensure_pane_socket_dir(parent).map_err(|e| e.to_string())?;
         }
         let shim_path = resolve_shim_path()?;
-        let proxy = crate::ipc::airgap::create_gapped_pane_proxy(
+        let proxy = crate::ipc::egress::create_gapped_pane_proxy(
             app,
             state.inner(),
             pane_id,
@@ -220,7 +220,7 @@ async fn build_production_agent_env(
             .into_iter()
             .collect();
 
-        let spec = crate::airgap::linux::GappedSpawnSpec {
+        let spec = crate::egress::linux::GappedSpawnSpec {
             pane_id: pane_id.to_string(),
             proxy_port: proxy.port(),
             host_socket_path: sock_path,
@@ -232,13 +232,13 @@ async fn build_production_agent_env(
             headless: true,
         };
         let argv = match &strategy {
-            crate::airgap::linux::SandboxStrategy::Bwrap => {
-                crate::airgap::linux::build_bwrap_argv(&spec)
+            crate::egress::linux::SandboxStrategy::Bwrap => {
+                crate::egress::linux::build_bwrap_argv(&spec)
             }
-            crate::airgap::linux::SandboxStrategy::SelfUnshare => {
-                crate::airgap::linux::build_self_unshare_argv(&spec)
+            crate::egress::linux::SandboxStrategy::SelfUnshare => {
+                crate::egress::linux::build_self_unshare_argv(&spec)
             }
-            crate::airgap::linux::SandboxStrategy::Refuse { .. } => {
+            crate::egress::linux::SandboxStrategy::Refuse { .. } => {
                 unreachable!("Refuse handled above")
             }
         };
@@ -254,23 +254,23 @@ async fn build_production_agent_env(
     Err("gapped flow nodes are only supported on macOS and Linux — refusing to spawn unenforced on this OS".to_string())
 }
 
-/// Freezes an already-resolved `airgap-default` reading into the same
-/// closure shape [`RunnerEnv::airgap_default`] expects, so every future call
+/// Freezes an already-resolved `egress-default` reading into the same
+/// closure shape [`RunnerEnv::egress_default`] expects, so every future call
 /// returns that ONE value rather than re-reading the store. Used by
 /// `ipc::runs::runs_start`'s own TOME-001 re-auth gate (mirroring
 /// `ipc::pty::pty_create`'s identical ceremony): the gate resolves
-/// `airgap_default` ONCE to decide whether a fresh passphrase/TOTP is
+/// `egress_default` ONCE to decide whether a fresh passphrase/TOTP is
 /// required, then freezes that value into the `RunnerEnv` it hands to
 /// [`start_run`] — so the gate's decision and every node this run actually
 /// spawns are PROVABLY looking at the same resolved gapped state, not two
-/// independent store reads a concurrent `store_set("airgap-default", ...)`
+/// independent store reads a concurrent `store_set("egress-default", ...)`
 /// could race apart (a compromised renderer racing its own `store_set`
 /// between the gate's read and `start_run`'s otherwise-separate internal
 /// read must not be able to make the gate see "gapped" while nodes spawn
 /// ungapped).
 ///
 /// [`start_run`]: crate::flow::runner::start_run
-pub fn frozen_airgap_default(value: bool) -> Arc<dyn Fn() -> BoxFuture<bool> + Send + Sync> {
+pub fn frozen_egress_default(value: bool) -> Arc<dyn Fn() -> BoxFuture<bool> + Send + Sync> {
     Arc::new(move || Box::pin(async move { value }) as BoxFuture<bool>)
 }
 
@@ -299,10 +299,10 @@ pub fn production_env(app: AppHandle) -> RunnerEnv {
             let app = app.clone();
             Arc::new(move |pane_id: &str| {
                 let state = app.state::<AppState>();
-                crate::ipc::airgap::close_pane_and_proxy(&app, state.inner(), pane_id);
+                crate::ipc::egress::close_pane_and_proxy(&app, state.inner(), pane_id);
             })
         },
-        airgap_default: {
+        egress_default: {
             let app = app.clone();
             Arc::new(move || {
                 let app = app.clone();
@@ -316,7 +316,7 @@ pub fn production_env(app: AppHandle) -> RunnerEnv {
                         return true;
                     };
                     let value = tokio::task::spawn_blocking(move || {
-                        crate::store::get(&dir, "airgap-default", locked)
+                        crate::store::get(&dir, "egress-default", locked)
                     })
                     .await
                     .unwrap_or(Value::Bool(true));
@@ -376,11 +376,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn frozen_airgap_default_always_returns_the_value_it_was_built_with() {
-        let gapped = frozen_airgap_default(true);
+    async fn frozen_egress_default_always_returns_the_value_it_was_built_with() {
+        let gapped = frozen_egress_default(true);
         assert!((gapped)().await);
         assert!((gapped)().await, "stays frozen across repeated calls");
-        let ungapped = frozen_airgap_default(false);
+        let ungapped = frozen_egress_default(false);
         assert!(!(ungapped)().await);
     }
 

@@ -35,7 +35,7 @@ fn whisper_bin_override() -> Option<String> {
 /// JS falsy check narrowed to what `store::get(dir, "voice-warmup", _)`
 /// can actually return: `null` (never set) or a stored `false` both gate
 /// the warmup off, matching `if (!(await readStore('voice-warmup')))`.
-/// `pty.rs`'s `airgap-default` read ports the opposite-polarity `!==
+/// `pty.rs`'s `egress-default` read ports the opposite-polarity `!==
 /// false` idiom ("anything but literal false wins") for its own,
 /// differently-defaulted JS call site — this key defaults off, that one
 /// defaults on, so each gets its own small helper rather than sharing one.

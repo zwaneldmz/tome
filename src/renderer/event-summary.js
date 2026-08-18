@@ -21,9 +21,9 @@ export function summary(rec) {
   switch (rec.kind) {
     case 'conductor:tool':
       return [rec.tool, rec.hint, rec.ok === false ? 'failed' : ''].filter(Boolean).join(' · ')
-    case 'airgap:unlock':
+    case 'egress:unlock':
       return [rec.paneId, rec.minutes != null ? `${rec.minutes}m` : ''].filter(Boolean).join(' · ')
-    case 'airgap:relock':
+    case 'egress:relock':
       return rec.paneId || ''
     // Background flow runs: node-level records carry a node id, run-level
     // ones don't, and the same field order reads for both ("release-notes ·
@@ -37,7 +37,7 @@ export function summary(rec) {
       ]
         .filter(Boolean)
         .join(' · ')
-    case 'airgap:blocked':
+    case 'egress:blocked':
       return [
         rec.host,
         rec.paneId,

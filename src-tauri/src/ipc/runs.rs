@@ -23,7 +23,7 @@ use crate::state::AppState;
 /// `runs:start` (`tome-ipc.js`'s `start: (flowPath) => call('runs_start', {
 /// flowPath })` — `auth` is a Rust-only addition, absent from every
 /// existing renderer call, so it deserializes to `None` exactly like
-/// `ipc::airgap::airgap_unlock`'s own bare `Option<String>` parameters do
+/// `ipc::egress::egress_unlock`'s own bare `Option<String>` parameters do
 /// when the caller omits them). Resolves `{ id }` once every node is
 /// planned and the first layer is spawning, `{ error }` for an ordinary
 /// refusal, or `{ reauth: true, error }` for the TOME-001 ceremony below —
@@ -34,8 +34,8 @@ use crate::state::AppState;
 /// A background flow run is a second, independent process-spawn path
 /// alongside `ipc::pty::pty_create` — every node it launches is a real
 /// `claude -p ...`-shaped headless process, gapped or not, per the SAME
-/// `airgap-default` preference a freshly spawned interactive pane would
-/// read (`flow::runner::start_run`'s own `(env.airgap_default)().await`).
+/// `egress-default` preference a freshly spawned interactive pane would
+/// read (`flow::runner::start_run`'s own `(env.egress_default)().await`).
 /// Without a gate here, a compromised renderer could call `runs:start`
 /// directly with an arbitrary flow path and get an unsandboxed,
 /// network-open headless agent process spawned with zero fresh proof of
@@ -48,9 +48,9 @@ use crate::state::AppState;
 /// failed attempt here never counts against — or is masked by — the
 /// terminal pane's own `"pty:unrestricted"` bucket.
 ///
-/// `airgap_default` is resolved ONCE here, then frozen into the
+/// `egress_default` is resolved ONCE here, then frozen into the
 /// `RunnerEnv` handed to `start_run` via
-/// [`crate::flow_env::frozen_airgap_default`] — see that
+/// [`crate::flow_env::frozen_egress_default`] — see that
 /// function's own doc comment for why re-reading the store a second,
 /// independent time (inside `start_run`) would reopen a narrow TOCTOU gap
 /// this gate is specifically meant to close.
@@ -73,9 +73,9 @@ pub async fn runs_start(
     lock_gate::guard(&state, "runs:start")?;
 
     let mut env = flow_env::production_env(app.clone());
-    let effective_gapped = (env.airgap_default)().await;
-    // Freeze it — see `frozen_airgap_default`'s doc comment.
-    env.airgap_default = flow_env::frozen_airgap_default(effective_gapped);
+    let effective_gapped = (env.egress_default)().await;
+    // Freeze it — see `frozen_egress_default`'s doc comment.
+    env.egress_default = flow_env::frozen_egress_default(effective_gapped);
 
     if !effective_gapped {
         let auth_configured = state
@@ -117,7 +117,7 @@ pub async fn runs_start(
                 crate::ipc::pty::ReauthOutcome::NeedsCredentials => {
                     return Ok(json!({
                         "reauth": true,
-                        "error": "refused: this run would be unsandboxed and needs a fresh passphrase or code, which this pane can't collect yet — turn the air gap back on to run flows in the background",
+                        "error": "refused: this run would be unsandboxed and needs a fresh passphrase or code, which this pane can't collect yet — turn the egress back on to run flows in the background",
                     }));
                 }
                 crate::ipc::pty::ReauthOutcome::Rejected => {
@@ -135,7 +135,7 @@ pub async fn runs_start(
     // — this needs a `'static` handle: `start_run`'s own scheduling loop
     // and every node's exit-await task outlive this single command
     // invocation, and `State<'_, AppState>`'s borrow does not. Mirrors
-    // `ipc::airgap`'s `AirgapEnv::app_state` doing the same for its own
+    // `ipc::egress`'s `EgressEnv::app_state` doing the same for its own
     // long-lived timer tasks.
     let runs = app.state::<AppState>().inner().flow.clone();
     Ok(flow::runner::start_run(runs, env, flow_path).await)
@@ -177,7 +177,7 @@ mod tests {
     // its pure decision core (`evaluate_reauth`/`ReauthOutcome`,
     // `pty_authority::unrestricted_spawn_needs_reauth`) is reused, not
     // duplicated, from `ipc::pty`/`pty_authority`, which carry that
-    // logic's own test coverage; `frozen_airgap_default`'s own test
+    // logic's own test coverage; `frozen_egress_default`'s own test
     // (`flow_env::tests`) covers the one piece of genuinely new
     // logic this command adds. A `#[tauri::command]` fn cannot be called
     // directly without a live `AppHandle`/`State` (this crate enables no

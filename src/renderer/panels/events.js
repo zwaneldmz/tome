@@ -1,5 +1,5 @@
 // Event log pane — read-only tail of main's persistent userData/events.jsonl:
-// conductor tool calls, air-gap unlocks/relocks, blocked egress. Newest first;
+// conductor tool calls, egress unlocks/relocks, blocked egress. Newest first;
 // live records prepend via the events:appended push. No actions here except
 // refresh — the log is an audit trail, not a control surface.
 

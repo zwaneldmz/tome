@@ -3,7 +3,7 @@
 //! test suite (the main `tome` package, as a `[dev-dependencies]` path
 //! dependency), for the cross-crate contract test `args.rs`'s own top doc
 //! comment describes: feeding the REAL output of
-//! `airgap::linux::build_bwrap_argv`/`build_self_unshare_argv` (the sibling
+//! `egress::linux::build_bwrap_argv`/`build_self_unshare_argv` (the sibling
 //! crate that builds this binary's argv) through the REAL [`args::parse_args`]
 //! (this crate, the thing that actually has to accept that argv at spawn
 //! time), so the two sides of this wire contract can never drift silently

@@ -112,9 +112,9 @@ pub const AGENT_SECRET_KEYS: &[&str] = &[
 /// everything `index.js`'s `buildAgentEnv` awaits before it can build the
 /// final map, threaded in instead of fetched here because this module has
 /// no I/O capability (no Tauri deps: no store reads, no login-shell
-/// shell-out, no airgap proxy). The integration slice that owns the real
+/// shell-out, no egress proxy). The integration slice that owns the real
 /// `pty_create` wiring resolves each field (`login_env`'s cached harvest,
-/// `brain::ensure_brain`, `airgap::create_pane_proxy`) and passes the
+/// `brain::ensure_brain`, `egress::create_pane_proxy`) and passes the
 /// results through here.
 #[derive(Debug, Clone, Default)]
 pub struct AgentEnvExtras {
@@ -134,7 +134,7 @@ pub struct AgentEnvExtras {
     /// configured (`brain::coreInfo(...).configured` in the JS original).
     pub core_vault_root: Option<String>,
     /// The per-pane proxy's port, when the pane is gapped
-    /// (`airgap::createPaneProxy`'s result in the JS original) — `None`
+    /// (`egress::createPaneProxy`'s result in the JS original) — `None`
     /// for an ungapped pane, matching `if (!gapped) return { env, sandbox:
     /// null }` short-circuiting before the proxy vars are ever set. (The
     /// seatbelt `sandbox` wrap itself is a separate concern the JS

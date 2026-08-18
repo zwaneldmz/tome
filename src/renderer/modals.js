@@ -1,4 +1,4 @@
-// Modal shell shared by the air-gap modals and the brain pane's dialogs.
+// Modal shell shared by the egress modals and the brain pane's dialogs.
 // One overlay at a time: opening a modal removes any existing one.
 import { el } from './util.js'
 

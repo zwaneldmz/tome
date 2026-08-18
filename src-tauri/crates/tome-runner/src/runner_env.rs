@@ -7,21 +7,21 @@
 //! note). What IS reused, directly and without reimplementation, is every
 //! lower-level PUBLIC primitive `flow_env.rs` itself is built from:
 //! [`tome_flow::agent_env::compose_agent_env`], [`tome_flow::login_env::login_env`],
-//! [`tome_flow::airgap::seatbelt::seatbelt_profile`], every
-//! `tome_flow::airgap::linux` builder, and
-//! [`tome_flow::airgap::proxy::PaneProxy`] — this file's own job is just
+//! [`tome_flow::egress::seatbelt::seatbelt_profile`], every
+//! `tome_flow::egress::linux` builder, and
+//! [`tome_flow::egress::proxy::PaneProxy`] — this file's own job is just
 //! wiring those together without a `tauri::AppHandle` in the loop, the
 //! same "reuse the primitives, rebuild the glue" split that module's own
 //! doc comment describes for its own construction.
 //!
 //! ## Always gapped — frozen, not read from anywhere
 //!
-//! [`build`]'s `airgap_default` closure always resolves to `true`. There
+//! [`build`]'s `egress_default` closure always resolves to `true`. There
 //! is no store, no lock screen, and no human to ask for a scheduled or
 //! remote-triggered run — the project's own non-negotiable is explicit
 //! that a background/scheduled agent spawn is ALWAYS gapped, and the
 //! desktop app's own scheduler makes the identical choice for the same
-//! reason (`src-tauri/src/schedule.rs::SCHEDULED_RUN_AIRGAP`, "named and
+//! reason (`src-tauri/src/schedule.rs::SCHEDULED_RUN_EGRESS`, "named and
 //! tested on its own... rather than an inline `true`... so the property
 //! ... is one grep away"). `tome-runner` has no OTHER kind of run at all —
 //! every invocation is exactly this one, unattended, case — so this is
@@ -30,10 +30,10 @@
 //!
 //! ## Per-node proxy lifetime
 //!
-//! A gapped node's [`tome_flow::airgap::proxy::PaneProxy`] must outlive the
+//! A gapped node's [`tome_flow::egress::proxy::PaneProxy`] must outlive the
 //! node's own spawned process — its `Drop` impl tears the listener (and
 //! any live tunnels) down. The desktop app keeps every pane's proxy alive
-//! inside `AppState`, torn down by `ipc::airgap::close_pane_and_proxy`
+//! inside `AppState`, torn down by `ipc::egress::close_pane_and_proxy`
 //! (called from `close_agent_env`). This binary has no `AppState`, so
 //! [`ProxyRegistry`] is this file's own minimal stand-in: `build_agent_env`
 //! inserts the freshly spawned proxy keyed by pane id before returning,
@@ -49,10 +49,10 @@ use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 
 use tome_flow::agent_env::AgentEnvExtras;
-use tome_flow::airgap::proxy::{BlockedEvent, PaneProxy};
+use tome_flow::egress::proxy::{BlockedEvent, PaneProxy};
 use tome_flow::flow::runner::env::{BoxFuture, BuiltEnv, RunnerEnv, SandboxWrap};
 
-use crate::{airgap_config, events, home};
+use crate::{egress_config, events, home};
 
 /// Live per-pane egress proxies this process has spawned, keyed by pane
 /// id — see this module's doc comment. `Default`-constructed once per
@@ -72,7 +72,7 @@ impl ProxyRegistry {
     /// Drops (and therefore shuts down) the pane's proxy, if any is still
     /// registered. A pane that was never gapped (or whose `build_agent_env`
     /// call failed before a proxy was ever spawned) has nothing here —
-    /// silently a no-op, same as `AirgapState::close_pane`'s own contract
+    /// silently a no-op, same as `EgressState::close_pane`'s own contract
     /// for an unknown id.
     fn close(&self, pane_id: &str) {
         self.0
@@ -105,7 +105,7 @@ fn can_open_flow(root: &Path, p: &Path) -> bool {
 }
 
 /// Real-environment fallback-ladder verdict — duplicated wrapper around
-/// `tome_flow::airgap::linux::probe_sandbox_strategy` for the identical
+/// `tome_flow::egress::linux::probe_sandbox_strategy` for the identical
 /// reason the main crate's `flow_env.rs::current_linux_sandbox_strategy`
 /// exists: that function is `#[cfg(target_os = "linux")]`-gated INSIDE
 /// `tome-flow` (it reads real `/proc`/`$PATH` state), so it does not even
@@ -117,12 +117,12 @@ fn can_open_flow(root: &Path, p: &Path) -> bool {
 /// verdict function, rather than two copies that could in principle
 /// diverge.
 #[cfg(target_os = "linux")]
-pub(crate) fn linux_sandbox_strategy() -> tome_flow::airgap::linux::SandboxStrategy {
-    tome_flow::airgap::linux::probe_sandbox_strategy()
+pub(crate) fn linux_sandbox_strategy() -> tome_flow::egress::linux::SandboxStrategy {
+    tome_flow::egress::linux::probe_sandbox_strategy()
 }
 #[cfg(not(target_os = "linux"))]
-pub(crate) fn linux_sandbox_strategy() -> tome_flow::airgap::linux::SandboxStrategy {
-    tome_flow::airgap::linux::SandboxStrategy::Refuse {
+pub(crate) fn linux_sandbox_strategy() -> tome_flow::egress::linux::SandboxStrategy {
+    tome_flow::egress::linux::SandboxStrategy::Refuse {
         reason: String::new(),
     }
 }
@@ -157,7 +157,7 @@ fn resolve_shim_path() -> Result<PathBuf, String> {
 /// The real `build_agent_env` for one headless flow node — see this
 /// module's doc comment for exactly what's reused vs. rebuilt. `gapped`
 /// is always `true` in this binary's own production wiring (see [`build`]'s
-/// `airgap_default`), but this still handles `false` correctly rather
+/// `egress_default`), but this still handles `false` correctly rather
 /// than panicking, matching `flow_env.rs::build_production_agent_env`'s
 /// identical shape for the same branch.
 async fn build_agent_env(
@@ -184,12 +184,12 @@ async fn build_agent_env(
         return Ok(BuiltEnv { env, sandbox: None });
     }
 
-    let allowed = airgap_config::load_allowed(config_dir);
+    let allowed = egress_config::load_allowed(config_dir);
     let on_blocked = {
         let state_dir = state_dir.to_path_buf();
         move |evt: BlockedEvent| {
             // Only the coalesced signal is persisted — mirrors the
-            // desktop app's own split (`airgap::proxy`'s module doc
+            // desktop app's own split (`egress::proxy`'s module doc
             // comment: `Coalesced` -> the persistent log, uncoalesced
             // `Attempt` -> a live push only). This binary has no live
             // push to fan `Attempt` out to (`RunnerEnv::push` is a
@@ -197,7 +197,7 @@ async fn build_agent_env(
             if let BlockedEvent::Coalesced { host, count } = evt {
                 events::append(
                     &state_dir,
-                    "airgap:blocked",
+                    "egress:blocked",
                     vec![
                         ("host".to_string(), json!(host)),
                         ("count".to_string(), json!(count)),
@@ -215,7 +215,7 @@ async fn build_agent_env(
         let env = tome_flow::agent_env::compose_agent_env(&process_env, &extras)
             .into_iter()
             .collect();
-        let profile = tome_flow::airgap::seatbelt::seatbelt_profile(config_dir);
+        let profile = tome_flow::egress::seatbelt::seatbelt_profile(config_dir);
         registry.insert(pane_id.to_string(), proxy);
         return Ok(BuiltEnv {
             env,
@@ -228,7 +228,7 @@ async fn build_agent_env(
 
     if cfg!(target_os = "linux") {
         let strategy = linux_sandbox_strategy();
-        if let tome_flow::airgap::linux::SandboxStrategy::Refuse { reason } = &strategy {
+        if let tome_flow::egress::linux::SandboxStrategy::Refuse { reason } = &strategy {
             // Fail closed before anything is created — mirrors
             // `flow_env.rs`'s identical ordering (no proxy to tear down
             // on this path). `run_cmd`'s own precheck already refuses
@@ -239,13 +239,13 @@ async fn build_agent_env(
             // changes between that precheck and this call.
             return Err(reason.clone());
         }
-        let sock_path = tome_flow::airgap::linux::pane_socket_path_from_env(pane_id)
+        let sock_path = tome_flow::egress::linux::pane_socket_path_from_env(pane_id)
             .ok_or_else(|| {
                 "gapped flow node refused: pane id is not a valid loopback-bridge socket path component"
                     .to_string()
             })?;
         if let Some(parent) = sock_path.parent() {
-            tome_flow::airgap::linux::ensure_pane_socket_dir(parent).map_err(|e| e.to_string())?;
+            tome_flow::egress::linux::ensure_pane_socket_dir(parent).map_err(|e| e.to_string())?;
         }
         let shim_path = resolve_shim_path()?;
         let proxy = PaneProxy::spawn(allowed, Some(sock_path.clone()), on_blocked)
@@ -256,7 +256,7 @@ async fn build_agent_env(
             .into_iter()
             .collect();
 
-        let spec = tome_flow::airgap::linux::GappedSpawnSpec {
+        let spec = tome_flow::egress::linux::GappedSpawnSpec {
             pane_id: pane_id.to_string(),
             proxy_port: proxy.port(),
             host_socket_path: sock_path,
@@ -268,13 +268,13 @@ async fn build_agent_env(
             headless: true,
         };
         let argv = match &strategy {
-            tome_flow::airgap::linux::SandboxStrategy::Bwrap => {
-                tome_flow::airgap::linux::build_bwrap_argv(&spec)
+            tome_flow::egress::linux::SandboxStrategy::Bwrap => {
+                tome_flow::egress::linux::build_bwrap_argv(&spec)
             }
-            tome_flow::airgap::linux::SandboxStrategy::SelfUnshare => {
-                tome_flow::airgap::linux::build_self_unshare_argv(&spec)
+            tome_flow::egress::linux::SandboxStrategy::SelfUnshare => {
+                tome_flow::egress::linux::build_self_unshare_argv(&spec)
             }
-            tome_flow::airgap::linux::SandboxStrategy::Refuse { .. } => {
+            tome_flow::egress::linux::SandboxStrategy::Refuse { .. } => {
                 unreachable!("Refuse handled above")
             }
         };
@@ -327,7 +327,7 @@ pub fn build(flow_path: &str, config_dir: PathBuf, state_dir: PathBuf) -> Runner
             Arc::new(move |pane_id: &str| registry.close(pane_id))
         },
         // Frozen true — see this module's top doc comment.
-        airgap_default: Arc::new(|| Box::pin(async { true }) as BoxFuture<bool>),
+        egress_default: Arc::new(|| Box::pin(async { true }) as BoxFuture<bool>),
         log_event: {
             let state_dir = state_dir.clone();
             Arc::new(move |kind: &str, fields: Vec<(String, Value)>| {
@@ -375,7 +375,7 @@ mod tests {
     fn linux_sandbox_strategy_refuses_unconditionally_off_linux() {
         assert!(matches!(
             linux_sandbox_strategy(),
-            tome_flow::airgap::linux::SandboxStrategy::Refuse { .. }
+            tome_flow::egress::linux::SandboxStrategy::Refuse { .. }
         ));
     }
 
@@ -404,13 +404,13 @@ mod tests {
     // ---- build (smoke-level: RunnerEnv comes back with a usable spawn fn) ----
 
     #[tokio::test]
-    async fn build_produces_an_airgap_default_that_is_always_true() {
+    async fn build_produces_an_egress_default_that_is_always_true() {
         let env = build(
             "/tmp/does-not-need-to-exist/x.flow.json",
             PathBuf::from("/tmp/tome-runner-test-config"),
             PathBuf::from("/tmp/tome-runner-test-state"),
         );
-        assert!((env.airgap_default)().await);
+        assert!((env.egress_default)().await);
     }
 
     #[test]

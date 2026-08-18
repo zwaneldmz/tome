@@ -1,4 +1,4 @@
-// Air-gap pane strips (per-terminal banner showing providers-only / open
+// Egress pane strips (per-terminal banner showing providers-only / open
 // internet state) and the modals behind them: unlock, first-run setup, TOTP
 // enrollment.
 import { tome, toast } from './util.js'
@@ -47,12 +47,12 @@ setInterval(() => {
   }
 }, 1000)
 
-tome.airgap.onState((s) => {
+tome.egress.onState((s) => {
   Object.assign(agState, s)
   for (const id of strips.keys()) stripRender(id)
   renderStatusbar()
 })
-tome.airgap.onBlocked(({ paneId, host }) => {
+tome.egress.onBlocked(({ paneId, host }) => {
   // the tally counts every attempt; the flash/toast stay throttled per host
   setBlockedCount(paneId, (blockedCounts.get(paneId) || 0) + 1)
   const key = paneId + host
@@ -66,11 +66,11 @@ tome.airgap.onBlocked(({ paneId, host }) => {
     void f.offsetWidth
     f.classList.add('show')
   }
-  toast(`airgap blocked: ${host}`, 'err')
+  toast(`egress blocked: ${host}`, 'err')
 })
 
-export async function airgapModal(paneId) {
-  const state = await tome.airgap.state()
+export async function egressModal(paneId) {
+  const state = await tome.egress.state()
   Object.assign(agState, state)
   if (!state.auth.configured) return setupModal(paneId)
   const st = state.panes[paneId]
@@ -82,7 +82,7 @@ export async function airgapModal(paneId) {
     const m = modalShell('⛉ pane is on the open internet')
     m.note('Relock now to return this pane to model-APIs-only mode.')
     m.button('Relock now', async () => {
-      await tome.airgap.relock(paneId)
+      await tome.egress.relock(paneId)
       m.close()
       toast('Internet closed — back to model APIs only', 'ok')
     })
@@ -117,7 +117,7 @@ export async function airgapModal(paneId) {
     )
   }
   const go = async () => {
-    const r = await tome.airgap.unlock({
+    const r = await tome.egress.unlock({
       paneId,
       passphrase: pass?.value,
       code: code?.value,
@@ -143,7 +143,7 @@ export async function airgapModal(paneId) {
 // case the pane is simply not started. errMsg carries main's last refusal
 // (wrong code, throttled) so a retry shows why the previous attempt failed.
 export async function reauthPrompt(errMsg) {
-  const state = await tome.airgap.state()
+  const state = await tome.egress.state()
   return new Promise((resolve) => {
     let settled = false
     const done = (v) => {
@@ -174,31 +174,31 @@ export async function reauthPrompt(errMsg) {
 }
 
 function setupModal(paneId) {
-  const m = modalShell('⛨ set up air-gap unlock')
-  m.note('Choose the passphrase that allows internet on air-gapped panes. Stored as a salted hash.')
+  const m = modalShell('⛨ set up network unlock')
+  m.note('Choose the passphrase that allows internet on contained panes. Stored as a salted hash.')
   const p1 = m.input('passphrase')
   const p2 = m.input('repeat passphrase')
   m.button('Set passphrase', async () => {
     if (p1.value.length < 8) return (m.err.textContent = 'Too short — 8 characters minimum.')
     if (p1.value !== p2.value) return (m.err.textContent = 'Passphrases differ.')
-    const r = await tome.airgap.setup(p1.value)
+    const r = await tome.egress.setup(p1.value)
     if (!r.ok) return (m.err.textContent = r.error)
     m.close()
     toast('Passphrase set', 'ok')
-    if (paneId) airgapModal(paneId)
+    if (paneId) egressModal(paneId)
   })
 }
 
 export function totpModal() {
   const m = modalShell('⛉ enroll authenticator (TOTP)')
   m.note('Add this secret to your authenticator app, then confirm a code.')
-  tome.airgap.enrollTotp().then(({ secret, uri }) => {
+  tome.egress.enrollTotp().then(({ secret, uri }) => {
     const s = m.note(secret)
     s.classList.add('ag-secret')
     m.note(uri)
     const code = m.input('code from the app', 'text')
     m.button('Confirm', async () => {
-      if (await tome.airgap.confirmTotp(code.value)) {
+      if (await tome.egress.confirmTotp(code.value)) {
         m.close()
         toast('2FA enabled', 'ok')
       } else {

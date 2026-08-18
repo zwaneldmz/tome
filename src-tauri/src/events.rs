@@ -27,7 +27,7 @@
 //!   command would be `tokio::task::spawn_blocking`, but that requires an
 //!   active Tokio runtime on the calling thread — a constraint future
 //!   callers of `append`/`log_event` (Phase 2/3 modules ported from
-//!   `airgap.js`, `conductor.js`, `flow-runner.js`, ...) would then all
+//!   `egress.js`, `conductor.js`, `flow-runner.js`, ...) would then all
 //!   have to satisfy. [`append`] instead spawns a plain OS thread, which
 //!   works from any calling context and costs nothing meaningful at the
 //!   log's actual call rate (human/agent-paced security events, not a hot
@@ -169,9 +169,9 @@ pub fn read_tail(dir: &Path) -> Vec<serde_json::Value> {
 }
 
 /// Full `logEvent(kind, fields)` equivalent — the entry point other modules
-/// should call once ported. `ipc::airgap`'s `AirgapEnv for AppHandle` impl
-/// is the first real caller (`'airgap:blocked'`/`'airgap:unlock'`/
-/// `'airgap:relock'`); the conductor port (`'conductor:tool'`/
+/// should call once ported. `ipc::egress`'s `EgressEnv for AppHandle` impl
+/// is the first real caller (`'egress:blocked'`/`'egress:unlock'`/
+/// `'egress:relock'`); the conductor port (`'conductor:tool'`/
 /// `'conductor:read'`) and the flow runner port (`'flow-run'`) are expected
 /// to call this too once they land. Builds the record via
 /// `eventlog::make_event` (defaulting `ts` to now) and hands it to

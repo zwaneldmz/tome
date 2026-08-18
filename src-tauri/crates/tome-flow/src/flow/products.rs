@@ -114,7 +114,7 @@ pub struct PromoteRequest {
     pub run_id: String,
     pub started: String,
     pub ended: String,
-    pub airgap: bool,
+    pub egress: bool,
     /// This run's own `runs/<id>/artifacts` directory — where every
     /// terminal output named in `terminal_outputs` is read from.
     pub artifacts_dir: PathBuf,
@@ -146,7 +146,7 @@ struct ManifestRun {
     id: String,
     started: String,
     ended: String,
-    airgap: bool,
+    egress: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -260,7 +260,7 @@ pub async fn promote_and_manifest(req: PromoteRequest) -> Result<Value, String> 
             id: req.run_id.clone(),
             started: req.started.clone(),
             ended: req.ended.clone(),
-            airgap: req.airgap,
+            egress: req.egress,
         },
         git: ManifestGit {
             head: git_head,
@@ -405,7 +405,7 @@ async fn update_runs_index(
 
 // ---- hashing ----
 
-/// Matches `airgap::sha1_hex`'s own hand-rolled hex encoder — no `hex`
+/// Matches `egress::sha1_hex`'s own hand-rolled hex encoder — no `hex`
 /// crate dependency needed for either.
 fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -537,7 +537,7 @@ mod tests {
             run_id: run_id.to_string(),
             started: "2026-08-09T10:00:00.000Z".to_string(),
             ended: "2026-08-09T10:00:02.000Z".to_string(),
-            airgap: true,
+            egress: true,
             artifacts_dir: root
                 .join(".tome")
                 .join("flows")
@@ -618,7 +618,7 @@ mod tests {
         assert_eq!(manifest["flow"]["name"], "demo");
         assert_eq!(manifest["flow"]["path"], ".tome/flows/demo.flow.json");
         assert_eq!(manifest["run"]["id"], "run1");
-        assert_eq!(manifest["run"]["airgap"], true);
+        assert_eq!(manifest["run"]["egress"], true);
         assert_eq!(manifest["git"]["head"], Value::Null);
         assert_eq!(manifest["git"]["dirty"], false);
         assert_eq!(manifest["nodes"][0]["id"], "n1");
@@ -892,7 +892,7 @@ mod tests {
                 id: "run1".to_string(),
                 started: "2026-01-01T00:00:00.000Z".to_string(),
                 ended: "2026-01-01T00:00:02.000Z".to_string(),
-                airgap: false,
+                egress: false,
             },
             git: ManifestGit {
                 head: None,

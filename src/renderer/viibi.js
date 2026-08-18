@@ -1,6 +1,6 @@
 // Viibi — the mascot. A small bookmark-sprite in the status bar that mirrors
 // what the app is doing: resting when idle, reading while flows / chat /
-// voice are busy, gapped when the air gap is holding, blocked on a refused
+// voice are busy, gapped when the egress is holding, blocked on a refused
 // request, and error on a failure. Pure presentation — it reads shared state
 // and the event bus, and never mutates app state.
 //
@@ -209,10 +209,10 @@ export function initViibi() {
     apply()
   })
 
-  // Air gap: a refused request is a blocked flash; state changes re-derive
+  // Egress: a refused request is a blocked flash; state changes re-derive
   // gapped-vs-resting.
-  tome.airgap.onBlocked(() => flash('blocked'))
-  tome.airgap.onState((s) => {
+  tome.egress.onBlocked(() => flash('blocked'))
+  tome.egress.onState((s) => {
     Object.assign(agState, s)
     apply()
   })

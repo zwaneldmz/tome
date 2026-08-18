@@ -181,7 +181,7 @@ fn build_env(
         close_agent_env: Arc::new(move |pane_id: &str| {
             closed.lock().unwrap().push(pane_id.to_string())
         }),
-        airgap_default: Arc::new(move || {
+        egress_default: Arc::new(move || {
             Box::pin(async move { gapped_default }) as env::BoxFuture<bool>
         }),
         log_event: Arc::new(move |kind: &str, fields: Vec<(String, Value)>| {
@@ -550,7 +550,7 @@ async fn wraps_the_whole_command_line_in_the_sandbox_exactly_as_a_gapped_pane_do
 }
 
 #[tokio::test]
-async fn runs_ungapped_with_no_sandbox_wrap_at_all_when_the_air_gap_default_is_off() {
+async fn runs_ungapped_with_no_sandbox_wrap_at_all_when_the_egress_default_is_off() {
     let root = workspace();
     let recorders = Recorders::default();
     let mut scripts = HashMap::new();
@@ -573,11 +573,11 @@ async fn runs_ungapped_with_no_sandbox_wrap_at_all_when_the_air_gap_default_is_o
     let seen = recorders.spawn_seen.lock().unwrap();
     assert_eq!(seen[0].cmd, "claude");
     assert_eq!(seen[0].args[0], "-p");
-    assert_eq!(run["airgap"], json!(false));
+    assert_eq!(run["egress"], json!(false));
 }
 
 #[tokio::test]
-async fn gives_every_node_its_own_air_gap_pane_id_and_closes_it_when_the_node_exits() {
+async fn gives_every_node_its_own_egress_pane_id_and_closes_it_when_the_node_exits() {
     let root = workspace();
     let recorders = Recorders::default();
     let e = build_env(&recorders, HashMap::new(), None, true);
@@ -598,7 +598,7 @@ async fn gives_every_node_its_own_air_gap_pane_id_and_closes_it_when_the_node_ex
     ];
     expected.sort();
     assert_eq!(calls, expected);
-    assert_eq!(run["airgap"], json!(true));
+    assert_eq!(run["egress"], json!(true));
 }
 
 // ======================================================================
@@ -876,7 +876,7 @@ async fn cancel_never_sigkills_a_node_that_exited_inside_the_grace_period() {
 }
 
 #[tokio::test]
-async fn never_spawns_into_a_run_cancelled_while_its_air_gap_was_still_coming_up() {
+async fn never_spawns_into_a_run_cancelled_while_its_egress_was_still_coming_up() {
     let root = workspace();
     let closed: Arc<std::sync::Mutex<Vec<String>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
     let gate = Arc::new(tokio::sync::Notify::new());
@@ -897,7 +897,7 @@ async fn never_spawns_into_a_run_cancelled_while_its_air_gap_was_still_coming_up
         close_agent_env: Arc::new(move |pane_id: &str| {
             closed2.lock().unwrap().push(pane_id.to_string())
         }),
-        airgap_default: Arc::new(|| Box::pin(async { true }) as env::BoxFuture<bool>),
+        egress_default: Arc::new(|| Box::pin(async { true }) as env::BoxFuture<bool>),
         log_event: Arc::new(|_k, _f| {}),
         push: Arc::new(|_v| {}),
         spawn: Arc::new(|_req| panic!("a cancelled run must not spawn anything")),
@@ -1862,7 +1862,7 @@ async fn products_e2e_promotes_only_the_terminal_nodes_output_with_gitignore_and
     assert_eq!(manifest["products"][0]["sha256"], json!(expected_sha));
     assert_eq!(products[0]["sha256"], json!(expected_sha));
     assert_eq!(manifest["run"]["id"], json!(id));
-    assert_eq!(manifest["run"]["airgap"], json!(true));
+    assert_eq!(manifest["run"]["egress"], json!(true));
     assert_eq!(manifest["flow"]["name"], json!("products-e2e"));
     assert_eq!(manifest["nodes"].as_array().unwrap().len(), 2); // n1 AND n2, not just the terminal
 

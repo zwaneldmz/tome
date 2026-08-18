@@ -1,12 +1,12 @@
 # Linux Landlock File Confinement — Design (F2)
 
 **Status:** design only, not implemented. Needs a real-Linux test loop to land safely.
-**Owner:** `src-tauri/crates/tome-shim` (mechanism) + `src-tauri/src/airgap/linux.rs` (argv builder).
+**Owner:** `src-tauri/crates/tome-shim` (mechanism) + `src-tauri/src/egress/linux.rs` (argv builder).
 
 ## Problem
 
 On macOS the seatbelt profile (a **deny-list**) denies agent **writes** under
-the app config dir and **reads** of `airgap-auth.json`. On Linux rung 2
+the app config dir and **reads** of `egress-auth.json`. On Linux rung 2
 (`tome-shim --self-unshare`), only the network-namespace egress kill is
 enforced today; file confinement is the `TODO(landlock)` in
 `crates/tome-shim/src/linux.rs`.
@@ -32,12 +32,12 @@ paths the agent may legitimately touch:
   own config dirs.
 
 The app config dir is excluded from both, which transitively makes the store
-and `airgap-auth.json` unreadable/unwritable without needing a per-file rule.
+and `egress-auth.json` unreadable/unwritable without needing a per-file rule.
 
 ## Change set
 
 1. Thread the allow-set through the spawn spec: `GappedSpawnSpec`
-   (`airgap/linux.rs`) → `build_self_unshare_argv` → new repeatable
+   (`egress/linux.rs`) → `build_self_unshare_argv` → new repeatable
    `--allow-read` / `--allow-write` flags → `ShimArgs`.
 2. Add the `landlock` crate as a `[target.'cfg(target_os = "linux")'.dependencies]`.
 3. Implement `apply_landlock(allow_read: &[PathBuf], allow_write: &[PathBuf])`:
@@ -59,7 +59,7 @@ and `airgap-auth.json` unreadable/unwritable without needing a per-file rule.
 Extend the `#[ignore]`d `linux_sandbox_integration_tests.rs` curl-matrix (now
 run on ubuntu-22.04/24.04 + fedora) with three assertions:
 
-- the agent **cannot read** `airgap-auth.json` (rung 2);
+- the agent **cannot read** `egress-auth.json` (rung 2);
 - the agent **cannot write** a file under the app config dir;
 - the agent **can still write** under the workspace and `/tmp` (no
   over-restriction that would break agent CLIs).

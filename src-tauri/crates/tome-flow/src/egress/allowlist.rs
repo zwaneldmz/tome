@@ -1,4 +1,4 @@
-//! Provider allowlist for the airgap proxies: hostname patterns where `*`
+//! Provider allowlist for the egress proxies: hostname patterns where `*`
 //! matches exactly one DNS label (`[a-z0-9-]+`), case-insensitive, matched
 //! label-by-label with equal label counts required — so `*.amazonaws.com`
 //! can never match `amazonaws.com.evil.com` (label counts differ) nor
@@ -7,12 +7,12 @@
 //! bypass-proof by construction and auditable by inspection, without
 //! having to reason about regex-engine edge cases (anchoring mistakes,
 //! `.` matching more than intended, catastrophic backtracking). Ports
-//! `src/main/lib/allowlist.js` 1:1, pinned by `test/airgap.test.js`'s
+//! `src/main/lib/allowlist.js` 1:1, pinned by `test/egress.test.js`'s
 //! "wildcard hostname compiler" / "exact hosts" / "DEFAULT_ALLOW" suites
-//! and `test/repo-airgap.test.js`'s `validateRepoAllowlist` suite (both
+//! and `test/repo-egress.test.js`'s `validateRepoAllowlist` suite (both
 //! ported below as `#[cfg(test)] mod tests`).
 //!
-//! Nothing in the crate calls into this module yet — the airgap
+//! Nothing in the crate calls into this module yet — the egress
 //! orchestration layer (`mod.rs`, a later slice — see that file's own doc
 //! comment for the ownership split) and `proxy.rs` (this same slice) are
 //! its only intended callers.
@@ -115,7 +115,7 @@ pub fn is_allowed(matchers: &[HostMatcher], host: &str) -> bool {
     matchers.iter().any(|m| m.matches(host))
 }
 
-/// Parses a repo's raw `.tome/airgap.json` text into its `allow` array.
+/// Parses a repo's raw `.tome/egress.json` text into its `allow` array.
 /// Mirrors `parseRepoAllowlist`: errs on bad JSON or when `allow` isn't a
 /// JSON array. Element values are NOT required to be strings here (mirrors
 /// `{ hosts: cfg.allow }` passing the parsed array through unchecked) —
@@ -208,9 +208,9 @@ fn validate_one(value: &Value) -> Result<String, String> {
     Ok(pattern.to_string())
 }
 
-/// Validates a repo's committed `.tome/airgap.json` `allow` array —
+/// Validates a repo's committed `.tome/egress.json` `allow` array —
 /// untrusted input, since anyone who can commit to the repo can edit it.
-/// The checks exist to stop a repo from silently punching the air gap wide
+/// The checks exist to stop a repo from silently punching the egress wide
 /// open. Never panics: a hostile file degrades to per-entry rejections
 /// instead of breaking the read path. Mirrors `validateRepoAllowlist`.
 pub fn validate_repo_allowlist(patterns: &[Value]) -> ValidationResult {

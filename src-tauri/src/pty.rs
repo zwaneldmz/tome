@@ -324,7 +324,7 @@ impl Registry {
 
     /// The mechanism every spawn path shares — `spawn_terminal` above is a
     /// thin `CommandBuilder` builder on top of this; a later phase's agent
-    /// path (once the airgap port lifts the phase 2 restriction — see this
+    /// path (once the egress port lifts the phase 2 restriction — see this
     /// slice's task brief) is expected to call this directly with its own
     /// `CommandBuilder` (sandbox wrap argv and all) rather than duplicating
     /// any of it. `pub(crate)` rather than a private fn for exactly that

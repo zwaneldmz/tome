@@ -1,6 +1,6 @@
 // Bottom status bar: active root, active-pane context, open-pane count,
-// background flow runs, and air-gap network state. Updated by panes.js (pane
-// add/remove/focus), workspaces/tree (active root), airgap-ui.js (per-pane
+// background flow runs, and egress network state. Updated by panes.js (pane
+// add/remove/focus), workspaces/tree (active root), egress-ui.js (per-pane
 // network mode), and — for runs alone — a subscription of its own below.
 // Otherwise pure presentation: it reads shared state.  Panels may expose
 // statusMeta() returning { icon, text } for contextual info (editor line:col,
@@ -15,7 +15,7 @@ const rootEl = document.getElementById('sb-root')
 const contextEl = document.getElementById('sb-context')
 const panesEl = document.getElementById('sb-panes')
 const runsEl = document.getElementById('sb-runs')
-const airgapEl = document.getElementById('sb-airgap')
+const egressEl = document.getElementById('sb-egress')
 const uqEl = document.getElementById('sb-uq')
 
 // panes.js injects the dock after creating it — avoids a panes<->statusbar
@@ -78,11 +78,11 @@ export function renderStatusbar() {
     runsLive ? `${runsLive} flow run${runsLive === 1 ? '' : 's'} running — open the runs page` : 'Flow runs'
   )
 
-  // air-gap network state: count panes currently open to the internet.
+  // egress network state: count panes currently open to the internet.
   //
-  // PANES, and only panes. A background flow node opens an air-gap proxy of
+  // PANES, and only panes. A background flow node opens an egress proxy of
   // its own under a `run:` pane id it invented for the purpose
-  // (flow-run-plan.js's RUN_PANE_PREFIX) — main's airgap map cannot tell the
+  // (flow-run-plan.js's RUN_PANE_PREFIX) — main's egress map cannot tell the
   // two apart, but this item says "pane" and a run has none: no strip, no
   // unlock UI, no window. Counted here, pressing Run on a three-node flow
   // would light a previously blank chip up as "⛨ 2 gated" and flicker the
@@ -93,17 +93,17 @@ export function renderStatusbar() {
     .map(([, p]) => p)
   const gapped = panes.length
   const open = panes.filter((p) => p?.mode === 'open').length
-  airgapEl.classList.remove('sb-open', 'sb-shut')
+  egressEl.classList.remove('sb-open', 'sb-shut')
   if (!gapped) {
-    airgapEl.textContent = ''
+    egressEl.textContent = ''
   } else if (open) {
-    airgapEl.textContent = `⛉ ${open} open`
-    airgapEl.classList.add('sb-open')
-    airgapEl.title = `${open} of ${gapped} air-gapped pane${gapped === 1 ? '' : 's'} on open internet`
+    egressEl.textContent = `⛉ ${open} open`
+    egressEl.classList.add('sb-open')
+    egressEl.title = `${open} of ${gapped} contained pane${gapped === 1 ? '' : 's'} on open internet`
   } else {
-    airgapEl.textContent = `⛨ ${gapped} gated`
-    airgapEl.classList.add('sb-shut')
-    airgapEl.title = `${gapped} air-gapped pane${gapped === 1 ? '' : 's'} — model APIs only`
+    egressEl.textContent = `⛨ ${gapped} gated`
+    egressEl.classList.add('sb-shut')
+    egressEl.title = `${gapped} contained pane${gapped === 1 ? '' : 's'} — model APIs only`
   }
 }
 

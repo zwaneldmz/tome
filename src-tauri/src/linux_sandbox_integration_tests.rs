@@ -1,10 +1,10 @@
 //! Phase 4/slice L3: the REAL enforcement proof — `#[ignore]`d integration
 //! tests that spawn a genuine `bwrap`-wrapped `tome-shim` inside a real
 //! Linux network namespace and curl from inside it. Everything else this
-//! phase built (`airgap::linux`'s argv assembly, `ipc::pty::pty_create`'s
+//! phase built (`egress::linux`'s argv assembly, `ipc::pty::pty_create`'s
 //! wiring, `tome-shim` itself) is exercised only by pure unit tests on
 //! whatever host happens to run `cargo test` — none of which can prove the
-//! air gap actually holds, since that requires a REAL `unshare(2)` call,
+//! egress actually holds, since that requires a REAL `unshare(2)` call,
 //! which this repo's own development host (macOS) cannot make. This file
 //! is that proof, and it runs in exactly one place: the `linux-sandbox`
 //! job in `.github/workflows/linux-sandbox.yml`, on a real `ubuntu-latest`
@@ -30,10 +30,10 @@
 //! ## Honest scope limits (read before trusting a green run as more than it is)
 //!
 //! - **Rung 1 (bwrap) only.** Every test below calls
-//!   `crate::airgap::linux::build_bwrap_argv` directly, rather than going
+//!   `crate::egress::linux::build_bwrap_argv` directly, rather than going
 //!   through `probe_sandbox_strategy()`'s own bwrap-vs-self-unshare
 //!   decision — that DECISION is already fully unit-tested in
-//!   `airgap::linux`'s own `#[cfg(test)]` suite (runs on every host,
+//!   `egress::linux`'s own `#[cfg(test)]` suite (runs on every host,
 //!   including this crate's macOS gates); what ONLY a real Linux box can
 //!   prove is whether the MECHANISM each rung names actually enforces
 //!   anything, and bwrap is the mechanism this app prefers whenever it's
@@ -42,7 +42,7 @@
 //!   deliberately flagged gap, not an oversight; a reasonable follow-up,
 //!   not required for THIS slice's own "the primary mechanism actually
 //!   works" claim. Its own `TODO(landlock)` gap (no `--tmpfs` equivalent)
-//!   is already documented in `airgap/linux.rs`.
+//!   is already documented in `egress/linux.rs`.
 //! - **Never run, never observed to pass, before this commit.** Authored
 //!   entirely on macOS. Treat a green run of THIS specific file, the
 //!   first time CI actually executes it, as the actual news — not
@@ -106,8 +106,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::process::{Child, Command};
 
-use crate::airgap::linux::{build_bwrap_argv, ensure_pane_socket_dir, GappedSpawnSpec};
-use crate::airgap::proxy::{BlockedEvent, PaneProxy};
+use crate::egress::linux::{build_bwrap_argv, ensure_pane_socket_dir, GappedSpawnSpec};
+use crate::egress::proxy::{BlockedEvent, PaneProxy};
 
 // ---- environment preconditions ----
 
@@ -250,8 +250,8 @@ struct SandboxFixture {
 }
 
 /// Sets up everything a real gapped-pane spawn needs, using the SAME
-/// production code (`airgap::linux::build_bwrap_argv`,
-/// `airgap::proxy::PaneProxy::spawn`) `ipc::pty::pty_create` calls — the
+/// production code (`egress::linux::build_bwrap_argv`,
+/// `egress::proxy::PaneProxy::spawn`) `ipc::pty::pty_create` calls — the
 /// whole point of testing from INSIDE this crate rather than as an
 /// external black box (see `lib.rs`'s registration comment).
 ///
@@ -536,8 +536,8 @@ async fn curl_via_proxy_to_a_non_allowlisted_host_is_blocked() {
     );
 
     // The host-side PaneProxy's on_blocked callback — the exact mechanism
-    // `ipc::airgap::create_gapped_pane_proxy` wires to `events::append`
-    // (kind `airgap:blocked`) in production — must have actually fired.
+    // `ipc::egress::create_gapped_pane_proxy` wires to `events::append`
+    // (kind `egress:blocked`) in production — must have actually fired.
     let blocked = fixture.blocked.lock().unwrap();
     assert!(
         blocked
@@ -615,7 +615,7 @@ async fn app_config_dir_is_hidden_by_the_bwrap_tmpfs() {
     // BEFORE spawning — the auth file bwrap's own profile (and this
     // fixture's argv) targets, present on the HOST, must still exist on
     // disk right up until the sandboxed process actually checks for it.
-    let marker = fixture.config_dir.path().join("airgap-auth.json");
+    let marker = fixture.config_dir.path().join("egress-auth.json");
     std::fs::write(&marker, r#"{"salt":"deadbeef","hash":"deadbeef"}"#)
         .expect("write marker file on host");
     assert!(

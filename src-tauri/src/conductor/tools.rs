@@ -327,7 +327,7 @@ fn list_panes(c: &Conductor) -> String {
                     let mut obj = p.as_object().cloned().unwrap_or_default();
                     obj.insert("kind".to_string(), json!(m.kind));
                     obj.insert("cwd".to_string(), json!(m.cwd));
-                    obj.insert("airgapped".to_string(), json!(m.airgap));
+                    obj.insert("egressped".to_string(), json!(m.egress));
                     // `!m.exited && ptys.has(p.id)` in JS — simplified to
                     // `!m.exited` alone: this crate's pty-liveness registry
                     // (`pty::Registry`) exposes no production-reachable
@@ -355,9 +355,9 @@ fn read_terminal(c: &Conductor, env: &ConductorEnv, input: &Value) -> String {
         return "No such terminal pane. Use list_panes.".to_string();
     };
     // Scrollback can hold anything the pane ever printed — default-deny,
-    // and an air-gapped pane is refused outright, consent or not (TOME-009).
-    if c.meta_of(pane_id).map(|m| m.airgap).unwrap_or(false) {
-        return "Refused: air-gapped pane output cannot be disclosed.".to_string();
+    // and an gapped pane is refused outright, consent or not (TOME-009).
+    if c.meta_of(pane_id).map(|m| m.egress).unwrap_or(false) {
+        return "Refused: gapped pane output cannot be disclosed.".to_string();
     }
     if !c.has_read_consent(pane_id) {
         // One-time per-pane consent prompt; fail closed until answered.

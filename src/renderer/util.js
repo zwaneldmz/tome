@@ -12,7 +12,7 @@ export function el(tag, cls, text) {
 
 const toasts = document.getElementById('toasts')
 // Toasts vanish after ~5 s, so every one is also logged (session-only, capped)
-// behind the bell in the top bar — a missed "airgap blocked" stays retrievable.
+// behind the bell in the top bar — a missed "egress blocked" stays retrievable.
 export const notifLog = []
 const NOTIF_CAP = 100
 export function toast(msg, kind = 'err') {

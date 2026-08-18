@@ -3,7 +3,7 @@
 //   panels/   one file per dockview panel class
 //   panes.js  the dockview grid + pane-opening actions + conductor bridge
 //   menus.js  topbar menus (workspace, ＋)   tree.js  file tree sidebar
-//   git.js    branch widget + polling        airgap-ui.js  strips + modals
+//   git.js    branch widget + polling        egress-ui.js  strips + modals
 //   modals.js modal shell   util.js  el()/toast/tome   state.js, regs.js
 // Tauri IPC shim — must evaluate before anything else reads window.tome
 // (util.js does so at module-eval time on the very next line).
@@ -16,14 +16,14 @@ import { markdownLangExt } from './cm-lang.js'
 import { renderAll } from './menus.js'
 import { startGitPolling, initGitMenu } from './git.js'
 import { activeWorkspace, syncFolders } from './workspaces.js'
-import { checkRepoAirgap } from './repo-airgap.js'
+import { checkRepoEgress } from './repo-egress.js'
 import { bootAuth } from './lock.js'
 import { maybeShowOnboarding } from './onboarding.js'
 import { bootTheme } from './theme.js'
 import { bootChrome } from './chrome.js'
 import { initVoice, voiceActive, VOICE_CHAT_ID } from './voice.js'
 import { loadEditorPrefs, warmLanguages } from './panels/editor.js'
-import './airgap-ui.js' // wires the air-gap event listeners + strip ticker
+import './egress-ui.js' // wires the egress event listeners + strip ticker
 import './viibi.js' // the mascot: status-bar sprite + processing-state wiring
 import './mentor.js' // mentor mode: gate subscription + per-workspace uq/verbose
 import './keys.js' // the keyboard spine: pane keys, quick open, zoom, reference
@@ -73,13 +73,13 @@ mark('module evaluation start')
       wsState.ws.active = wsState.ws.workspaces.length - 1
   }
   await loadEditorPrefs() // before restoreLayout, so reopened editors get them
-  const agPref = await tome.store.get('airgap-default')
-  if (agPref !== null) prefs.airgapDefault = !!agPref
+  const agPref = await tome.store.get('egress-default')
+  if (agPref !== null) prefs.egressDefault = !!agPref
   if (await tome.store.get('conductor-run')) {
     prefs.conductorRun = true
     tome.conductor.allowRun(true)
   }
-  tome.airgap.state().then((s) => Object.assign(agState, s))
+  tome.egress.state().then((s) => Object.assign(agState, s))
   syncFolders() // main starts with an empty confinement list
   wsState.activeRoot = activeWorkspace()?.folders[0] || null
   renderAll()
@@ -94,8 +94,8 @@ mark('module evaluation start')
   // Everything below is boot-tail work: nothing here is awaited by the paint
   // path above, so it all runs after the layout is on screen.
   // After bootAuth, so the lock-gated apply channel is reachable; a repo's
-  // .tome/airgap.json still needs the user's consent before it is honored.
-  checkRepoAirgap()
+  // .tome/egress.json still needs the user's consent before it is honored.
+  checkRepoEgress()
   initGitMenu() // deferred out of git.js's module body — see the note there
   startGitPolling() // gated on unlock: the IPC gate refuses while locked
   // Idle warm-up of the two lazy loads the user is most likely to hit next:
@@ -126,7 +126,7 @@ mark('module evaluation start')
         id,
         component: 'terminal',
         title: `⛨ zsh — demo`,
-        params: { ptyId: id, kind: 'terminal', cwd: root, airgap: true },
+        params: { ptyId: id, kind: 'terminal', cwd: root, egress: true },
       })
       openFile(`${root}/package.json`)
       addChat()

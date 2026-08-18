@@ -8,11 +8,11 @@ design leans on.
 
 ## Assets
 
-- `<app_data_dir>/airgap-auth.json` — scrypt passphrase hash + TOTP secret
+- `<app_data_dir>/egress-auth.json` — scrypt passphrase hash + TOTP secret
   (0600; the TOTP secret itself lives in the OS keychain when one is
   available — see `src-tauri/src/authlock.rs`).
-- `<app_data_dir>/airgap.json` — egress allowlist for air-gapped panes.
-- `<app_data_dir>/airgap-repo-consents.json` — repo egress consents (0600).
+- `<app_data_dir>/egress.json` — egress allowlist for gapped panes.
+- `<app_data_dir>/egress-repo-consents.json` — repo egress consents (0600).
 - `<app_data_dir>/events.jsonl` — the persistent event log.
 - Provider API keys (Anthropic/OpenAI/etc.) read from the user's login shell.
 - The user's project files, exposed to agent CLIs running in pty panes.
@@ -26,10 +26,10 @@ Electron's `app.getPath('userData')` (see `src-tauri/src/lib.rs`).
    Electron `sandbox: true` flag) and talks to the Rust backend over Tauri
    IPC, gated fail-closed (`src-tauri/src/lock_gate.rs`). A compromised
    renderer must not be able to spawn arbitrary processes, read credentials,
-   or weaken the air gap.
+   or weaken the egress controls.
 2. **Agent pane ↔ host.** Agent CLIs run under the macOS seatbelt
-   (`sandbox-exec`, `src-tauri/src/airgap/seatbelt.rs`) or the Linux
-   bubblewrap/unshare ladder (`src-tauri/src/airgap/linux.rs`) with all
+   (`sandbox-exec`, `src-tauri/src/egress/seatbelt.rs`) or the Linux
+   bubblewrap/unshare ladder (`src-tauri/src/egress/linux.rs`) with all
    direct egress denied; the only way out is a per-pane loopback CONNECT
    proxy that enforces the provider allowlist.
 3. **Model ↔ tools.** The assistant chat (conductor, `src-tauri/src/conductor/`)
@@ -50,7 +50,7 @@ vetted in `src-tauri/src/store_keys.rs` (used by `src-tauri/src/store.rs`):
 - `is_key_shape_valid()` accepts only slug-shaped keys
   (`/^[a-z0-9][a-z0-9-]*$/`) — no path traversal into other files in
   `<app_data_dir>`.
-- `RESERVED_KEYS = { airgap, airgap-auth, airgap-repo-consents, events }` can
+- `RESERVED_KEYS = { egress, egress-auth, egress-repo-consents, events }` can
   never be read or written through the store — the credential file, the
   egress allowlist, the repo-consent file, and the event log are
   unreachable over this open channel.
@@ -59,7 +59,7 @@ vetted in `src-tauri/src/store_keys.rs` (used by `src-tauri/src/store.rs`):
 
 ### 2. Login already proves the passphrase ⇒ pane unlock is second-factor-only
 
-`airgap:unlock` (freeing an air-gapped pane onto the open internet) is itself
+`egress:unlock` (freeing a gapped pane onto the open internet) is itself
 behind the lock gate (`src-tauri/src/lock_gate.rs`), so the caller has
 already proven the passphrase (or Touch ID) at login. Pane unlock therefore
 demands a *second* factor by design: the TOTP code when enrolled, the
@@ -71,11 +71,11 @@ point.
 
 The per-workspace note vault lives at `~/Tome/Brains/<ws>` (sanitized
 workspace name), not under Tauri's `<app_data_dir>`, precisely because the
-seatbelt profile denies air-gapped panes all writes under the app config dir
-(`src-tauri/src/airgap/seatbelt.rs`) — and the Linux bwrap wrap replaces the
-config dir with a fresh tmpfs (`src-tauri/src/airgap/linux.rs`). This gives
+seatbelt profile denies gapped panes all writes under the app config dir
+(`src-tauri/src/egress/seatbelt.rs`) — and the Linux bwrap wrap replaces the
+config dir with a fresh tmpfs (`src-tauri/src/egress/linux.rs`). This gives
 agents full read/write of their vault with zero sandbox changes. The same
-profile also denies reads of `airgap-auth.json` (TOTP secret) specifically.
+profile also denies reads of `egress-auth.json` (TOTP secret) specifically.
 If the vault location ever moves (`src-tauri/src/brain.rs`'s `brains_root`),
 re-check the seatbelt profile against it.
 
@@ -86,16 +86,16 @@ TODO (`src-tauri/crates/tome-shim/src/linux.rs`, `TODO(landlock)`). The
 network-namespace egress kill is what that rung actually delivers; its
 filesystem hardening is still open.
 
-### 4. The air gap widens the proxy, never the sandbox
+### 4. Unlock widens the proxy, never the sandbox
 
 Unlocking a pane flips its per-pane proxy from "providers allowlist" to
-"open" (`src-tauri/src/airgap/mod.rs`'s `PaneMode`,
-`src-tauri/src/airgap/proxy.rs`'s `host_allowed`). The sandbox wrap (macOS
+"open" (`src-tauri/src/egress/mod.rs`'s `PaneMode`,
+`src-tauri/src/egress/proxy.rs`'s `host_allowed`). The sandbox wrap (macOS
 seatbelt profile / Linux bwrap or self-unshare argv) is fixed at spawn and
 **no code path weakens the sandbox after spawn** — sandboxed processes can't
 be re-profiled, and we don't try. All lock/unlock/relock state lives in the
 backend proxy. Corollary: the sandbox denies egress even in "open" mode; the
-proxy is still the only route out. `airgap/proxy.rs` also re-checks
+proxy is still the only route out. `egress/proxy.rs` also re-checks
 pane-alive + host-allowed at CONNECT-completion time (TOME-002), so a tunnel
 that was only ever allowed because the pane was in `Open` mode can't finish
 handshaking after a relock and pipe forever.
@@ -115,7 +115,7 @@ case:
   characters that would submit or signal on their own (CR/LF, Ctrl-C,
   Ctrl-D, …) are stripped from the typed text, so `text: "ls\r"` cannot run
   a command the user never approved — the text sits in the prompt for review.
-- `read_terminal` refuses air-gapped panes outright (TOME-009) and otherwise
+- `read_terminal` refuses gapped panes outright (TOME-009) and otherwise
   asks once per pane before disclosing scrollback.
 - Scrollback is ANSI/control-stripped (`strip_ansi`) before the model sees
   it.
@@ -129,7 +129,7 @@ case:
 `TOME_SHOT` (screenshot/demo mode) bypasses the lock gate and opens a
 representative set of panes for development screenshots. It exists for
 development only. Intent: it must never be reachable in a packaged build —
-`src-tauri/src/lib.rs`'s `boot_auth_and_airgap` computes it as
+`src-tauri/src/lib.rs`'s `boot_auth_and_egress` computes it as
 `truthy_env("TOME_SHOT") && tauri::is_dev()` (the port of
 `!app.isPackaged`), and `lock_gate::is_locked` receives `shot_mode` as a
 parameter rather than reading the env itself. Until that is independently
@@ -202,26 +202,26 @@ entries:
   (`src-tauri/src/protocol.rs`), but renderer JS cannot *read* `tome://`
   response bodies: the CSP `connect-src` omits `tome:` (see that file's
   module doc comment for the two-half fix).
-- **A repo's `.tome/airgap.json` is untrusted input.** It is validated by
+- **A repo's `.tome/egress.json` is untrusted input.** It is validated by
   the same wildcard compiler as the user allowlist, over-broad patterns
   (bare `*`, `*.com`, single labels, URL syntax) are refused
-  (`src-tauri/src/airgap/allowlist.rs`), and the user must consent before
+  (`src-tauri/src/egress/allowlist.rs`), and the user must consent before
   any of it is honored. Consent is collected in the renderer but **verified
   and stored in the backend**
-  (`<app_data_dir>/airgap-repo-consents.json`, 0600, seatbelt-denied to
-  agents; `src-tauri/src/airgap/mod.rs`): the backend re-reads and re-hashes
+  (`<app_data_dir>/egress-repo-consents.json`, 0600, seatbelt-denied to
+  agents; `src-tauri/src/egress/mod.rs`): the backend re-reads and re-hashes
   the file at consent time (TOCTOU-safe — a hash mismatch refuses) and at
   every boot and workspace sync, dropping consents whose file changed or
   vanished, so a post-consent edit re-prompts and delete-the-file is a real
   revocation. A compromised renderer cannot widen egress — it can only *ask*
   the backend to re-check the file. A consent is a **standing grant pinned to
-  the file's SHA-1**: it applies globally (to every air-gapped pane, not just
+  the file's SHA-1**: it applies globally (to every gapped pane, not just
   the active workspace) until the file changes or the user revokes it —
   switching workspaces does not revoke it.
 - **The event log records actions, never payloads.**
   `<app_data_dir>/events.jsonl` keeps a capped, append-only audit of
   security-relevant actions — conductor tool calls (name, pane/chat id,
-  outcome), air-gap unlocks/relocks, blocked egress hosts
+  outcome), egress unlocks/relocks, blocked egress hosts
   (`src-tauri/src/eventlog.rs`, cap 5000; `src-tauri/src/events.rs`) — but
   tool *inputs/outputs* and typed text stay out of the log by design: they
   may contain secrets. The renderer reads it only through the lock-gated

@@ -341,7 +341,7 @@ export async function populateAddMenu(menu, target) {
   const disabled = new Set((await tome.store.get('agents-disabled')) || [])
   for (const a of agents.filter((a) => !a.custom && !disabled.has(a.name))) {
     menuItem(menu, {
-      label: (prefs.airgapDefault ? '⛨ ' : '') + a.name,
+      label: (prefs.egressDefault ? '⛨ ' : '') + a.name,
       hint: a.available ? (target ? 'as a tab' : 'agent') : 'not installed',
       disabled: !a.available,
       onClick: () => addTerminal(a.name, target),
@@ -355,7 +355,7 @@ export async function populateAddMenu(menu, target) {
     menuLabel(menu, 'Custom agents')
     for (const a of customs) {
       menuItem(menu, {
-        label: (prefs.airgapDefault ? '⛨ ' : '') + (a.label || a.name),
+        label: (prefs.egressDefault ? '⛨ ' : '') + (a.label || a.name),
         hint: a.available ? (target ? 'as a tab' : 'agent') : 'not installed',
         disabled: !a.available,
         onClick: () => addTerminal(a.name, target),
@@ -363,12 +363,12 @@ export async function populateAddMenu(menu, target) {
     }
   }
   menuItem(menu, {
-    label: 'spawn agents air-gapped',
-    hint: prefs.airgapDefault ? 'on' : 'off',
-    active: prefs.airgapDefault,
+    label: 'spawn agents contained',
+    hint: prefs.egressDefault ? 'on' : 'off',
+    active: prefs.egressDefault,
     onClick: () => {
-      prefs.airgapDefault = !prefs.airgapDefault
-      tome.store.set('airgap-default', prefs.airgapDefault)
+      prefs.egressDefault = !prefs.egressDefault
+      tome.store.set('egress-default', prefs.egressDefault)
     },
   })
   menuItem(menu, {

@@ -31,21 +31,21 @@
 //! exactly the wiring this binary needs from `tome_flow`'s own public
 //! primitives instead — see that module's own doc comment.
 //!
-//! ## The air gap and lock gate are never weakened here
+//! ## The egress and lock gate are never weakened here
 //!
 //! This binary has no lock screen to bypass (there is nothing to
 //! authenticate to — it is not interactive), so the project's "nothing
 //! spawns while locked" invariant has no analogue to weaken. What DOES
 //! apply, and is enforced identically: every flow node this binary spawns
-//! is air-gapped, unconditionally (`runner_env::build`'s `airgap_default`
+//! is gapped, unconditionally (`runner_env::build`'s `egress_default`
 //! is frozen `true` — see that module's doc comment), and a gapped node's
 //! egress allowlist is read from exactly one place, a file under the
 //! SERVER OWNER's own `$HOME` that nothing in the repo checkout can reach
-//! or edit (`airgap_config`'s own doc comment spells out why this is a
+//! or edit (`egress_config`'s own doc comment spells out why this is a
 //! prompt-injection line, not a convenience choice).
 
-mod airgap_config;
 mod cli;
+mod egress_config;
 mod events;
 mod home;
 mod run_cmd;

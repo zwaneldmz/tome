@@ -4,7 +4,7 @@ Starter `.flow.json` files — the same shape Tome saves when you build a flow o
 
 - **release-notes** — the smallest useful graph: gather (claude on haiku) → draft → review. Start here.
 - **codebase-onboarding** — fan-out/fan-in: three parallel readers (architecture, conventions, gotchas) → one synthesizer that writes a first-day guide.
-- **airgap-demo** — the 60-second demo as a flow: a scout probes the air-gap proxy, a builder codes offline, a terminal verifies.
+- **egress-demo** — the 60-second demo as a flow: a scout probes the egress proxy, a builder codes offline, a terminal verifies.
 - **review-pipeline** — triage (claude on haiku) → planner (claude) → implementer (opencode) → adversarial reviewer (pi) → verify (terminal).
 - **docs-sweep** — read docs, grep for stale claims, draft minimal fixes.
 
@@ -33,7 +33,7 @@ shape decides what each agent ever gets to see. Patterns these starters demonstr
   commit list either way — paying frontier-model prices for it buys nothing.
 - **Adversarial pair** (review-pipeline) — the diff is reviewed by a *different* CLI with
   instructions to break it, not admire it. Same-model review tends to nod along.
-- **Terminal ground truth** (airgap-demo, review-pipeline) — end with a `terminal` node
+- **Terminal ground truth** (egress-demo, review-pipeline) — end with a `terminal` node
   that runs the tests. Agents grade each other on vibes; terminals exit non-zero.
 
 To build your own, work backwards from the artifact you want. Name the file the last node
@@ -49,4 +49,4 @@ you can't write in one sentence means the node is doing two jobs: split it.
 - Edges wire ports, not nodes: `{ from, to, fromOutput, toInput }` — both port names must exist on their nodes or validation warns.
 - Handoff is a file per output: `.tome/flows/<name>/<node>-<output>.md`. Downstream nodes read upstream files; that's the whole mechanism.
 
-The demo script these support is item #6 in `docs/adoption-council-report.md` (E7's 60-second air-gap clip).
+The demo script these support is item #6 in `docs/adoption-council-report.md` (E7's 60-second egress clip).

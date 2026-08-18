@@ -106,7 +106,7 @@ mod tests {
         // "malformed" — both are isValidStoreKey() == false, both throw the
         // same 'Bad store key.' message.
         let dir = tempdir();
-        let err = set(dir.path(), "airgap-auth", &json!(1), false).unwrap_err();
+        let err = set(dir.path(), "egress-auth", &json!(1), false).unwrap_err();
         assert_eq!(err, "Bad store key.");
     }
 

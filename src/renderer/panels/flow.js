@@ -345,7 +345,7 @@ export class FlowPanel {
     // granted, before schedules_set is ever called).
     const scheduleBtn = el('button', 'flow-schedule', 'Schedule…')
     scheduleBtn.type = 'button'
-    scheduleBtn.title = 'Run this flow automatically, on a timer — always air-gapped'
+    scheduleBtn.title = 'Run this flow automatically, on a timer — always contained'
     scheduleBtn.addEventListener('click', () => this.scheduleFlowAction())
     actions.append(addBtn, saveBtn, runSplit, openText, scheduleBtn)
     bar.appendChild(actions)
@@ -1205,7 +1205,7 @@ export class FlowPanel {
           : `daily at ${timeInput.value} UTC`
       const ok = await confirmModal(
         'Schedule this flow?',
-        `${this.flow.name} — ${restated}. This schedule always runs air-gapped, even if "Spawn agents air-gapped" is off in Settings, and suspends itself the moment the flow file changes on disk.`,
+        `${this.flow.name} — ${restated}. This schedule always runs contained, even if "Spawn agents contained" is off in Settings, and suspends itself the moment the flow file changes on disk.`,
         'Schedule',
         this.element.ownerDocument
       )
@@ -1258,9 +1258,9 @@ export class FlowPanel {
     // node's group so a run lands as tabs in one place instead of scattering
     // across the grid (mirrors how conductor-opened panes join the asking
     // pane's group — see groupTarget in panes.js). Passing no explicit
-    // `airgap` here means each node gets exactly the same default spawnTerminal
+    // `egress` here means each node gets exactly the same default spawnTerminal
     // already applies everywhere else: plain 'terminal' nodes un-gapped,
-    // agent kinds gapped per prefs.airgapDefault (plan's Air-gap note) —
+    // agent kinds gapped per prefs.egressDefault (plan's Egress note) —
     // Run must not special-case or bypass that.
     let group
     order.forEach((node, i) => {

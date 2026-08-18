@@ -1,15 +1,15 @@
-//! Airgap subsystem (Phase 3). Slice ownership within this directory:
+//! Egress subsystem (Phase 3). Slice ownership within this directory:
 //! `allowlist.rs` + `proxy.rs` = slice A1 (host-matching compiler, the
 //! per-pane loopback CONNECT proxy, live tunnel tracking); `seatbelt.rs` +
 //! THIS file = slice A3 (this slice). `seatbelt.rs` is the pure macOS SBPL
 //! profile builder (see its own doc comment). This file is the pane-gapping
 //! state machine, repo-allowlist consent bookkeeping, and unlock/relock
-//! deadline tracking — ported from `src/main/airgap.js`'s module-level
+//! deadline tracking — ported from `src/main/egress.js`'s module-level
 //! state (`panes`, `repoConsents`, `appliedRepos`) and its
 //! `unlockPane`/`relockPane`/`closePane`/`closeAll`/`readRepoAllowlist`/
 //! `consentRepoAllowlist`/`revokeRepoAllowlist`/`reapplyRepoConsents`
-//! exports, plus `test/airgap-proxy-lifecycle.test.js`'s pure-state
-//! assertions and all of `test/repo-airgap.test.js`.
+//! exports, plus `test/egress-proxy-lifecycle.test.js`'s pure-state
+//! assertions and all of `test/repo-egress.test.js`.
 //!
 //! ## What is deliberately NOT here, and why
 //!
@@ -18,44 +18,44 @@
 //! state (`mode`, `expiresAt`) and live I/O resources (`server`, an
 //! `http.Server`; `tunnels`, live CONNECT sockets) it owns directly because
 //! JS has no separate ownership boundary to put them behind. This port
-//! splits that: [`AirgapState`] owns only the pure half (mode + deadline);
+//! splits that: [`EgressState`] owns only the pure half (mode + deadline);
 //! the live loopback listener and its tunnel registry belong to
-//! `airgap::proxy` (slice A1) and are wired together by the integrator
-//! (Task A4), which also owns pushing `airgap:state`/`airgap:blocked`
+//! `egress::proxy` (slice A1) and are wired together by the integrator
+//! (Task A4), which also owns pushing `egress:state`/`egress:blocked`
 //! events onto the real Tauri event bus (the JS original's `onEvent`/
-//! `pushState`). This keeps `AirgapState` framework-free — no
+//! `pushState`). This keeps `EgressState` framework-free — no
 //! `tauri::AppHandle`, no `tauri::State`, nothing async — so every method
 //! below is a plain synchronous call a `#[cfg(test)]` can exercise directly.
 //! Confinement resolution (`confine::confined_real_path`, which DOES need a
 //! live `tauri::State`) is threaded in the same way: as a closure the
 //! caller supplies per call, mirroring the JS original's own
 //! `setConfinedRealPath(fn)` injection but without a stored, boxed callback
-//! — see [`AirgapState::read_repo_allowlist`]'s doc comment.
+//! — see [`EgressState::read_repo_allowlist`]'s doc comment.
 //!
 //! **No `compileAllowlist`/`DEFAULT_ALLOW` (the wildcard hostname
-//! matcher).** `test/airgap.test.js` (which despite its filename tests only
+//! matcher).** `test/egress.test.js` (which despite its filename tests only
 //! this compiler, imported from `lib/allowlist.js`) is NOT ported into this
 //! file. That compiler's only consumer is the proxy's `hostAllowed(paneId,
 //! host)` check, which — by the split above — lives with the proxy, not the
 //! pane-state machine: `hostAllowed` in the original is `mode === 'open' ||
 //! allowMatchers.some(...)`, a composition of ONE fact this module owns
-//! (pane mode) with ONE fact `airgap::allowlist` (slice A1) owns (the
-//! compiled matcher list). [`AirgapState::pane_mode`] exists precisely so
+//! (pane mode) with ONE fact `egress::allowlist` (slice A1) owns (the
+//! compiled matcher list). [`EgressState::pane_mode`] exists precisely so
 //! the integrator can perform that composition without this module needing
-//! its own copy of the matcher compiler. `airgap/mod.rs`'s pre-existing doc
+//! its own copy of the matcher compiler. `egress/mod.rs`'s pre-existing doc
 //! comment (before this slice's own work landed) already assigned
 //! `allowlist.rs` to slice A1 for exactly this reason.
 //!
 //! **`parseRepoAllowlist`/`validateRepoAllowlist` are exposed here as
 //! `pub fn`s with this module's own return shape, but RECONCILED (Task A4
-//! integration) to delegate to `airgap::allowlist`'s implementation rather
+//! integration) to delegate to `egress::allowlist`'s implementation rather
 //! than carry a second copy of the validation rules.** This module needed
 //! them before `allowlist.rs` (slice A1) had landed — repo-consent
 //! bookkeeping (`readRepoAllowlist`/`consentRepoAllowlist`) cannot report
 //! `hosts`/`rejected` without them, and this slice's own gate could not
 //! wait — so [`parse_repo_allowlist`]/[`validate_repo_allowlist`] below
 //! started as a self-contained copy, pinned against every assertion in
-//! `test/repo-airgap.test.js`. Once `allowlist.rs` landed as the real,
+//! `test/repo-egress.test.js`. Once `allowlist.rs` landed as the real,
 //! 1:1-ported single source of truth for those same rules, both functions
 //! were reduced to thin adapters over it — same `pub` signatures (so every
 //! existing caller, including this module's own 30+ pinned tests, needed
@@ -69,14 +69,14 @@
 //! original's `unlockPane` both computes a deadline AND arms a real
 //! `setTimeout` that calls `relockPane` when it fires; `vi.useFakeTimers()`
 //! is how its test suite observes that without a real 15-minute wait.
-//! [`AirgapState::unlock_pane`] only does the first half: it validates and
+//! [`EgressState::unlock_pane`] only does the first half: it validates and
 //! records the deadline, returning it so the integrator can arm a real
 //! `tokio::time::sleep_until` (or equivalent) that calls
-//! [`AirgapState::relock_pane`] when it fires — the closest Rust analogue
-//! to the original's per-pane `setTimeout`. [`AirgapState::sweep_expired`]
+//! [`EgressState::relock_pane`] when it fires — the closest Rust analogue
+//! to the original's per-pane `setTimeout`. [`EgressState::sweep_expired`]
 //! is the other valid integration strategy (a periodic tick over every open
 //! pane) and is also what lets this module's own tests pin the "deadline is
-//! exclusive" boundary from `test/airgap-proxy-lifecycle.test.js`
+//! exclusive" boundary from `test/egress-proxy-lifecycle.test.js`
 //! deterministically, by passing an explicit `now_ms` instead of a fake
 //! clock — see that test's port below.
 //!
@@ -84,12 +84,12 @@
 //! `BLOCKED_COALESCE_MS`/`blockedPending` in the JS original) is driven by
 //! the proxy's own request handler observing a blocked CONNECT/plain-HTTP
 //! attempt — an event this module never produces, since it never runs a
-//! server. Left to `airgap::proxy` (slice A1) or the integrator (Task A4).
+//! server. Left to `egress::proxy` (slice A1) or the integrator (Task A4).
 
 // Every item below is exercised by its own #[cfg(test)] suite, but in a
 // plain (non-test) build nothing calls any of it yet — same rationale as
 // `pty_authority.rs`'s module-level allow (see that module's top doc
-// comment): the real callers (`ipc::airgap::*`, `ipc::pty::pty_create`'s
+// comment): the real callers (`ipc::egress::*`, `ipc::pty::pty_create`'s
 // gapped-pane path) are different slices' files and still stubs as of this
 // slice landing. One module-level allow here instead of scattering
 // `#[allow(dead_code)]` over two dozen individual items; `cargo test` still
@@ -109,9 +109,9 @@ use std::sync::Mutex;
 use serde::Serialize;
 use sha1::{Digest, Sha1};
 
-// ---- unlock policy (src/main/airgap.js's ALLOWED_UNLOCK_MINUTES / DEFAULT_UNLOCK_MINUTES) ----
+// ---- unlock policy (src/main/egress.js's ALLOWED_UNLOCK_MINUTES / DEFAULT_UNLOCK_MINUTES) ----
 
-/// Main-owned menu of valid `airgap:unlock` durations, in minutes — exactly
+/// Main-owned menu of valid `egress:unlock` durations, in minutes — exactly
 /// what the renderer's own unlock UI offers. `unlock_pane` refuses any
 /// value outside this set BEFORE mutating any state (TOME-019): a forged
 /// IPC call with `minutes` outside this list — 0, negative, or absurdly
@@ -121,22 +121,22 @@ use sha1::{Digest, Sha1};
 /// The JS original's own test additionally rejects non-integer shapes
 /// (`'15'` as a string, `NaN`, `Infinity`) that arrive over an untyped
 /// `ipcMain.handle` payload. Those have no analogue here: `minutes: i64` in
-/// [`AirgapState::unlock_pane`] makes them unrepresentable by the time a
+/// [`EgressState::unlock_pane`] makes them unrepresentable by the time a
 /// Tauri command's argument deserialization would even call in — the same
 /// type-level simplification `pty_authority.rs` and `confine.rs` document
 /// for their own renderer-supplied parameters.
 pub const ALLOWED_UNLOCK_MINUTES: [i64; 3] = [15, 30, 60];
 
-/// `src/main/airgap.js`'s `DEFAULT_UNLOCK_MINUTES` — not currently
+/// `src/main/egress.js`'s `DEFAULT_UNLOCK_MINUTES` — not currently
 /// user-configurable in either implementation; reported as `defaultMinutes`
-/// in the `airgap:state` wire shape.
+/// in the `egress:state` wire shape.
 pub const DEFAULT_UNLOCK_MINUTES: i64 = 15;
 
 // ---- pane gapping state ----
 
-/// A pane's egress mode. Mirrors `airgap.js`'s `st.mode` string
+/// A pane's egress mode. Mirrors `egress.js`'s `st.mode` string
 /// (`'providers' | 'open'`) as a real enum; [`PaneMode::as_str`] produces
-/// the identical two lowercase strings for the `airgap:state` wire shape.
+/// the identical two lowercase strings for the `egress:state` wire shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaneMode {
     /// Only allowlisted hosts (the provider defaults, the user's own
@@ -145,7 +145,7 @@ pub enum PaneMode {
     Providers,
     /// Temporarily unlocked: every host is reachable through this pane's
     /// proxy until `expires_at`. Only ever entered via
-    /// [`AirgapState::unlock_pane`].
+    /// [`EgressState::unlock_pane`].
     Open,
 }
 
@@ -176,7 +176,7 @@ struct RepoConsent {
 }
 
 /// One entry of `validateRepoAllowlist`'s `rejected` array — an
-/// individually-rejected pattern from a repo's `.tome/airgap.json`, with a
+/// individually-rejected pattern from a repo's `.tome/egress.json`, with a
 /// human-readable reason. `pattern` is the original JSON value, not a
 /// `String`: the JS original passes through whatever the entry actually
 /// was (a number, `null`, an object — see the "rejects non-strings" test),
@@ -195,7 +195,7 @@ pub struct RejectedPattern {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "lowercase")]
 pub enum RepoAllowlistReport {
-    /// No `.tome/airgap.json`, or main could not resolve/read/parse it — a
+    /// No `.tome/egress.json`, or main could not resolve/read/parse it — a
     /// file main cannot honestly read is treated as a file main cannot
     /// apply, same as the JS original's every catch branch.
     Absent,
@@ -219,9 +219,9 @@ pub enum RepoAllowlistReport {
 /// applied, rejected }` / `{ ok: false, error }`). Left un-`Serialize`
 /// deliberately: unlike [`RepoAllowlistReport`], nothing in this slice's
 /// scope hands this shape directly to a Tauri command's return type yet —
-/// the future `ipc::airgap::airgap_consent_repo_allowlist` (not this
+/// the future `ipc::egress::egress_consent_repo_allowlist` (not this
 /// slice's file) is expected to pattern-match this and build its own
-/// `{ ok, ... }` JSON, the same way every OTHER `ipc::airgap::*` stub
+/// `{ ok, ... }` JSON, the same way every OTHER `ipc::egress::*` stub
 /// already builds its JSON by hand rather than serializing a shared type.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConsentOutcome {
@@ -238,7 +238,7 @@ pub enum ConsentOutcome {
     Err(String),
 }
 
-// ---- `airgap:state` snapshot ----
+// ---- `egress:state` snapshot ----
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PaneStateView {
@@ -254,11 +254,11 @@ pub struct RepoStateEntry {
 }
 
 /// Mirrors `getState()`'s return shape exactly (`{ panes, defaultMinutes,
-/// repo }`) — the future `ipc::airgap::airgap_state` (not this slice's
+/// repo }`) — the future `ipc::egress::egress_state` (not this slice's
 /// file) additionally merges in `auth: authlock.authStatus()`, same as the
 /// JS handler does on top of this same `getState()` call.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct AirgapStateSnapshot {
+pub struct EgressStateSnapshot {
     pub panes: HashMap<String, PaneStateView>,
     #[serde(rename = "defaultMinutes")]
     pub default_minutes: i64,
@@ -279,14 +279,14 @@ struct Inner {
     panes: HashMap<String, PaneRecord>,
     /// root -> the consent last recorded for it (hash + the hosts that
     /// were `ok` at consent time). Persisted; survives restarts as long as
-    /// the file's hash still matches (see [`AirgapState::reapply_repo_consents`]).
+    /// the file's hash still matches (see [`EgressState::reapply_repo_consents`]).
     repo_consents: HashMap<String, RepoConsent>,
     /// root -> hosts CURRENTLY folded into the effective allowlist —
     /// mirrors `appliedRepos`. Distinct from `repo_consents` for the same
     /// reason the original keeps two maps: a consent can exist for a root
     /// whose hosts are not (yet, or no longer) applied, e.g. mid-reapply.
     applied_repos: HashMap<String, Vec<String>>,
-    /// Set once by [`AirgapState::load_repo_consents`] (mirrors the JS
+    /// Set once by [`EgressState::load_repo_consents`] (mirrors the JS
     /// original's module-level `consentsFile`, set once at boot from
     /// `loadRepoConsents(userData)`). `None` means "never loaded" — every
     /// save is then a silent no-op, matching `saveRepoConsents`'s own
@@ -294,14 +294,14 @@ struct Inner {
     consents_path: Option<PathBuf>,
 }
 
-/// The air-gap pane-gapping state machine plus repo-allowlist consent
+/// The egress pane-gapping state machine plus repo-allowlist consent
 /// bookkeeping — Tauri-free (see this module's top doc comment), owns its
 /// own interior locking so it is a plain value field on `AppState`, not
 /// wrapped in another `Mutex` (the same shape `pty::Registry` already
 /// uses).
-pub struct AirgapState {
+pub struct EgressState {
     inner: Mutex<Inner>,
-    /// Re-entrancy guard for [`AirgapState::reapply_repo_consents`] —
+    /// Re-entrancy guard for [`EgressState::reapply_repo_consents`] —
     /// mirrors the JS original's module-level `reapplying` boolean, which
     /// exists because `ws:sync` can fire again (a second workspace-folder
     /// sync) while an earlier reapply is still resolving confinement for
@@ -313,7 +313,7 @@ pub struct AirgapState {
     reapplying: AtomicBool,
 }
 
-impl AirgapState {
+impl EgressState {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(Inner {
@@ -329,7 +329,7 @@ impl AirgapState {
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.inner
             .lock()
-            .expect("airgap::AirgapState mutex poisoned")
+            .expect("egress::EgressState mutex poisoned")
     }
 
     // ---- pane lifecycle ----
@@ -337,7 +337,7 @@ impl AirgapState {
     /// Registers a freshly-created pane in `Providers` mode with no expiry
     /// — the state half of `createPaneProxy`'s `panes.set(paneId, { mode:
     /// 'providers', expiresAt: null, ... })`. The integrator calls this
-    /// once its real loopback proxy (`airgap::proxy`, slice A1) is actually
+    /// once its real loopback proxy (`egress::proxy`, slice A1) is actually
     /// listening; this module has no proxy of its own to wait on.
     ///
     /// Like `Map.set`, re-registering an already-live id overwrites the
@@ -356,7 +356,7 @@ impl AirgapState {
 
     /// `closePane` — drops the pane's state entry. No-op (returns `false`)
     /// for an unknown id, same as the original's `if (!st) return`
-    /// (`test/airgap-proxy-lifecycle.test.js`: "closePane on an unknown id
+    /// (`test/egress-proxy-lifecycle.test.js`: "closePane on an unknown id
     /// is a no-op"). The integrator is responsible for the matching
     /// `server.close()` + live-tunnel teardown on the real proxy handle —
     /// this call only ever needs to happen once regardless of order, so
@@ -388,7 +388,7 @@ impl AirgapState {
     }
 
     /// Mode + expiry together, for tests and for building an
-    /// [`AirgapStateSnapshot`] entry by hand when only one pane is needed.
+    /// [`EgressStateSnapshot`] entry by hand when only one pane is needed.
     pub fn pane_state(&self, id: &str) -> Option<(PaneMode, Option<i64>)> {
         self.lock().panes.get(id).map(|r| (r.mode, r.expires_at))
     }
@@ -442,7 +442,7 @@ impl AirgapState {
 
     /// Relocks every `Open` pane whose deadline has passed as of `now_ms`
     /// (`now_ms >= expires_at`, an INCLUSIVE-at-the-deadline comparison —
-    /// see `test/airgap-proxy-lifecycle.test.js`'s "not yet — deadline is
+    /// see `test/egress-proxy-lifecycle.test.js`'s "not yet — deadline is
     /// exclusive" assertion, ported below), returning the ids actually
     /// relocked. A pane already in `Providers` mode is left alone
     /// regardless of `now_ms`.
@@ -468,10 +468,10 @@ impl AirgapState {
         relocked
     }
 
-    /// `getState()`, minus the `auth` field the real `airgap:state` handler
+    /// `getState()`, minus the `auth` field the real `egress:state` handler
     /// merges in from a different subsystem entirely (see
-    /// [`AirgapStateSnapshot`]'s doc comment).
-    pub fn state_snapshot(&self) -> AirgapStateSnapshot {
+    /// [`EgressStateSnapshot`]'s doc comment).
+    pub fn state_snapshot(&self) -> EgressStateSnapshot {
         let inner = self.lock();
         let panes = inner
             .panes
@@ -494,7 +494,7 @@ impl AirgapState {
                 hosts: hosts.len(),
             })
             .collect();
-        AirgapStateSnapshot {
+        EgressStateSnapshot {
             panes,
             default_minutes: DEFAULT_UNLOCK_MINUTES,
             repo,
@@ -506,8 +506,8 @@ impl AirgapState {
     /// Flattened hosts from every currently-applied repo consent — the
     /// piece `state_snapshot`'s `RepoStateEntry.hosts` (a COUNT, for the UI)
     /// deliberately does not expose. Added for Task A4's integration: the
-    /// proxy's live allow set (`airgap::proxy::PaneProxy::set_allowed`) is
-    /// `DEFAULT_ALLOW ++ effective_repo_hosts()`, mirroring `airgap.js`'s
+    /// proxy's live allow set (`egress::proxy::PaneProxy::set_allowed`) is
+    /// `DEFAULT_ALLOW ++ effective_repo_hosts()`, mirroring `egress.js`'s
     /// `recompile()` (`[...(userAllow || DEFAULT_ALLOW), ...[...appliedRepos.values()].flat()]`,
     /// minus the user-override half — see this slice's task report for why
     /// `userAllow`/`loadAllowlist` has no port yet). Order is
@@ -523,7 +523,7 @@ impl AirgapState {
     }
 
     /// `readRepoAllowlist(root)` — reports what main WOULD apply for
-    /// `${root}/.tome/airgap.json`, without applying anything. `resolve` is
+    /// `${root}/.tome/egress.json`, without applying anything. `resolve` is
     /// this call's confinement resolver (mirrors the JS original's
     /// injected, module-level `confinedRealPath` — see this module's top
     /// doc comment for why it is a per-call closure here rather than a
@@ -551,11 +551,20 @@ impl AirgapState {
             return RepoAllowlistReport::Absent;
         }
         // Plain concatenation, not `Path::join`, matching the JS original's
-        // template literal (`` `${root}/.tome/airgap.json` ``) exactly —
+        // template literal (`` `${root}/.tome/egress.json` ``) exactly —
         // including its quirk of a doubled separator if `root` already ends
         // in one, which the resolver either tolerates or refuses the same
         // way it would for the JS version.
-        let candidate = PathBuf::from(format!("{root}/.tome/airgap.json"));
+        let primary = PathBuf::from(format!("{root}/.tome/egress.json"));
+        // `.tome/airgap.json` is the pre-rename filename. Read it as a
+        // fallback so existing repos' committed allowlists keep working;
+        // consent is re-pinned to whichever file is present, so a team that
+        // later renames the file re-prompts everyone exactly once.
+        let candidate = if primary.exists() {
+            primary
+        } else {
+            PathBuf::from(format!("{root}/.tome/airgap.json"))
+        };
         let Some(real) = resolve(&candidate) else {
             return RepoAllowlistReport::Absent;
         };
@@ -582,7 +591,7 @@ impl AirgapState {
     }
 
     /// `consentRepoAllowlist(root, hash)` — TOCTOU-safe: re-reads and
-    /// re-hashes the file NOW via [`AirgapState::read_repo_allowlist`], and
+    /// re-hashes the file NOW via [`EgressState::read_repo_allowlist`], and
     /// only records consent (and folds `hosts` into `applied_repos`,
     /// widening the effective allowlist) if the freshly-computed hash
     /// matches `presented_hash` exactly. The caller never supplies hosts —
@@ -634,7 +643,7 @@ impl AirgapState {
     /// `revokeRepoAllowlist(root)` — drops both the stored consent and the
     /// applied hosts for `root`, unconditionally (the original always
     /// returns `{ ok: true }`, even for a root with no consent to revoke).
-    /// Persists best-effort, same as [`AirgapState::consent_repo_allowlist`].
+    /// Persists best-effort, same as [`EgressState::consent_repo_allowlist`].
     pub fn revoke_repo_allowlist(&self, root: &str) {
         {
             let mut inner = self.lock();
@@ -732,7 +741,7 @@ impl AirgapState {
 
     /// `saveRepoConsents()` — writes the full consent map as one JSON
     /// object (`{ root: { hash, hosts } }`, matching `Object.fromEntries
-    /// (repoConsents)`) to the path [`AirgapState::load_repo_consents`]
+    /// (repoConsents)`) to the path [`EgressState::load_repo_consents`]
     /// recorded, then chmods it `0600` on Unix — "the consent file proves
     /// user intent, so it must not be world-readable even outside the
     /// sandbox," the same discipline `authlock.js`'s auth file uses.
@@ -769,7 +778,7 @@ impl AirgapState {
     }
 }
 
-impl Default for AirgapState {
+impl Default for EgressState {
     fn default() -> Self {
         Self::new()
     }
@@ -778,8 +787,8 @@ impl Default for AirgapState {
 // ---- sha1 (repo-consent hashing) ----
 
 /// sha1 hex digest of `text` — used to fingerprint a repo's `.tome/
-/// airgap.json` RAW TEXT (not its parsed form) for consent pinning. `pub`
-/// so a future caller (e.g. a UI-facing diagnostic, or `ipc::airgap`'s real
+/// egress.json` RAW TEXT (not its parsed form) for consent pinning. `pub`
+/// so a future caller (e.g. a UI-facing diagnostic, or `ipc::egress`'s real
 /// implementation) never needs to reimplement this one line.
 pub fn sha1_hex(text: &str) -> String {
     let digest = Sha1::digest(text.as_bytes());
@@ -791,12 +800,12 @@ pub fn sha1_hex(text: &str) -> String {
 // RECONCILED (Task A4 integration — flagged by both this slice's OWN top
 // doc comment and by `allowlist.rs`'s, each naming the other as the
 // eventual single source of truth once both landed): these two functions
-// now DELEGATE to `airgap::allowlist::{parse_repo_allowlist,
+// now DELEGATE to `egress::allowlist::{parse_repo_allowlist,
 // validate_repo_allowlist}` — the real, single implementation of the
 // validation rules — rather than carrying a second, independently-written
 // copy of the same checks. Signatures and both functions' own `pub`
 // visibility are UNCHANGED so every caller (including this module's own
-// 30+ `#[cfg(test)]` assertions ported from `test/repo-airgap.test.js`,
+// 30+ `#[cfg(test)]` assertions ported from `test/repo-egress.test.js`,
 // written directly against these two names) keeps working without any
 // edits; only the bodies changed, from "re-implement" to "delegate + adapt
 // the return shape". The two implementations were independently pinned
@@ -808,7 +817,7 @@ pub fn sha1_hex(text: &str) -> String {
 // hostname and no pinned test exercises), so this is a pure de-duplication,
 // not a behavior change.
 
-/// `parseRepoAllowlist(text)` — see `airgap::allowlist::parse_repo_allowlist`
+/// `parseRepoAllowlist(text)` — see `egress::allowlist::parse_repo_allowlist`
 /// for the real implementation. `Option`, not that function's `Result`:
 /// every caller in this module immediately collapses either error case to
 /// [`RepoAllowlistReport::Absent`] anyway, so there is no case here that
@@ -818,14 +827,14 @@ pub fn parse_repo_allowlist(text: &str) -> Option<Vec<serde_json::Value>> {
 }
 
 /// `validateRepoAllowlist(patterns)` — see
-/// `airgap::allowlist::validate_repo_allowlist` for the real
+/// `egress::allowlist::validate_repo_allowlist` for the real
 /// implementation and its own doc comment for the exact positional breadth
 /// rule. Adapts that function's `ValidationResult { ok, rejected }` (whose
 /// `rejected: Vec<allowlist::RejectedPattern>` is a plain, non-`Serialize`
 /// struct — `allowlist.rs` has no caller that hands one directly to a Tauri
 /// command's return type) into this module's own `(Vec<String>,
 /// Vec<RejectedPattern>)` shape, where THIS module's [`RejectedPattern`]
-/// derives `Serialize` for exactly that reason (`ipc::airgap`'s handlers
+/// derives `Serialize` for exactly that reason (`ipc::egress`'s handlers
 /// serialize it directly — see that type's own doc comment).
 pub fn validate_repo_allowlist(
     patterns: &[serde_json::Value],
@@ -855,7 +864,7 @@ mod tests {
 
     #[test]
     fn register_pane_starts_in_providers_mode_with_no_expiry() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         state.register_pane("pty-1");
         assert_eq!(state.pane_mode("pty-1"), Some(PaneMode::Providers));
         assert_eq!(state.pane_state("pty-1"), Some((PaneMode::Providers, None)));
@@ -863,14 +872,14 @@ mod tests {
 
     #[test]
     fn unknown_pane_reports_none_everywhere() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         assert_eq!(state.pane_mode("ghost"), None);
         assert_eq!(state.pane_state("ghost"), None);
     }
 
     #[test]
     fn re_registering_an_id_overwrites_the_existing_record() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         state.register_pane("pty-1");
         state.unlock_pane("pty-1", 15, 0);
         assert_eq!(state.pane_mode("pty-1"), Some(PaneMode::Open));
@@ -878,11 +887,11 @@ mod tests {
         assert_eq!(state.pane_state("pty-1"), Some((PaneMode::Providers, None)));
     }
 
-    // ---- close_pane / close_all — test/airgap-proxy-lifecycle.test.js "pane proxy lifecycle" ----
+    // ---- close_pane / close_all — test/egress-proxy-lifecycle.test.js "pane proxy lifecycle" ----
 
     #[test]
     fn close_pane_drops_the_state_entry() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         state.register_pane("pty-1");
         assert!(state.pane_state("pty-1").is_some());
         assert!(state.close_pane("pty-1"));
@@ -891,13 +900,13 @@ mod tests {
 
     #[test]
     fn close_pane_on_an_unknown_id_is_a_no_op() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         assert!(!state.close_pane("never-existed"));
     }
 
     #[test]
     fn close_all_reaps_every_pane() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         state.register_pane("pty-a");
         state.register_pane("pty-b");
         let mut ids = state.close_all();
@@ -909,7 +918,7 @@ mod tests {
 
     #[test]
     fn close_all_is_idempotent() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         state.register_pane("pty-a");
         assert_eq!(state.close_all().len(), 1);
         assert_eq!(state.close_all().len(), 0); // will-quit AND window-all-closed both call it
@@ -927,7 +936,7 @@ mod tests {
         // '15' (string) / NaN / Infinity from the JS suite have no Rust
         // analogue — see ALLOWED_UNLOCK_MINUTES's doc comment.
         for bad in [0, -1, 999] {
-            let state = AirgapState::new();
+            let state = EgressState::new();
             state.register_pane("pty-1");
             assert_eq!(state.unlock_pane("pty-1", bad, 0), None, "minutes={bad}");
             assert_eq!(state.pane_state("pty-1"), Some((PaneMode::Providers, None)));
@@ -936,14 +945,14 @@ mod tests {
 
     #[test]
     fn unlock_pane_on_an_unknown_id_returns_none() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         assert_eq!(state.unlock_pane("ghost", 15, 0), None);
     }
 
     #[test]
     fn accepts_each_allowed_value_opens_the_pane_and_relocks_by_the_deadline() {
         for minutes in ALLOWED_UNLOCK_MINUTES {
-            let state = AirgapState::new();
+            let state = EgressState::new();
             state.register_pane("pty-1");
             let now = 1_700_000_000_000_i64;
             let deadline = state.unlock_pane("pty-1", minutes, now);
@@ -974,13 +983,13 @@ mod tests {
 
     #[test]
     fn relock_pane_on_an_unknown_id_returns_false_and_is_a_no_op() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         assert!(!state.relock_pane("ghost"));
     }
 
     #[test]
     fn relock_pane_is_immediate_unlike_sweep_expired() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         state.register_pane("pty-1");
         state.unlock_pane("pty-1", 15, 0);
         assert!(state.relock_pane("pty-1"));
@@ -989,7 +998,7 @@ mod tests {
 
     #[test]
     fn sweep_expired_leaves_providers_mode_panes_alone() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         state.register_pane("pty-1"); // never unlocked
         assert_eq!(state.sweep_expired(i64::MAX), Vec::<String>::new());
         assert_eq!(state.pane_mode("pty-1"), Some(PaneMode::Providers));
@@ -997,7 +1006,7 @@ mod tests {
 
     #[test]
     fn sweep_expired_only_relocks_panes_whose_deadline_has_actually_passed() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         state.register_pane("a");
         state.register_pane("b");
         state.unlock_pane("a", 15, 0); // deadline 900_000
@@ -1011,7 +1020,7 @@ mod tests {
 
     #[test]
     fn state_snapshot_serializes_with_camelcase_expires_at_and_default_minutes() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         state.register_pane("pty-1");
         state.unlock_pane("pty-1", 15, 1_000);
         let value = serde_json::to_value(state.state_snapshot()).unwrap();
@@ -1026,7 +1035,7 @@ mod tests {
 
     #[test]
     fn state_snapshot_reports_a_null_expiry_for_a_providers_mode_pane() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         state.register_pane("pty-1");
         let value = serde_json::to_value(state.state_snapshot()).unwrap();
         assert_eq!(value["panes"]["pty-1"]["mode"], json!("providers"));
@@ -1076,7 +1085,7 @@ mod tests {
         assert_eq!(parse_repo_allowlist(r#"[1,2,3]"#), None);
     }
 
-    // ==== validate_repo_allowlist — ported from test/repo-airgap.test.js ====
+    // ==== validate_repo_allowlist — ported from test/repo-egress.test.js ====
 
     fn ok_of(patterns: &[serde_json::Value]) -> Vec<String> {
         validate_repo_allowlist(patterns).0
@@ -1217,14 +1226,14 @@ mod tests {
     fn write_repo_allowlist(root: &Path, text: &str) -> PathBuf {
         let tome_dir = root.join(".tome");
         fs::create_dir_all(&tome_dir).unwrap();
-        let file = tome_dir.join("airgap.json");
+        let file = tome_dir.join("egress.json");
         fs::write(&file, text).unwrap();
         file
     }
 
     #[test]
     fn read_repo_allowlist_reports_absent_for_an_empty_root() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         assert_eq!(
             state.read_repo_allowlist("", |_| None),
             RepoAllowlistReport::Absent
@@ -1235,7 +1244,7 @@ mod tests {
     fn read_repo_allowlist_reports_absent_when_the_resolver_refuses() {
         // Mirrors confinedRealPath returning null: root outside the open
         // workspace folders, or before ws:sync has run at all.
-        let state = AirgapState::new();
+        let state = EgressState::new();
         assert_eq!(
             state.read_repo_allowlist("/some/repo", |_| None),
             RepoAllowlistReport::Absent
@@ -1246,7 +1255,7 @@ mod tests {
     fn read_repo_allowlist_reports_absent_for_malformed_json() {
         let dir = tempdir().unwrap();
         let file = write_repo_allowlist(dir.path(), "not json");
-        let state = AirgapState::new();
+        let state = EgressState::new();
         let root = dir.path().to_str().unwrap();
         assert_eq!(
             state.read_repo_allowlist(root, |_| Some(file.clone())),
@@ -1259,7 +1268,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let text = r#"{"allow":["api.example.com","*"]}"#;
         let file = write_repo_allowlist(dir.path(), text);
-        let state = AirgapState::new();
+        let state = EgressState::new();
         let root = dir.path().to_str().unwrap();
         let report = state.read_repo_allowlist(root, |_| Some(file.clone()));
         match report {
@@ -1279,10 +1288,57 @@ mod tests {
     }
 
     #[test]
+    fn read_repo_allowlist_falls_back_to_legacy_airgap_filename() {
+        // The pre-rename filename, `.tome/airgap.json`, must keep resolving
+        // so existing repos' committed allowlists work without a rename.
+        let dir = tempdir().unwrap();
+        let tome_dir = dir.path().join(".tome");
+        fs::create_dir_all(&tome_dir).unwrap();
+        let legacy = tome_dir.join("airgap.json");
+        fs::write(&legacy, r#"{"allow":["legacy.example.com"]}"#).unwrap();
+        let state = EgressState::new();
+        let root = dir.path().to_str().unwrap();
+        let report = state.read_repo_allowlist(root, |p| Some(p.to_path_buf()));
+        match report {
+            RepoAllowlistReport::Present { hosts, .. } => {
+                assert_eq!(hosts, vec!["legacy.example.com".to_string()]);
+            }
+            other => panic!("expected Present, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn read_repo_allowlist_prefers_the_new_egress_filename() {
+        // When both names exist, `.tome/egress.json` wins.
+        let dir = tempdir().unwrap();
+        let tome_dir = dir.path().join(".tome");
+        fs::create_dir_all(&tome_dir).unwrap();
+        fs::write(
+            tome_dir.join("egress.json"),
+            r#"{"allow":["new.example.com"]}"#,
+        )
+        .unwrap();
+        fs::write(
+            tome_dir.join("airgap.json"),
+            r#"{"allow":["legacy.example.com"]}"#,
+        )
+        .unwrap();
+        let state = EgressState::new();
+        let root = dir.path().to_str().unwrap();
+        let report = state.read_repo_allowlist(root, |p| Some(p.to_path_buf()));
+        match report {
+            RepoAllowlistReport::Present { hosts, .. } => {
+                assert_eq!(hosts, vec!["new.example.com".to_string()]);
+            }
+            other => panic!("expected Present, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn consent_then_read_reports_consented_true_until_the_file_changes() {
         let dir = tempdir().unwrap();
         let file = write_repo_allowlist(dir.path(), r#"{"allow":["api.example.com"]}"#);
-        let state = AirgapState::new();
+        let state = EgressState::new();
         let root = dir.path().to_str().unwrap();
         let resolve = |_p: &Path| Some(file.clone());
 
@@ -1314,7 +1370,7 @@ mod tests {
     fn consent_rejects_a_stale_presented_hash() {
         let dir = tempdir().unwrap();
         let file = write_repo_allowlist(dir.path(), r#"{"allow":["api.example.com"]}"#);
-        let state = AirgapState::new();
+        let state = EgressState::new();
         let root = dir.path().to_str().unwrap();
         let outcome =
             state.consent_repo_allowlist(root, "not-the-real-hash", |_p| Some(file.clone()));
@@ -1325,7 +1381,7 @@ mod tests {
     fn consent_never_applies_hosts_the_caller_supplied_only_what_it_reads_itself() {
         let dir = tempdir().unwrap();
         let file = write_repo_allowlist(dir.path(), r#"{"allow":["api.example.com"]}"#);
-        let state = AirgapState::new();
+        let state = EgressState::new();
         let root = dir.path().to_str().unwrap();
         let resolve = |_p: &Path| Some(file.clone());
         let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve)
@@ -1351,7 +1407,7 @@ mod tests {
 
     #[test]
     fn effective_repo_hosts_is_empty_with_no_consents() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         assert_eq!(state.effective_repo_hosts(), Vec::<String>::new());
     }
 
@@ -1366,7 +1422,7 @@ mod tests {
         let file_b = write_repo_allowlist(dir_b.path(), r#"{"allow":["c.example.com"]}"#);
         let root_a = dir_a.path().to_str().unwrap().to_string();
         let root_b = dir_b.path().to_str().unwrap().to_string();
-        let state = AirgapState::new();
+        let state = EgressState::new();
         let resolve = |p: &Path| {
             if p.starts_with(&root_a) {
                 Some(file_a.clone())
@@ -1405,7 +1461,7 @@ mod tests {
         let file = write_repo_allowlist(dir.path(), r#"{"allow":["api.example.com"]}"#);
         let root = dir.path().to_str().unwrap();
         let resolve = |_p: &Path| Some(file.clone());
-        let state = AirgapState::new();
+        let state = EgressState::new();
         let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve)
         else {
             panic!()
@@ -1423,7 +1479,7 @@ mod tests {
     fn revoke_removes_a_stored_consent_and_its_applied_hosts() {
         let dir = tempdir().unwrap();
         let file = write_repo_allowlist(dir.path(), r#"{"allow":["api.example.com"]}"#);
-        let state = AirgapState::new();
+        let state = EgressState::new();
         let root = dir.path().to_str().unwrap();
         let resolve = |_p: &Path| Some(file.clone());
         let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve)
@@ -1445,7 +1501,7 @@ mod tests {
 
     #[test]
     fn revoke_of_a_root_with_no_consent_does_not_panic() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         state.revoke_repo_allowlist("/never/consented");
     }
 
@@ -1458,7 +1514,7 @@ mod tests {
         let root_a = dir_a.path().to_str().unwrap().to_string();
         let root_b = dir_b.path().to_str().unwrap().to_string();
 
-        let state = AirgapState::new();
+        let state = EgressState::new();
         // No `move`: capturing `file_a`/`file_b`/`root_a` by shared
         // reference (all three outlive every use below) rather than by
         // value keeps this closure `Copy`, so it can be passed BY VALUE at
@@ -1496,7 +1552,7 @@ mod tests {
 
     #[test]
     fn reapply_with_no_consents_is_a_harmless_no_op() {
-        let state = AirgapState::new();
+        let state = EgressState::new();
         assert!(state.reapply_repo_consents(|_| None));
         assert_eq!(state.state_snapshot().repo, Vec::new());
     }
@@ -1507,12 +1563,12 @@ mod tests {
     fn save_and_load_repo_consents_round_trip_and_the_file_is_0600() {
         let scratch = tempdir().unwrap();
         let repo_dir = tempdir().unwrap();
-        let consents_path = scratch.path().join("airgap-repo-consents.json");
+        let consents_path = scratch.path().join("egress-repo-consents.json");
         let file = write_repo_allowlist(repo_dir.path(), r#"{"allow":["api.example.com"]}"#);
         let root = repo_dir.path().to_str().unwrap();
         let resolve = |_p: &Path| Some(file.clone());
 
-        let state = AirgapState::new();
+        let state = EgressState::new();
         state.load_repo_consents(&consents_path); // no file yet — starts empty, records the path
         let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve)
         else {
@@ -1524,8 +1580,8 @@ mod tests {
             "consent_repo_allowlist must persist on success"
         );
 
-        // A fresh AirgapState loading the same file sees the same consent.
-        let reloaded = AirgapState::new();
+        // A fresh EgressState loading the same file sees the same consent.
+        let reloaded = EgressState::new();
         reloaded.load_repo_consents(&consents_path);
         let RepoAllowlistReport::Present { consented, .. } =
             reloaded.read_repo_allowlist(root, resolve)
@@ -1547,7 +1603,7 @@ mod tests {
     ) {
         let scratch = tempdir().unwrap();
         let consents_path = scratch.path().join("does-not-exist.json");
-        let state = AirgapState::new();
+        let state = EgressState::new();
         state.load_repo_consents(&consents_path);
         assert_eq!(state.state_snapshot().repo, Vec::new());
 
@@ -1573,7 +1629,7 @@ mod tests {
         let file = write_repo_allowlist(repo_dir.path(), r#"{"allow":["api.example.com"]}"#);
         let root = repo_dir.path().to_str().unwrap();
         let resolve = |_p: &Path| Some(file.clone());
-        let state = AirgapState::new(); // load_repo_consents never called
+        let state = EgressState::new(); // load_repo_consents never called
         let RepoAllowlistReport::Present { hash, .. } = state.read_repo_allowlist(root, resolve)
         else {
             panic!()

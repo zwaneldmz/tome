@@ -8,7 +8,7 @@ discard-on-close prompts exist, Touch ID is real, OS file drop is back).
 
 An "affordance" here means: a capability the app *has* that the user can
 *perceive, reach, and trust*. Tome's core properties — sandboxed agents,
-the air gap, flows — are invisible when they work. The plan is organized so
+the egress, flows — are invisible when they work. The plan is organized so
 that the things that make Tome *Tome* become visible without becoming noisy.
 
 ---
@@ -27,12 +27,12 @@ that the things that make Tome *Tome* become visible without becoming noisy.
 
 ## 1. Make the security model legible (the product's premise)
 
-The air gap is the reason Tome exists; it is also the easiest thing to
+The egress is the reason Tome exists; it is also the easiest thing to
 misunderstand. Council E6's "jargon" note is the tip: every security
 surface should answer three questions at a glance — *what is contained,
 what just happened, what can I do about it.*
 
-1.1 **Air-gap strip → security center.** Keep the persistent strip, add a
+1.1 **Egress strip → security center.** Keep the persistent strip, add a
 click-through popover: per-pane state (gapped/free), allowlisted hosts with
 one-click revoke, and a running count of blocked attempts since unlock
 (council: the 4 s blocked-host flash vanishes; the count must persist).

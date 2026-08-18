@@ -15,21 +15,21 @@ describe('summary', () => {
     expect(summary({ kind: 'conductor:tool', tool: 'read_terminal' })).toBe('read_terminal')
   })
 
-  it('airgap:unlock — paneId · minutes', () => {
-    expect(summary({ kind: 'airgap:unlock', paneId: 'pty-3', minutes: 15 })).toBe('pty-3 · 15m')
-    expect(summary({ kind: 'airgap:unlock', paneId: 'pty-3' })).toBe('pty-3')
+  it('egress:unlock — paneId · minutes', () => {
+    expect(summary({ kind: 'egress:unlock', paneId: 'pty-3', minutes: 15 })).toBe('pty-3 · 15m')
+    expect(summary({ kind: 'egress:unlock', paneId: 'pty-3' })).toBe('pty-3')
   })
 
-  it('airgap:relock — paneId only', () => {
-    expect(summary({ kind: 'airgap:relock', paneId: 'pty-1' })).toBe('pty-1')
-    expect(summary({ kind: 'airgap:relock' })).toBe('')
+  it('egress:relock — paneId only', () => {
+    expect(summary({ kind: 'egress:relock', paneId: 'pty-1' })).toBe('pty-1')
+    expect(summary({ kind: 'egress:relock' })).toBe('')
   })
 
-  it('airgap:blocked — host · paneId, with × N when coalesced', () => {
-    expect(summary({ kind: 'airgap:blocked', host: 'evil.com', paneId: 'pty-2' })).toBe(
+  it('egress:blocked — host · paneId, with × N when coalesced', () => {
+    expect(summary({ kind: 'egress:blocked', host: 'evil.com', paneId: 'pty-2' })).toBe(
       'evil.com · pty-2'
     )
-    expect(summary({ kind: 'airgap:blocked', host: 'evil.com', paneId: 'pty-2', count: 7 })).toBe(
+    expect(summary({ kind: 'egress:blocked', host: 'evil.com', paneId: 'pty-2', count: 7 })).toBe(
       'evil.com · pty-2 · × 7'
     )
   })

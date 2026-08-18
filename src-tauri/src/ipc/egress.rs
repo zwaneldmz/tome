@@ -1,27 +1,27 @@
-//! The air gap: proxy lifecycle, allowlist, consents, unlock/relock, repo
-//! allowlist consent. Ports `src/main/airgap.js` + the `airgap:*` handler
+//! The egress: proxy lifecycle, allowlist, consents, unlock/relock, repo
+//! allowlist consent. Ports `src/main/egress.js` + the `egress:*` handler
 //! bodies from `src/main/index.js` (~800-847) — exact return shapes,
 //! including the auth-adjacent throttle/verify plumbing those handlers
 //! inline directly rather than delegating to `authlock.js` alone.
 //!
 //! This file OWNS the integration between the three landed build slices:
-//! `airgap::AirgapState` (pure pane-gapping bookkeeping + repo consent,
-//! `airgap/mod.rs`), `airgap::proxy::PaneProxy` (the live per-pane loopback
-//! proxy, `airgap/proxy.rs`), and `airgap::allowlist` (the hostname
-//! matcher + `DEFAULT_ALLOW`, `airgap/allowlist.rs`). Neither
-//! `AirgapState` nor `PaneProxy` talks to the other — see both modules'
+//! `egress::EgressState` (pure pane-gapping bookkeeping + repo consent,
+//! `egress/mod.rs`), `egress::proxy::PaneProxy` (the live per-pane loopback
+//! proxy, `egress/proxy.rs`), and `egress::allowlist` (the hostname
+//! matcher + `DEFAULT_ALLOW`, `egress/allowlist.rs`). Neither
+//! `EgressState` nor `PaneProxy` talks to the other — see both modules'
 //! own doc comments — so every place a pane's mode changes, THIS file
-//! updates both: `AirgapState` for the `airgap:state` UI snapshot,
+//! updates both: `EgressState` for the `egress:state` UI snapshot,
 //! `PaneProxy` for the actual live enforcement. `ipc::pty::pty_create`
 //! (a sibling file, this same slice) is the only other caller of the
 //! `pub(crate)` helpers below — it creates a pane's `PaneProxy` and
-//! registers it in `AppState.proxies`/`AirgapState` in the first place.
+//! registers it in `AppState.proxies`/`EgressState` in the first place.
 //!
-//! Deliberately NOT ported this phase: `airgap.js`'s `loadAllowlist`/
-//! `userAllow` (a `userData/airgap.json` override file that REPLACES
+//! Deliberately NOT ported this phase: `egress.js`'s `loadAllowlist`/
+//! `userAllow` (a `userData/egress.json` override file that REPLACES
 //! `DEFAULT_ALLOW` when present — there is no IPC command exposing it in
 //! either the JS original or this task's command list, and
-//! `airgap::AirgapState` does not track it). [`effective_allow_patterns`]
+//! `egress::EgressState` does not track it). [`effective_allow_patterns`]
 //! is therefore always `DEFAULT_ALLOW ++ effective_repo_hosts()`, never a
 //! user-shrunk-or-widened custom base — strictly more conservative than
 //! the JS original's override path, not a fidelity gap that widens
@@ -34,8 +34,8 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::airgap::allowlist::DEFAULT_ALLOW;
-use crate::airgap::ConsentOutcome;
+use crate::egress::allowlist::DEFAULT_ALLOW;
+use crate::egress::ConsentOutcome;
 use crate::ipc::auth::{ceil_seconds, mark_unlocked};
 use crate::{confine, events, lock_gate, state::AppState, totp};
 
@@ -47,7 +47,7 @@ use crate::{confine, events, lock_gate, state::AppState, totp};
 /// override itself has no port yet).
 pub(crate) fn effective_allow_patterns(state: &AppState) -> Vec<String> {
     let mut patterns: Vec<String> = DEFAULT_ALLOW.iter().map(|s| s.to_string()).collect();
-    patterns.extend(state.airgap.effective_repo_hosts());
+    patterns.extend(state.egress.effective_repo_hosts());
     patterns
 }
 
@@ -56,7 +56,7 @@ pub(crate) fn effective_allow_patterns(state: &AppState) -> Vec<String> {
 /// effect for every pane immediately (the JS original has one shared
 /// `allowMatchers` variable; here, an explicit fan-out, since each
 /// `PaneProxy` holds its own independently-compiled set — see
-/// `airgap::proxy`'s doc comment on that split).
+/// `egress::proxy`'s doc comment on that split).
 pub(crate) fn recompile_all_proxies(state: &AppState) {
     let patterns = effective_allow_patterns(state);
     let proxies = state
@@ -69,8 +69,8 @@ pub(crate) fn recompile_all_proxies(state: &AppState) {
 }
 
 fn state_snapshot_json(state: &AppState) -> Value {
-    serde_json::to_value(state.airgap.state_snapshot())
-        .expect("AirgapStateSnapshot always serializes")
+    serde_json::to_value(state.egress.state_snapshot())
+        .expect("EgressStateSnapshot always serializes")
 }
 
 /// Seam over the two kinds of push [`schedule_unlock`]/[`relock_now`]/
@@ -78,7 +78,7 @@ fn state_snapshot_json(state: &AppState) -> Value {
 /// every pane state transition — the live event (`AppHandle::emit`) and
 /// the persistent event log (`events::log_event`) — so those four
 /// integration-glue functions can be driven under `#[cfg(test)]` against a
-/// REAL `AirgapState` and a REAL `PaneProxy`, with no live `tauri::Builder`
+/// REAL `EgressState` and a REAL `PaneProxy`, with no live `tauri::Builder`
 /// app: this crate enables no tauri `test` feature (`Cargo.toml`: `tauri =
 /// { version = "2", features = [] }`), so nothing outside a running app can
 /// construct a real `AppHandle` — and every one of those four functions
@@ -93,7 +93,7 @@ fn state_snapshot_json(state: &AppState) -> Value {
 /// zero-caller-edit seam. `#[cfg(test)]`'s own implementation (this file's
 /// `tests` module) wraps an owned `AppState` instead — `AppState::new()`
 /// needs no live Tauri app either, it's a plain constructor.
-pub(crate) trait AirgapEnv: Clone + Send + Sync + 'static {
+pub(crate) trait EgressEnv: Clone + Send + Sync + 'static {
     /// The `AppState` this env is ultimately backed by. `AppHandle`'s impl
     /// resolves it via Tauri's managed-state lookup
     /// (`State::inner`, which — unlike `State` itself — carries the
@@ -109,7 +109,7 @@ pub(crate) trait AirgapEnv: Clone + Send + Sync + 'static {
     fn log(&self, kind: &str, fields: Vec<(&'static str, Value)>);
 }
 
-impl AirgapEnv for AppHandle {
+impl EgressEnv for AppHandle {
     fn app_state(&self) -> &AppState {
         self.state::<AppState>().inner()
     }
@@ -124,64 +124,64 @@ impl AirgapEnv for AppHandle {
 /// `pub(crate)`: `ipc::pty`'s `pty_kill`/`pty_create` error path and
 /// [`schedule_unlock`]/[`relock_now`]/[`create_gapped_pane_proxy`] below
 /// all push the same shape after mutating pane state; kept as one function
-/// so `airgap:state`'s wire shape is built in exactly one place.
-pub(crate) fn push_state_event<E: AirgapEnv>(env: &E, state: &AppState) {
-    env.emit_json("airgap:state", state_snapshot_json(state));
+/// so `egress:state`'s wire shape is built in exactly one place.
+pub(crate) fn push_state_event<E: EgressEnv>(env: &E, state: &AppState) {
+    env.emit_json("egress:state", state_snapshot_json(state));
 }
 
 /// Spins up a fresh `PaneProxy` for `pane_id` — the creation-side
 /// counterpart to [`close_pane_and_proxy`]: binds the loopback listener,
 /// seeds it with the CURRENT effective allow set
 /// ([`effective_allow_patterns`]), wires its blocked-callback to both the
-/// live `airgap:blocked` push (uncoalesced — mirrors `onEvent('blocked',
-/// ...)` -> `win.webContents.send('airgap:blocked', payload)`) and the
+/// live `egress:blocked` push (uncoalesced — mirrors `onEvent('blocked',
+/// ...)` -> `win.webContents.send('egress:blocked', payload)`) and the
 /// persistent event log (60s-coalesced — mirrors `logBlocked`/
 /// `flushBlocked`, including the exact field-presence difference between
 /// the immediate log (no `count`) and the trailing flush (`count` present,
 /// only when `count >= 2`) — a `Coalesced` event's `count` can only ever be
 /// `1` on the immediate fire, since the trailing flush suppresses itself
-/// below 2, see `airgap::proxy`'s own doc comment), registers it in both
-/// `AppState.proxies` and `AirgapState` (`register_pane`), and pushes
-/// `airgap:state` — mirrors `createPaneProxy`'s own `panes.set(...);
+/// below 2, see `egress::proxy`'s own doc comment), registers it in both
+/// `AppState.proxies` and `EgressState` (`register_pane`), and pushes
+/// `egress:state` — mirrors `createPaneProxy`'s own `panes.set(...);
 /// pushState()` on a successful bind.
 ///
 /// `unix_socket_path`: `None` on macOS (`ipc::pty::pty_create`'s only
 /// caller there — seatbelt needs no loopback bridge, so the proxy never
 /// binds a second listener). `Some(path)` on Linux — Phase 4/slice L3's
-/// wiring of the seam `airgap::proxy::PaneProxy::spawn` has carried since
+/// wiring of the seam `egress::proxy::PaneProxy::spawn` has carried since
 /// Phase 3 (see that function's own "Linux seam" doc comment): threaded
 /// straight through so `tome-shim`'s in-namespace bridge has a bind-mounted
 /// (bwrap) or directly-reachable (self-unshare — no mount namespace to
-/// remap into, see `airgap::linux`'s module doc comment) unix socket to
+/// remap into, see `egress::linux`'s module doc comment) unix socket to
 /// shovel bytes to. On a successful bind with a unix path, this also locks
 /// the socket down to `0600` (THE DESIGN's own requirement — see
-/// `airgap::linux::secure_pane_socket_permissions`'s doc comment for why
+/// `egress::linux::secure_pane_socket_permissions`'s doc comment for why
 /// `PaneProxy::spawn` itself doesn't do this: it has no opinion on Linux's
 /// specific permission requirements, only on binding the socket). The
 /// PARENT directory's own `0700` lockdown
-/// (`airgap::linux::ensure_pane_socket_dir`) is the caller's job, before
+/// (`egress::linux::ensure_pane_socket_dir`) is the caller's job, before
 /// this function ever runs — `PaneProxy::spawn`'s `UnixListener::bind`
 /// needs the directory to already exist.
 ///
 /// `pub(crate)`: `ipc::pty::pty_create` is the only caller (its own doc
 /// comment covers exactly when this path is taken vs. refused).
-pub(crate) async fn create_gapped_pane_proxy<E: AirgapEnv>(
+pub(crate) async fn create_gapped_pane_proxy<E: EgressEnv>(
     env: &E,
     state: &AppState,
     pane_id: &str,
     unix_socket_path: Option<PathBuf>,
-) -> std::io::Result<std::sync::Arc<crate::airgap::proxy::PaneProxy>> {
+) -> std::io::Result<std::sync::Arc<crate::egress::proxy::PaneProxy>> {
     let initial_allowed = effective_allow_patterns(state);
     let blocked_env = env.clone();
     let blocked_pane_id = pane_id.to_string();
-    let on_blocked = move |event: crate::airgap::proxy::BlockedEvent| match event {
-        crate::airgap::proxy::BlockedEvent::Attempt { host } => {
+    let on_blocked = move |event: crate::egress::proxy::BlockedEvent| match event {
+        crate::egress::proxy::BlockedEvent::Attempt { host } => {
             blocked_env.emit_json(
-                "airgap:blocked",
+                "egress:blocked",
                 json!({"paneId": blocked_pane_id, "host": host}),
             );
         }
-        crate::airgap::proxy::BlockedEvent::Coalesced { host, count } => {
+        crate::egress::proxy::BlockedEvent::Coalesced { host, count } => {
             let fields: Vec<(&'static str, Value)> = if count <= 1 {
                 vec![("paneId", json!(blocked_pane_id)), ("host", json!(host))]
             } else {
@@ -191,12 +191,12 @@ pub(crate) async fn create_gapped_pane_proxy<E: AirgapEnv>(
                     ("count", json!(count)),
                 ]
             };
-            blocked_env.log("airgap:blocked", fields);
+            blocked_env.log("egress:blocked", fields);
         }
     };
 
     let proxy =
-        crate::airgap::proxy::PaneProxy::spawn(initial_allowed, unix_socket_path, on_blocked)
+        crate::egress::proxy::PaneProxy::spawn(initial_allowed, unix_socket_path, on_blocked)
             .await?;
     // `#[cfg(unix)]`, not `target_os = "linux"` — matches
     // `secure_pane_socket_permissions`'s own gate (unix permission bits are
@@ -205,7 +205,7 @@ pub(crate) async fn create_gapped_pane_proxy<E: AirgapEnv>(
     // this is a no-op on every macOS spawn regardless of the `#[cfg]`.
     #[cfg(unix)]
     if let Some(path) = proxy.unix_path() {
-        crate::airgap::linux::secure_pane_socket_permissions(path)?;
+        crate::egress::linux::secure_pane_socket_permissions(path)?;
     }
     let proxy = std::sync::Arc::new(proxy);
     state
@@ -213,25 +213,25 @@ pub(crate) async fn create_gapped_pane_proxy<E: AirgapEnv>(
         .lock()
         .expect("AppState.proxies lock poisoned")
         .insert(pane_id.to_string(), proxy.clone());
-    state.airgap.register_pane(pane_id);
+    state.egress.register_pane(pane_id);
     push_state_event(env, state);
     Ok(proxy)
 }
 
 /// Tears down one pane's live proxy, cancels any scheduled auto-relock
-/// timer, and drops its `AirgapState` record — mirrors `closePane`
+/// timer, and drops its `EgressState` record — mirrors `closePane`
 /// (idempotent: a second call, or a call for a pane that was never
-/// gapped, finds nothing and is a safe no-op). Pushes `airgap:state` ONLY
+/// gapped, finds nothing and is a safe no-op). Pushes `egress:state` ONLY
 /// when a pane record actually existed — matching `closePane`'s own
 /// `if (!st) return` short-circuit BEFORE its `pushState()` call, so an
-/// ungapped pane's close (no `AirgapState` entry was ever registered for
-/// it) produces no spurious `airgap:state` event.
+/// ungapped pane's close (no `EgressState` entry was ever registered for
+/// it) produces no spurious `egress:state` event.
 ///
 /// `pub(crate)`: `ipc::pty::pty_create` calls this on a spawn that failed
 /// after its proxy already came up (mirrors the JS original's `catch`
-/// block: `airgap.closePane(id); throw err`), and on every ordinary
+/// block: `egress.closePane(id); throw err`), and on every ordinary
 /// `pty:kill`/pane-exit teardown, gapped or not.
-pub(crate) fn close_pane_and_proxy<E: AirgapEnv>(env: &E, state: &AppState, pane_id: &str) {
+pub(crate) fn close_pane_and_proxy<E: EgressEnv>(env: &E, state: &AppState, pane_id: &str) {
     if let Some((_, timer)) = state
         .relock_timers
         .lock()
@@ -248,28 +248,28 @@ pub(crate) fn close_pane_and_proxy<E: AirgapEnv>(env: &E, state: &AppState, pane
     {
         proxy.shutdown();
     }
-    if state.airgap.close_pane(pane_id) {
+    if state.egress.close_pane(pane_id) {
         push_state_event(env, state);
     }
 }
 
-/// `unlockPane(paneId, minutes)` PLUS the live-enforcement half `airgap.js`
+/// `unlockPane(paneId, minutes)` PLUS the live-enforcement half `egress.js`
 /// gets for free from its one shared `allowMatchers`/`panes` map: widens
 /// the pane's live `PaneProxy` mode, arms the real auto-relock timer
 /// (cancelling any prior one for the same pane — mirrors `clearTimeout(
-/// st.timer)`), and pushes `airgap:state` — all ONLY when
-/// `AirgapState::unlock_pane` actually validated `minutes` and found a
+/// st.timer)`), and pushes `egress:state` — all ONLY when
+/// `EgressState::unlock_pane` actually validated `minutes` and found a
 /// known pane (TOME-019: no state change of ANY kind, pure or live, on a
-/// forged/invalid request). `pub(crate)` so `airgap_unlock` below can stay
+/// forged/invalid request). `pub(crate)` so `egress_unlock` below can stay
 /// a thin command wrapper around it.
-pub(crate) fn schedule_unlock<E: AirgapEnv>(
+pub(crate) fn schedule_unlock<E: EgressEnv>(
     env: &E,
     state: &AppState,
     pane_id: &str,
     minutes: i64,
 ) {
     let now = totp::now_ms() as i64;
-    let Some(deadline_ms) = state.airgap.unlock_pane(pane_id, minutes, now) else {
+    let Some(deadline_ms) = state.egress.unlock_pane(pane_id, minutes, now) else {
         return;
     };
 
@@ -293,7 +293,7 @@ pub(crate) fn schedule_unlock<E: AirgapEnv>(
     // minutes, re-unlocked by an already-re-authenticated user right around
     // the old deadline, could have that fresh unlock silently reverted
     // moments later by the stale timer it raced against — with the
-    // renderer having just received `{ ok: true }` from `airgap:unlock`.
+    // renderer having just received `{ ok: true }` from `egress:unlock`.
     // Minting a fresh generation HERE (before the old timer is even
     // aborted) and having every timer's continuation re-check, under
     // `relock_timers`' own lock, that its captured generation is STILL the
@@ -322,7 +322,7 @@ pub(crate) fn schedule_unlock<E: AirgapEnv>(
             relock_now(&env_for_timer, state, &pane_id_for_timer);
         }
         // else: superseded by a fresher `schedule_unlock` (or already
-        // removed by a manual `airgap:relock`/pane close) — a stale timer
+        // removed by a manual `egress:relock`/pane close) — a stale timer
         // must not relock a pane it no longer has any claim over.
     });
     state
@@ -335,7 +335,7 @@ pub(crate) fn schedule_unlock<E: AirgapEnv>(
         );
 
     env.log(
-        "airgap:unlock",
+        "egress:unlock",
         vec![("paneId", json!(pane_id)), ("minutes", json!(minutes))],
     );
     push_state_event(env, state);
@@ -366,14 +366,14 @@ fn claim_timer_if_current(state: &AppState, pane_id: &str, generation: u64) -> b
 /// `relockPane(paneId)`'s live half: narrows the pane's `PaneProxy` back to
 /// providers-only (which itself kills every tunnel that was only ever
 /// admitted because the mode was `Open` — TOME-002, see `PaneProxy::relock`'s
-/// doc comment) and pushes `airgap:state` + the persistent `airgap:relock`
-/// log entry — but ONLY when `AirgapState::relock_pane` reports the pane
+/// doc comment) and pushes `egress:state` + the persistent `egress:relock`
+/// log entry — but ONLY when `EgressState::relock_pane` reports the pane
 /// was actually found (mirrors `if (!st) return` running before either).
-/// Shared by [`airgap_relock`] (immediate, user-initiated) and
+/// Shared by [`egress_relock`] (immediate, user-initiated) and
 /// [`schedule_unlock`]'s own auto-relock timer (via
 /// [`claim_timer_if_current`]).
-fn relock_now<E: AirgapEnv>(env: &E, state: &AppState, pane_id: &str) {
-    if !state.airgap.relock_pane(pane_id) {
+fn relock_now<E: EgressEnv>(env: &E, state: &AppState, pane_id: &str) {
+    if !state.egress.relock_pane(pane_id) {
         return;
     }
     if let Some(proxy) = state
@@ -385,19 +385,19 @@ fn relock_now<E: AirgapEnv>(env: &E, state: &AppState, pane_id: &str) {
     {
         proxy.relock();
     }
-    env.log("airgap:relock", vec![("paneId", json!(pane_id))]);
+    env.log("egress:relock", vec![("paneId", json!(pane_id))]);
     push_state_event(env, state);
 }
 
 // ---- commands ----
 
-/// Mirrors `{ ...airgap.getState(), auth: authlock.authStatus() }`
-/// (`airgap:state`'s handler body) — `auth` here is bare `{configured,
+/// Mirrors `{ ...egress.getState(), auth: authlock.authStatus() }`
+/// (`egress:state`'s handler body) — `auth` here is bare `{configured,
 /// totp}`, not the fuller `auth:status` shape (`unlocked`/`touchId`), same
 /// distinction `ipc::auth::auth_status`'s own doc comment makes.
 #[tauri::command]
-pub async fn airgap_state(state: State<'_, AppState>) -> Result<Value, String> {
-    lock_gate::guard(&state, "airgap:state")?;
+pub async fn egress_state(state: State<'_, AppState>) -> Result<Value, String> {
+    lock_gate::guard(&state, "egress:state")?;
     let mut snapshot = state_snapshot_json(&state);
     let (configured, totp) = {
         let guard = state.auth.lock().expect("AppState.auth lock poisoned");
@@ -410,7 +410,7 @@ pub async fn airgap_state(state: State<'_, AppState>) -> Result<Value, String> {
     Ok(snapshot)
 }
 
-/// `airgap:unlock` (`{ paneId, passphrase, code, minutes }`): re-verifies a
+/// `egress:unlock` (`{ paneId, passphrase, code, minutes }`): re-verifies a
 /// second factor (TOTP if enrolled, else the passphrase — the app login
 /// already proved one, but this channel demands it again per pane, exactly
 /// like `auth:login`'s own throttle purpose is independent), then widens
@@ -419,11 +419,11 @@ pub async fn airgap_state(state: State<'_, AppState>) -> Result<Value, String> {
 /// `unlockPane`'s own return value (`false` for bad `minutes`/an unknown
 /// pane id) is never consulted by the JS handler either. TOME-019's actual
 /// safety property — no mutation on an invalid `minutes` — is still fully
-/// intact regardless, since [`schedule_unlock`]/`AirgapState::unlock_pane`
+/// intact regardless, since [`schedule_unlock`]/`EgressState::unlock_pane`
 /// validate before touching anything; only this cosmetic response shape is
 /// preserved as-is for exact fidelity.
 #[tauri::command]
-pub async fn airgap_unlock(
+pub async fn egress_unlock(
     app: AppHandle,
     state: State<'_, AppState>,
     pane_id: String,
@@ -431,14 +431,14 @@ pub async fn airgap_unlock(
     code: Option<String>,
     minutes: i64,
 ) -> Result<Value, String> {
-    lock_gate::guard(&state, "airgap:unlock")?;
+    lock_gate::guard(&state, "egress:unlock")?;
 
     {
         let mut guard = state.auth.lock().expect("AppState.auth lock poisoned");
         let auth = guard
             .as_mut()
             .ok_or_else(|| "auth: not initialized".to_string())?;
-        let wait = auth.throttle_retry_in("airgap:unlock");
+        let wait = auth.throttle_retry_in("egress:unlock");
         if wait > 0 {
             return Ok(json!({
                 "ok": false,
@@ -454,7 +454,7 @@ pub async fn airgap_unlock(
                 .is_some_and(|p| auth.verify_passphrase(p))
         };
         if !verified {
-            auth.record_failure("airgap:unlock");
+            auth.record_failure("egress:unlock");
             let error = if totp_active {
                 "Wrong 2FA code."
             } else {
@@ -462,26 +462,26 @@ pub async fn airgap_unlock(
             };
             return Ok(json!({"ok": false, "error": error}));
         }
-        auth.record_success("airgap:unlock");
+        auth.record_success("egress:unlock");
     }
 
     schedule_unlock(&app, &state, &pane_id, minutes);
     Ok(json!({"ok": true}))
 }
 
-/// `airgap:relock` (bare `paneId`, not an object — see `tome-ipc.js`'s
-/// `relock: (paneId) => call('airgap_relock', { paneId })`, which wraps it
+/// `egress:relock` (bare `paneId`, not an object — see `tome-ipc.js`'s
+/// `relock: (paneId) => call('egress_relock', { paneId })`, which wraps it
 /// into `{ paneId }` for Tauri's named-argument convention). Immediate,
 /// unauthenticated (narrowing egress is never privileged — only widening
 /// it is) — mirrors `relockPane` being callable with no re-auth in the JS
 /// original.
 #[tauri::command]
-pub async fn airgap_relock(
+pub async fn egress_relock(
     app: AppHandle,
     state: State<'_, AppState>,
     pane_id: String,
 ) -> Result<Value, String> {
-    lock_gate::guard(&state, "airgap:relock")?;
+    lock_gate::guard(&state, "egress:relock")?;
     if let Some((_, timer)) = state
         .relock_timers
         .lock()
@@ -494,18 +494,18 @@ pub async fn airgap_relock(
     Ok(json!({}))
 }
 
-/// `airgap:setup` (`{ passphrase }`): first-run (or post-factory-reset,
+/// `egress:setup` (`{ passphrase }`): first-run (or post-factory-reset,
 /// though this build has no reset path either) passphrase configuration.
 /// Refuses if already configured — `setPassphrase` itself has no such
 /// guard (it happily overwrites, which is how a passphrase CHANGE works
-/// elsewhere); this handler's own guard is what makes `airgap:setup`
+/// elsewhere); this handler's own guard is what makes `egress:setup`
 /// specifically a first-time-only door, matching the JS original's
 /// `if (authlock.authStatus().configured) return { ok: false, error:
 /// 'Already configured.' }`. Marks the session unlocked on success — "first-
 /// run setup happens at the lock screen," per the JS original's comment.
 #[tauri::command]
-pub async fn airgap_setup(state: State<'_, AppState>, passphrase: String) -> Result<Value, String> {
-    lock_gate::guard(&state, "airgap:setup")?;
+pub async fn egress_setup(state: State<'_, AppState>, passphrase: String) -> Result<Value, String> {
+    lock_gate::guard(&state, "egress:setup")?;
     {
         let mut guard = state.auth.lock().expect("AppState.auth lock poisoned");
         let auth = guard
@@ -522,14 +522,14 @@ pub async fn airgap_setup(state: State<'_, AppState>, passphrase: String) -> Res
     Ok(json!({"ok": true}))
 }
 
-/// `airgap:enrollTotp` (no args). Mirrors `authlock.enrollTotp()`'s own
+/// `egress:enrollTotp` (no args). Mirrors `authlock.enrollTotp()`'s own
 /// contract exactly: resolves `{ secret, uri }` on success, REJECTS (not a
 /// `{ok:false}` shape) on the TOME-005 active-factor guard — an `Err`
 /// here rejects the Tauri `invoke()` promise the same way a thrown JS
 /// `Error` rejects an Electron one.
 #[tauri::command]
-pub async fn airgap_enroll_totp(state: State<'_, AppState>) -> Result<Value, String> {
-    lock_gate::guard(&state, "airgap:enrollTotp")?;
+pub async fn egress_enroll_totp(state: State<'_, AppState>) -> Result<Value, String> {
+    lock_gate::guard(&state, "egress:enrollTotp")?;
     let mut guard = state.auth.lock().expect("AppState.auth lock poisoned");
     let auth = guard
         .as_mut()
@@ -539,17 +539,17 @@ pub async fn airgap_enroll_totp(state: State<'_, AppState>) -> Result<Value, Str
         .map_err(|e| e.to_string())
 }
 
-/// `airgap:confirmTotp` (`{ code }`). Mirrors `authlock.confirmTotp(code)`
+/// `egress:confirmTotp` (`{ code }`). Mirrors `authlock.confirmTotp(code)`
 /// exactly: resolves a plain BOOLEAN (`true`/`false` for right/wrong code
-/// — not an `{ok:...}` object; `src/renderer/airgap-ui.js`'s
-/// `if (await tome.airgap.confirmTotp(code.value))` reads it as one), and
+/// — not an `{ok:...}` object; `src/renderer/egress-ui.js`'s
+/// `if (await tome.egress.confirmTotp(code.value))` reads it as one), and
 /// only `Err`s on an actual save failure.
 #[tauri::command]
-pub async fn airgap_confirm_totp(
+pub async fn egress_confirm_totp(
     state: State<'_, AppState>,
     code: String,
 ) -> Result<Value, String> {
-    lock_gate::guard(&state, "airgap:confirmTotp")?;
+    lock_gate::guard(&state, "egress:confirmTotp")?;
     let mut guard = state.auth.lock().expect("AppState.auth lock poisoned");
     let auth = guard
         .as_mut()
@@ -559,38 +559,38 @@ pub async fn airgap_confirm_totp(
         .map_err(|e| e.to_string())
 }
 
-/// `airgap:readRepoAllowlist` (`{ root }`). Main is the sole authority: it
+/// `egress:readRepoAllowlist` (`{ root }`). Main is the sole authority: it
 /// resolves `root` through the SAME confinement boundary every other
 /// workspace-scoped command uses (`confine::confined_real_path`), then
-/// reads/hashes/validates `.tome/airgap.json` itself — the renderer never
+/// reads/hashes/validates `.tome/egress.json` itself — the renderer never
 /// supplies hosts, only a root to check.
 #[tauri::command]
-pub async fn airgap_read_repo_allowlist(
+pub async fn egress_read_repo_allowlist(
     state: State<'_, AppState>,
     root: String,
 ) -> Result<Value, String> {
-    lock_gate::guard(&state, "airgap:readRepoAllowlist")?;
+    lock_gate::guard(&state, "egress:readRepoAllowlist")?;
     let report = state
-        .airgap
+        .egress
         .read_repo_allowlist(&root, |p| confine::confined_real_path(&state, p).ok());
     Ok(serde_json::to_value(report).expect("RepoAllowlistReport always serializes"))
 }
 
-/// `airgap:consentRepoAllowlist` (`{ root, hash }`). TOCTOU-safe by
-/// construction (`AirgapState::consent_repo_allowlist` re-reads and
+/// `egress:consentRepoAllowlist` (`{ root, hash }`). TOCTOU-safe by
+/// construction (`EgressState::consent_repo_allowlist` re-reads and
 /// re-hashes before ever comparing `hash`) — the renderer's `hash` is
 /// proof it saw a specific file content, never a value that itself takes
 /// effect. On success, widens every currently-live gapped pane's egress
 /// immediately (mirrors `recompile()`'s module-wide effect) — see
 /// [`recompile_all_proxies`].
 #[tauri::command]
-pub async fn airgap_consent_repo_allowlist(
+pub async fn egress_consent_repo_allowlist(
     state: State<'_, AppState>,
     root: String,
     hash: String,
 ) -> Result<Value, String> {
-    lock_gate::guard(&state, "airgap:consentRepoAllowlist")?;
-    let outcome = state.airgap.consent_repo_allowlist(&root, &hash, |p| {
+    lock_gate::guard(&state, "egress:consentRepoAllowlist")?;
+    let outcome = state.egress.consent_repo_allowlist(&root, &hash, |p| {
         confine::confined_real_path(&state, p).ok()
     });
     match outcome {
@@ -602,19 +602,19 @@ pub async fn airgap_consent_repo_allowlist(
     }
 }
 
-/// `airgap:revokeRepoAllowlist` (`{ root }`). Always `{ ok: true }`, even
+/// `egress:revokeRepoAllowlist` (`{ root }`). Always `{ ok: true }`, even
 /// for a root with no consent to revoke — matches the JS original exactly.
 /// Also re-applies the (now possibly narrower) effective allow set to
 /// every live pane, unconditionally — `revokeRepoAllowlist` calls
 /// `recompile()` unconditionally too, a harmless no-op when nothing
 /// actually changed.
 #[tauri::command]
-pub async fn airgap_revoke_repo_allowlist(
+pub async fn egress_revoke_repo_allowlist(
     state: State<'_, AppState>,
     root: String,
 ) -> Result<Value, String> {
-    lock_gate::guard(&state, "airgap:revokeRepoAllowlist")?;
-    state.airgap.revoke_repo_allowlist(&root);
+    lock_gate::guard(&state, "egress:revokeRepoAllowlist")?;
+    state.egress.revoke_repo_allowlist(&root);
     recompile_all_proxies(&state);
     Ok(json!({"ok": true}))
 }
@@ -624,14 +624,14 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Mutex as StdMutex};
 
-    // ---- AirgapEnv test double — see that trait's own doc comment ----
+    // ---- EgressEnv test double — see that trait's own doc comment ----
 
     /// Wraps an owned `AppState` (no live Tauri app needed —
     /// `AppState::new()` is a plain constructor) and records every push
     /// instead of touching a real event bus, so
     /// schedule_unlock/relock_now/create_gapped_pane_proxy/
     /// close_pane_and_proxy below can be driven end-to-end against a REAL
-    /// `AirgapState` and a REAL `PaneProxy`.
+    /// `EgressState` and a REAL `PaneProxy`.
     #[derive(Clone)]
     struct TestEnv {
         state: Arc<AppState>,
@@ -647,7 +647,7 @@ mod tests {
         }
     }
 
-    impl AirgapEnv for TestEnv {
+    impl EgressEnv for TestEnv {
         fn app_state(&self) -> &AppState {
             &self.state
         }
@@ -671,15 +671,15 @@ mod tests {
 
     // ---- integration glue: schedule_unlock / relock_now /
     // create_gapped_pane_proxy / close_pane_and_proxy driven end-to-end
-    // against a real AirgapState + a real PaneProxy (TestEnv stands in for
+    // against a real EgressState + a real PaneProxy (TestEnv stands in for
     // the AppHandle none of this can construct outside a running app) ----
 
     #[tokio::test]
-    async fn schedule_unlock_widens_both_airgap_state_and_the_live_proxy() {
+    async fn schedule_unlock_widens_both_egress_state_and_the_live_proxy() {
         let env = TestEnv::new();
-        env.state.airgap.register_pane("pty-1");
+        env.state.egress.register_pane("pty-1");
         let proxy = Arc::new(
-            crate::airgap::proxy::PaneProxy::spawn(vec![], None, |_| {})
+            crate::egress::proxy::PaneProxy::spawn(vec![], None, |_| {})
                 .await
                 .unwrap(),
         );
@@ -688,21 +688,21 @@ mod tests {
             .lock()
             .unwrap()
             .insert("pty-1".to_string(), proxy.clone());
-        assert_eq!(proxy.mode(), crate::airgap::proxy::Mode::Providers);
+        assert_eq!(proxy.mode(), crate::egress::proxy::Mode::Providers);
 
         schedule_unlock(&env, &env.state, "pty-1", 15);
 
         assert_eq!(
-            env.state.airgap.pane_mode("pty-1"),
-            Some(crate::airgap::PaneMode::Open)
+            env.state.egress.pane_mode("pty-1"),
+            Some(crate::egress::PaneMode::Open)
         );
-        assert_eq!(proxy.mode(), crate::airgap::proxy::Mode::Open);
+        assert_eq!(proxy.mode(), crate::egress::proxy::Mode::Open);
         assert!(env
             .pushes
             .lock()
             .unwrap()
             .iter()
-            .any(|(k, _)| k == "airgap:unlock"));
+            .any(|(k, _)| k == "egress:unlock"));
         assert!(env
             .state
             .relock_timers
@@ -712,21 +712,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn schedule_unlock_on_an_unknown_pane_touches_neither_airgap_state_nor_any_proxy() {
+    async fn schedule_unlock_on_an_unknown_pane_touches_neither_egress_state_nor_any_proxy() {
         // TOME-019: an invalid/forged unlock must not partially apply.
         let env = TestEnv::new();
         schedule_unlock(&env, &env.state, "ghost", 15);
-        assert_eq!(env.state.airgap.pane_mode("ghost"), None);
+        assert_eq!(env.state.egress.pane_mode("ghost"), None);
         assert!(env.state.relock_timers.lock().unwrap().is_empty());
         assert!(env.pushes.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
-    async fn relock_now_narrows_both_airgap_state_and_the_live_proxy() {
+    async fn relock_now_narrows_both_egress_state_and_the_live_proxy() {
         let env = TestEnv::new();
-        env.state.airgap.register_pane("pty-1");
+        env.state.egress.register_pane("pty-1");
         let proxy = Arc::new(
-            crate::airgap::proxy::PaneProxy::spawn(vec![], None, |_| {})
+            crate::egress::proxy::PaneProxy::spawn(vec![], None, |_| {})
                 .await
                 .unwrap(),
         );
@@ -736,21 +736,21 @@ mod tests {
             .unwrap()
             .insert("pty-1".to_string(), proxy.clone());
         schedule_unlock(&env, &env.state, "pty-1", 15);
-        assert_eq!(proxy.mode(), crate::airgap::proxy::Mode::Open);
+        assert_eq!(proxy.mode(), crate::egress::proxy::Mode::Open);
 
         relock_now(&env, &env.state, "pty-1");
 
         assert_eq!(
-            env.state.airgap.pane_mode("pty-1"),
-            Some(crate::airgap::PaneMode::Providers)
+            env.state.egress.pane_mode("pty-1"),
+            Some(crate::egress::PaneMode::Providers)
         );
-        assert_eq!(proxy.mode(), crate::airgap::proxy::Mode::Providers);
+        assert_eq!(proxy.mode(), crate::egress::proxy::Mode::Providers);
         assert!(env
             .pushes
             .lock()
             .unwrap()
             .iter()
-            .any(|(k, _)| k == "airgap:relock"));
+            .any(|(k, _)| k == "egress:relock"));
     }
 
     #[tokio::test]
@@ -761,8 +761,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            env.state.airgap.pane_mode("pty-1"),
-            Some(crate::airgap::PaneMode::Providers)
+            env.state.egress.pane_mode("pty-1"),
+            Some(crate::egress::PaneMode::Providers)
         );
         assert!(env.state.proxies.lock().unwrap().contains_key("pty-1"));
         assert!(tokio::net::TcpStream::connect(("127.0.0.1", proxy.port()))
@@ -773,7 +773,7 @@ mod tests {
             .lock()
             .unwrap()
             .iter()
-            .any(|(k, _)| k == "airgap:state"));
+            .any(|(k, _)| k == "egress:state"));
         assert!(
             proxy.unix_path().is_none(),
             "no unix path was requested — none should be bound"
@@ -825,7 +825,7 @@ mod tests {
             .unwrap()
             .get("pty-1")
             .is_none());
-        assert_eq!(env.state.airgap.pane_state("pty-1"), None);
+        assert_eq!(env.state.egress.pane_state("pty-1"), None);
         // The real listener must actually be down, not just forgotten about.
         // `proxy.shutdown()` signals the listener's accept loop rather than
         // synchronously joining it, so the OS-level socket close can lag
@@ -864,7 +864,7 @@ mod tests {
         // drives `claim_timer_if_current` — the EXACT primitive both the
         // real timer task and this test call — directly.
         let env = TestEnv::new();
-        env.state.airgap.register_pane("pty-1");
+        env.state.egress.register_pane("pty-1");
 
         schedule_unlock(&env, &env.state, "pty-1", 15);
         let stale_generation = env
@@ -905,8 +905,8 @@ mod tests {
             .unwrap()
             .contains_key("pty-1"));
         assert_eq!(
-            env.state.airgap.pane_mode("pty-1"),
-            Some(crate::airgap::PaneMode::Open),
+            env.state.egress.pane_mode("pty-1"),
+            Some(crate::egress::PaneMode::Open),
             "the stale timer's relock_now must never be allowed to run"
         );
 
@@ -946,17 +946,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let tome_dir = dir.path().join(".tome");
         std::fs::create_dir_all(&tome_dir).unwrap();
-        let file = tome_dir.join("airgap.json");
+        let file = tome_dir.join("egress.json");
         std::fs::write(&file, r#"{"allow":["extra.example.com"]}"#).unwrap();
         let root = dir.path().to_str().unwrap();
         let resolve = |_p: &std::path::Path| Some(file.clone());
 
         let state = AppState::new();
-        let report = state.airgap.read_repo_allowlist(root, resolve);
-        let crate::airgap::RepoAllowlistReport::Present { hash, .. } = report else {
+        let report = state.egress.read_repo_allowlist(root, resolve);
+        let crate::egress::RepoAllowlistReport::Present { hash, .. } = report else {
             panic!("expected Present")
         };
-        state.airgap.consent_repo_allowlist(root, &hash, resolve);
+        state.egress.consent_repo_allowlist(root, &hash, resolve);
 
         let patterns = effective_allow_patterns(&state);
         assert!(patterns.contains(&"extra.example.com".to_string()));
@@ -979,11 +979,11 @@ mod tests {
 
     #[tokio::test]
     async fn close_pane_and_proxy_on_an_unregistered_pane_touches_nothing() {
-        // Now exercised through the REAL function (see `AirgapEnv`'s doc
+        // Now exercised through the REAL function (see `EgressEnv`'s doc
         // comment for how `TestEnv` makes that possible) rather than only
         // its no-AppHandle-needed inner half: proves the early-return
         // branch really does short-circuit before any push happens, not
-        // just that `AirgapState::close_pane` alone is a no-op.
+        // just that `EgressState::close_pane` alone is a no-op.
         let env = TestEnv::new();
         close_pane_and_proxy(&env, &env.state, "never-existed");
         assert!(env.state.relock_timers.lock().unwrap().is_empty());

@@ -7,7 +7,7 @@ import { modalShell, confirmModal } from './modals.js'
 import { setTheme, themeState, THEME_ORDER, THEME_GLYPH } from './theme.js'
 import { TERM_FONT, setTermFontSize } from './panels/terminal.js'
 import { editorPrefs, setEditorPrefs } from './panels/editor.js'
-import { totpModal } from './airgap-ui.js'
+import { totpModal } from './egress-ui.js'
 import { showOnboarding } from './onboarding.js'
 import { activeWorkspace } from './workspaces.js'
 import { mentorState, saveMentorSettings, setUq, uq } from './mentor.js'
@@ -268,7 +268,7 @@ export async function buildExportSection(closePreferences) {
 // shaped) — the same field(label, control) idiom panels/flow.js's node
 // editor modal uses. Submitting restates exactly what will be consented to
 // in a separate confirmModal before ever calling export_consent — the same
-// "state it back before granting" discipline repo-airgap.js's consentModal
+// "state it back before granting" discipline repo-egress.js's consentModal
 // applies to the repo-allowlist flow, except here the content being
 // consented to is fresh user input rather than something main already read
 // and hashed, so the restatement is the only guard against a typo'd
@@ -370,7 +370,7 @@ function openAddDestinationModal() {
 // ---- schedules ----
 // The in-app scheduler (flow.js's Schedule… button, schedule.rs): every row
 // here is a flow-schedules.json record main already hashed at schedules_set
-// time. Main ticks every 30s, always air-gapped, and re-verifies the hash
+// time. Main ticks every 30s, always gapped, and re-verifies the hash
 // on every tick — a mismatch suspends the schedule rather than run content
 // nobody reviewed, which is the state "Re-consent" below clears by calling
 // schedules_set again with the schedule's own current fields (there is no
@@ -378,7 +378,7 @@ function openAddDestinationModal() {
 export async function buildSchedulesSection() {
   const section = el('section', 'prefs-section')
   section.append(el('h4', '', 'Schedules'))
-  section.append(el('div', 'prefs-hint', 'flows scheduled from the Flow panel — always air-gapped, all times UTC'))
+  section.append(el('div', 'prefs-hint', 'flows scheduled from the Flow panel — always contained, all times UTC'))
   const list = el('div', 'prefs-agents')
   section.appendChild(list)
 
@@ -873,12 +873,12 @@ export async function preferencesModal() {
   security.append(el('h4', '', 'Security'))
   toggleRow(
     security,
-    'Spawn agents air-gapped',
+    'Spawn agents contained',
     null,
-    () => prefs.airgapDefault,
+    () => prefs.egressDefault,
     (v) => {
-      prefs.airgapDefault = v
-      tome.store.set('airgap-default', v)
+      prefs.egressDefault = v
+      tome.store.set('egress-default', v)
     }
   )
   toggleRow(
@@ -898,7 +898,7 @@ export async function preferencesModal() {
     m.close()
     totpModal()
   })
-  row(security, 'Two-factor authentication', enroll, 'required to open an air-gapped pane')
+  row(security, 'Two-factor authentication', enroll, 'required to open a contained pane')
   m.body.appendChild(security)
 
   // ---------- export destinations ----------

@@ -377,7 +377,7 @@ main { padding-bottom: 40px; }
 <section class="step" id="contain" aria-labelledby="h-contain">
 <p class="eyebrow"><span class="badge">02</span><span class="nodename">contain</span></p>
 <h2 id="h-contain" tabindex="-1">Contain the network</h2>
-<p>Agent panes spawn contained by default — the ＋ menu prefixes every agent with ⛨ to say so, and the pane wears a cyan strip reading "⛨ model APIs only — click to allow internet". Commit the hosts your team actually needs to <code>.tome/airgap.json</code>; the first time the workspace opens that file, Tome lists exactly those hosts and waits for you to click "Allow N hosts". When a pane genuinely needs the open internet, click its strip and give the second factor — the authenticator code, or the passphrase — for 15, 30 or 60 minutes.</p>
+<p>Agent panes spawn contained by default — the ＋ menu prefixes every agent with ⛨ to say so, and the pane wears a cyan strip reading "⛨ model APIs only — click to allow internet". Commit the hosts your team actually needs to <code>.tome/egress.json</code>; the first time the workspace opens that file, Tome lists exactly those hosts and waits for you to click "Allow N hosts". When a pane genuinely needs the open internet, click its strip and give the second factor — the authenticator code, or the passphrase — for 15, 30 or 60 minutes.</p>
 <figure class="board"><svg class="sb" viewBox="0 0 520 196" role="img" aria-label="Sketch of the egress path: an agent pane sits inside a dashed seatbelt sandbox. A dashed arc leaving the sandbox directly is crossed out. The only live arrow goes to a CONNECT proxy on 127.0.0.1, which forwards to api.anthropic.com and refuses github.com." focusable="false"><rect class="sb-line sb-dash" x="6" y="44" width="186" height="140" rx="10" fill="none"/><text class="sb-t" x="16" y="176">seatbelt sandbox</text><rect class="sb-box" x="20" y="62" width="158" height="96" rx="7"/><rect class="sb-strip" x="28" y="70" width="142" height="14" rx="4"/><text class="sb-tb sb-xs" x="34" y="80">&#9960; model APIs only</text><text class="sb-tb" x="28" y="106">agent pane</text><text class="sb-t sb-xs" x="28" y="124">raw sockets &#183; ssh &#183; DNS</text><text class="sb-t sb-xs" x="28" y="137">dead, freed or not</text><path class="sb-line sb-dash" d="M 178 82 C 236 30 320 26 392 44"/><path class="sb-no" d="M 189 66 L 199 76 M 189 76 L 199 66"/><text class="sb-t sb-xs" x="240" y="24">any other route out</text><path class="sb-line" d="M 178 116 L 207 116"/><path class="sb-head" d="M 212 116 L 206 119 L 206 113 Z"/><rect class="sb-box" x="216" y="92" width="118" height="48" rx="7"/><text class="sb-tb" x="226" y="112">127.0.0.1</text><text class="sb-t sb-xs" x="226" y="128">CONNECT proxy</text><path class="sb-line" d="M 334 106 L 368.076 79.0982"/><path class="sb-head" d="M 372 76 L 369.15 82.0725 L 365.432 77.3632 Z"/><path class="sb-line" d="M 334 126 L 367.773 147.33"/><path class="sb-head" d="M 372 150 L 365.325 149.333 L 368.529 144.26 Z"/><path class="sb-ok" d="M 379 68 L 382.5 72 L 389 63"/><text class="sb-tb" x="396" y="72">api.anthropic.com</text><text class="sb-t sb-xs" x="396" y="86">allowed by default</text><path class="sb-no" d="M 379 143 L 389 153 M 379 153 L 389 143"/><text class="sb-tb" x="396" y="152">github.com</text><text class="sb-t sb-xs" x="396" y="166">refused, and logged</text></svg></figure>
 <div class="why">
 <p class="label">Why it is built this way</p>
@@ -385,13 +385,13 @@ main { padding-bottom: 40px; }
 <p>The sandbox kills all direct egress, DNS included; the only route out is a per-pane CONNECT proxy on <code>127.0.0.1</code> that allows model-provider domains. Freeing a pane widens that proxy and never the sandbox — the seatbelt profile is fixed at spawn and no code path weakens it afterwards, so raw sockets and ssh stay dead even in a freed pane, and tools that ignore proxy env vars fail closed. Consent to a repo's list is per-user and pinned to the file's SHA-1, verified in the main process, so editing one character re-prompts everyone: "that re-prompt is a feature, not friction — the user sees the change". Honest caveat: Claude Code's <code>WebSearch/WebFetch</code> run server-side at <code>api.anthropic.com</code>, so a contained claude can still search, while opencode's and pi's client-side fetches are genuinely blocked until freed.</p>
 </div>
 <figure class="artifact">
-<figcaption id="cap-airgap"><span class="badge">scheme</span> src-tauri/src/airgap/seatbelt.rs — the whole macOS sandbox, six lines, later rules winning. (Linux builds the same wall from bubblewrap network namespaces, in airgap/linux.rs.)</figcaption>
-<pre tabindex="0" role="region" aria-labelledby="cap-airgap"><code>(version 1)
+<figcaption id="cap-egress"><span class="badge">scheme</span> src-tauri/src/egress/seatbelt.rs — the whole macOS sandbox, six lines, later rules winning. (Linux builds the same wall from bubblewrap network namespaces, in egress/linux.rs.)</figcaption>
+<pre tabindex="0" role="region" aria-labelledby="cap-egress"><code>(version 1)
 (allow default)
 (deny network-outbound)
 (allow network-outbound (remote ip "localhost:*"))
 (deny file-write* (subpath "&lt;userData&gt;"))
-(deny file-read* (literal "&lt;userData&gt;/airgap-auth.json"))</code></pre>
+(deny file-read* (literal "&lt;userData&gt;/egress-auth.json"))</code></pre>
 </figure>
 </section>
 <section class="step" id="create" aria-labelledby="h-create">
@@ -559,8 +559,8 @@ submit."</code></pre>
 </div>
 <figure class="artifact">
 <figcaption id="cap-audit"><span class="badge">json</span> The shape of userData/events.jsonl — identifiers and outcomes, no payloads.</figcaption>
-<pre tabindex="0" role="region" aria-labelledby="cap-audit"><code>{"ts":"2026-08-08T14:02:11.913Z","kind":"airgap:blocked","paneId":"pty-4","host":"github.com","count":3}
-{"ts":"2026-08-08T14:03:40.204Z","kind":"airgap:unlock","paneId":"pty-4","minutes":15}
+<pre tabindex="0" role="region" aria-labelledby="cap-audit"><code>{"ts":"2026-08-08T14:02:11.913Z","kind":"egress:blocked","paneId":"pty-4","host":"github.com","count":3}
+{"ts":"2026-08-08T14:03:40.204Z","kind":"egress:unlock","paneId":"pty-4","minutes":15}
 {"ts":"2026-08-08T14:07:02.551Z","kind":"conductor:tool","tool":"open_file","chatId":"chat-1","ok":true,"hint":"/repo/.tome/flows/review-pipeline/n3-verdict.md"}</code></pre>
 </figure>
 </section>
@@ -575,12 +575,12 @@ submit."</code></pre>
 <div class="why">
 <p class="label">Why it is built this way</p>
 <h3>Git, and .tome as the project's memory</h3>
-<p>What the run leaves behind is the point. The pipeline is a diffable <code>.flow.json</code>, the policy is a <code>.tome/airgap.json</code> your teammates consent to once, and the agents' handoffs are plain markdown the agents wrote themselves — so the whole run reviews like any other change instead of living in someone's terminal scrollback. The products and manifest land under <code>out/</code>, gitignored and hashed, and a finished run can be exported to a destination you've consented to once. The event log stays outside the repo in <code>userData</code>, because it is per-user evidence rather than project content. Nothing here needs a hosted service: the CLIs are the ones already on your <code>PATH</code>, and every file above is one you can open, edit and revert. For unattended runs, <a href="remote-runner.md">remote-runner.md</a> covers the headless <code>tome-runner</code> and <code>systemd --user</code> timers.</p>
+<p>What the run leaves behind is the point. The pipeline is a diffable <code>.flow.json</code>, the policy is a <code>.tome/egress.json</code> your teammates consent to once, and the agents' handoffs are plain markdown the agents wrote themselves — so the whole run reviews like any other change instead of living in someone's terminal scrollback. The products and manifest land under <code>out/</code>, gitignored and hashed, and a finished run can be exported to a destination you've consented to once. The event log stays outside the repo in <code>userData</code>, because it is per-user evidence rather than project content. Nothing here needs a hosted service: the CLIs are the ones already on your <code>PATH</code>, and every file above is one you can open, edit and revert. For unattended runs, <a href="remote-runner.md">remote-runner.md</a> covers the headless <code>tome-runner</code> and <code>systemd --user</code> timers.</p>
 </div>
 <figure class="artifact">
 <figcaption id="cap-ship"><span class="badge">text</span> What the run leaves in the repo — everything except the audit log, which stays in userData.</figcaption>
 <pre tabindex="0" role="region" aria-labelledby="cap-ship"><code>.tome/
-├── airgap.json                       # hosts this repo asks to reach — consented, hash-pinned
+├── egress.json                       # hosts this repo asks to reach — consented, hash-pinned
 └── flows/
     ├── review-pipeline.flow.json     # the pipeline itself, hand-editable
     ├── review-pipeline/
@@ -594,7 +594,7 @@ submit."</code></pre>
 </main>
 <footer class="outro"><div class="wrap">
 <h2>Everything here is a file you can read</h2>
-<p>The pipeline is a <code>.flow.json</code>, the policy is a <code>.tome/airgap.json</code>, the handoffs are markdown, and the sandbox is six lines of seatbelt profile. Nothing in that run depended on a modified agent CLI or a service we host. Tome runs on macOS and Linux — the wall is seatbelt (<code>sandbox-exec</code>) on macOS and bubblewrap network namespaces on Linux; the allowlist proxy between them is platform-neutral. Packaged builds are unsigned for now, so a fresh copy into <code>/Applications</code> needs <code>xattr -dr com.apple.quarantine</code> once.</p>
+<p>The pipeline is a <code>.flow.json</code>, the policy is a <code>.tome/egress.json</code>, the handoffs are markdown, and the sandbox is six lines of seatbelt profile. Nothing in that run depended on a modified agent CLI or a service we host. Tome runs on macOS and Linux — the wall is seatbelt (<code>sandbox-exec</code>) on macOS and bubblewrap network namespaces on Linux; the allowlist proxy between them is platform-neutral. Packaged builds are unsigned for now, so a fresh copy into <code>/Applications</code> needs <code>xattr -dr com.apple.quarantine</code> once.</p>
 <a class="cta" href="https://github.com/zwaneldmz/tome/releases">Download for macOS or Linux</a>
 <a class="cta cta-2" href="https://github.com/zwaneldmz/tome">Read the source</a>
 </div></footer>

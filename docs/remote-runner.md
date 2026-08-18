@@ -19,7 +19,7 @@ way to talk to it is its own two subcommands.
   pass to `tome-runner run`. `tome-runner` reads flow files straight off
   disk — there is no sync step.
 - **`cargo build --workspace`** run once on that checkout, so `tome-runner`
-  and `tome-shim` (its Linux sandbox helper — see "The air gap" below) land
+  and `tome-shim` (its Linux sandbox helper — see "The egress control" below) land
   side by side in the same `target/{debug,release}/` directory.
   `tome-runner` resolves `tome-shim` as its own sibling; there is no
   install step or `$PATH` lookup for it.
@@ -35,35 +35,35 @@ way to talk to it is its own two subcommands.
   agents need) in the `EnvironmentFile` — see "Credentials" below. Provider
   keys are never read from this repo's own files or from flow content.
 - **`bwrap` (bubblewrap), or a kernel that allows unprivileged user
-  namespaces, on Linux.** Every run this binary starts is air-gapped,
-  unconditionally (see "The air gap" below) — on Linux that gap is
+  namespaces, on Linux.** Every run this binary starts is gapped,
+  unconditionally (see "The egress control" below) — on Linux that gap is
   enforced by bubblewrap when it's installed, or by `tome-shim` unsharing
   its own namespaces when it isn't. If neither is available,
   `tome-runner run` refuses to start anything and exits non-zero,
-  printing an install hint. On macOS the air gap is enforced by the
+  printing an install hint. On macOS the egress control is enforced by the
   seatbelt profile (`sandbox-exec`), which every macOS install ships —
   there is no equivalent refusal path there.
 
-## The air gap
+## The egress control
 
 Every node `tome-runner` spawns is gapped — always. There is no flag to
 turn this off, no store preference, nothing to read: unlike the desktop
 app (which asks whether the user wants a background run gapped), an
 unattended, remotely-triggered process has no one to ask, so it makes the
 same choice the desktop app's own in-app scheduler makes for the identical
-reason (`src-tauri/src/schedule.rs`'s `SCHEDULED_RUN_AIRGAP`). A gapped
+reason (`src-tauri/src/schedule.rs`'s `SCHEDULED_RUN_EGRESS`). A gapped
 node's only route to the network is its own per-node loopback proxy,
 enforcing an allowlist of hostnames — see the next section for where that
 allowlist comes from.
 
-## `~/.config/tome-runner/airgap.json` — the egress allowlist
+## `~/.config/tome-runner/egress.json` — the egress allowlist
 
 Every gapped node starts from the same shipped provider defaults every
-other airgap consumer in this codebase uses (`api.anthropic.com`,
+other egress consumer in this codebase uses (`api.anthropic.com`,
 `api.openai.com`, and so on — the full list is
-`tome_flow::airgap::allowlist::DEFAULT_ALLOW`). If your flow's agents need
+`tome_flow::egress::allowlist::DEFAULT_ALLOW`). If your flow's agents need
 to reach anything else — an internal API, a private package registry —
-list it in `~/.config/tome-runner/airgap.json`:
+list it in `~/.config/tome-runner/egress.json`:
 
 ```json
 {
@@ -76,21 +76,21 @@ list it in `~/.config/tome-runner/airgap.json`:
 
 Same shape, and the same pattern rules (`*` matches exactly one DNS label;
 no bare `*`, no wildcard TLD, no scheme/path/userinfo — see
-`tome_flow::airgap::allowlist`'s own doc comment), as the desktop app's own
-allowlist override file and a repo's `.tome/airgap.json`. A missing file,
+`tome_flow::egress::allowlist`'s own doc comment), as the desktop app's own
+allowlist override file and a repo's `.tome/egress.json`. A missing file,
 an unreadable file, malformed JSON, or an entry that fails validation all
 fail closed to "no extra hosts" — never a wider gap by accident.
 
 **This file lives under the server owner's own `$HOME`, and that is
-deliberate — `tome-runner` never reads a repo's own `.tome/airgap.json`.**
-The desktop app treats a repo's `.tome/airgap.json` as a CONSENT-gated
+deliberate — `tome-runner` never reads a repo's own `.tome/egress.json`.**
+The desktop app treats a repo's `.tome/egress.json` as a CONSENT-gated
 suggestion: a human reviews it and clicks Allow before its hosts are
 applied. Nobody is at the keyboard for a run that fires at 3am, so
 `tome-runner` never applies that consent step automatically — if it read a
 repo-supplied allowlist unattended, a compromised or malicious commit
-could ship its own wider `.tome/airgap.json` alongside itself and grant
+could ship its own wider `.tome/egress.json` alongside itself and grant
 its own future runs new egress with nobody to approve anything. Treat
-`~/.config/tome-runner/airgap.json` as you would any other credential-
+`~/.config/tome-runner/egress.json` as you would any other credential-
 adjacent config: only the server owner should be able to write it, and
 nothing inside the repo checkout ever should.
 

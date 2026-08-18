@@ -60,10 +60,10 @@ tokio-util = "0.7"
 futures-util = "0.3"
 # Plan step 2.1: the extracted background flow-run engine (DAG scheduling,
 # the live run registry, realpath confinement, product promotion, agent
-# spawn-policy allowlists, the air-gap subsystem) — see that crate's own
+# spawn-policy allowlists, the egress subsystem) — see that crate's own
 # `lib.rs` doc comment for its full membership. `tome_lib` re-exports its
 # public surface at every module's original path (`flow`, `agent_spawn`,
-# `agent_env`, `login_env`, `airgap`, `custom_agents`), so this is the one
+# `agent_env`, `login_env`, `egress`, `custom_agents`), so this is the one
 # place those modules' code is now actually compiled from.
 tome-flow = { path = "crates/tome-flow" }
 

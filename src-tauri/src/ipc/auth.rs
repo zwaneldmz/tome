@@ -1,4 +1,4 @@
-//! Airgap-passphrase auth commands (status/login/Touch ID). Ports
+//! Egress-passphrase auth commands (status/login/Touch ID). Ports
 //! `src/main/authlock.js`'s `auth:status`/`auth:login`/`auth:touchid`
 //! handler bodies from `src/main/index.js` (~849-876) byte-for-byte in
 //! return shape. `authlock::AuthLock` (this phase's sibling slice) does the
@@ -24,8 +24,8 @@ use tauri::State;
 use crate::{lock_gate, state::AppState};
 
 /// How many whole seconds a caller should wait before retrying, rounded up
-/// — mirrors `Math.ceil(waitMs / 1000)`. `pub(crate)`: `ipc::airgap`'s
-/// `airgap_unlock` formats the identical "Too many attempts" message off
+/// — mirrors `Math.ceil(waitMs / 1000)`. `pub(crate)`: `ipc::egress`'s
+/// `egress_unlock` formats the identical "Too many attempts" message off
 /// the same `AuthLock::throttle_retry_in` shape.
 pub(crate) fn ceil_seconds(wait_ms: u64) -> u64 {
     wait_ms.div_ceil(1000)
@@ -131,10 +131,10 @@ pub async fn auth_touchid(state: State<'_, AppState>) -> Result<Value, String> {
 }
 
 /// Flips both one-way session-unlock fields — the single place every login
-/// success path (`auth_login` here; `airgap_setup`/a future real
-/// `auth_touchid` in `ipc::airgap`/this file) calls, so the two fields
+/// success path (`auth_login` here; `egress_setup`/a future real
+/// `auth_touchid` in `ipc::egress`/this file) calls, so the two fields
 /// (see their own doc comments on `state.rs`) can never drift out of sync
-/// with each other. `pub(crate)` so `ipc::airgap::airgap_setup` — a
+/// with each other. `pub(crate)` so `ipc::egress::egress_setup` — a
 /// sibling command with the identical `authlock.markUnlocked()` call in
 /// its JS original — reuses this instead of re-deriving the two writes.
 pub(crate) fn mark_unlocked(state: &AppState) {

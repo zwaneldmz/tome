@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities granted to Tome's main window and popout panes: core defaults only. `dialog:default`/`opener:default` are deliberately NOT granted here: ipc/dialog.rs and ipc/shell.rs call the plugins' Rust APIs (app.dialog(), app.opener()) directly from within already lock_gate::guard'd and (for shell) crate::confine'd command handlers, which needs no webview-facing ACL at all. Granting the plugin permission sets instead would let any script running in the webview invoke `plugin:dialog|open`/`plugin:opener|open_url`/`plugin:opener|reveal_item_in_dir` straight through Tauri's ACL layer, bypassing the lock gate and the confinement/airgap invariants entirely (security review finding, see git history around this file).",
+  "description": "Capabilities granted to Tome's main window and popout panes: core defaults only. `dialog:default`/`opener:default` are deliberately NOT granted here: ipc/dialog.rs and ipc/shell.rs call the plugins' Rust APIs (app.dialog(), app.opener()) directly from within already lock_gate::guard'd and (for shell) crate::confine'd command handlers, which needs no webview-facing ACL at all. Granting the plugin permission sets instead would let any script running in the webview invoke `plugin:dialog|open`/`plugin:opener|open_url`/`plugin:opener|reveal_item_in_dir` straight through Tauri's ACL layer, bypassing the lock gate and the confinement/egress invariants entirely (security review finding, see git history around this file).",
   "windows": ["main", "popout*"],
   "permissions": ["core:default"]
 }
