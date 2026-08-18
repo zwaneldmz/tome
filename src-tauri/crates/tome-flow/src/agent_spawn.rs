@@ -129,7 +129,7 @@ fn vet_model_against(
                 Ok(vetted.to_string())
             } else {
                 // Only reachable when the allowlist itself grew an entry
-                // that isn't a bare alias, i.e. a mistake in this crate
+                // that isn't a bare alias, that is a mistake in this crate
                 // rather than in anyone's flow file.
                 Err(format!(
                     r#"{from}: allowlisted model "{vetted}" for {cmd} is not a bare [a-z0-9-] alias — refusing to build a command line from it"#
@@ -318,8 +318,8 @@ pub fn build_headless_spawn(
     }
     // A brief that isn't a non-empty string is a bug upstream, not a
     // prompt — `claude -p ''` is the worst possible way to find out: with
-    // no prompt to answer it reads a stdin that is a pipe nobody will
-    // ever write to, i.e. a background node that hangs forever with
+    // no prompt to answer it reads a stdin that is a pipe nobody ever
+    // writes to, that is a background node that hangs forever with
     // nothing in its log to say why.
     let Some(brief) = brief.filter(|b| !b.is_empty()) else {
         eprintln!("flow-run: refusing to run {kind} headless with a missing or empty brief");
@@ -636,7 +636,7 @@ mod tests {
     #[test]
     fn headless_returns_none_for_a_brief_that_is_not_a_non_empty_string() {
         // `claude -p ''` has no prompt to answer and reads a stdin nobody
-        // will ever write to — a background node that hangs forever with
+        // ever writes to — a background node that hangs forever with
         // an empty log.
         assert_eq!(build_headless_spawn("claude", None, Some("")), None);
         assert_eq!(build_headless_spawn("claude", None, None), None);

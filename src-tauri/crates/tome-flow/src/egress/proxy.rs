@@ -378,7 +378,7 @@ async fn accept_loop(listener: TcpListener, state: Arc<ProxyState>) {
                 let st = state.clone();
                 tokio::spawn(async move { handle_connection(stream, st).await });
             }
-            // A single failed accept (e.g. transient EMFILE) must not take
+            // A single failed accept (for example, transient EMFILE) must not take
             // the whole pane offline.
             Err(_) => continue,
         }
@@ -480,7 +480,7 @@ where
         return;
     };
     // Any bytes the BufReader already pulled off the wire past the blank
-    // line (Node's "head" bytes handed to the 'connect' event, e.g. the
+    // line (Node's "head" bytes handed to the 'connect' event, for example, the
     // first flight of a TLS ClientHello arriving in the same packet as the
     // CONNECT request) must be replayed before any raw copy begins —
     // `into_inner()` would otherwise silently discard them.
@@ -574,7 +574,7 @@ fn schedule_coalesced_log(state: &Arc<ProxyState>, host: &str) {
 /// first) is what keeps a multi-colon target from being misread; NOTE this
 /// deliberately matches the JS original's actual wire contract, which is
 /// only unambiguous for UNBRACKETED hosts (an IPv6 literal must arrive
-/// without brackets, e.g. `::1:9999`, for the split to land on the real
+/// without brackets, for example `::1:9999`, for the split to land on the real
 /// port separator — a bracketed `[::1]:9999` would (also matching the JS
 /// original) extract host `"[::1]"` including the brackets, which fails to
 /// resolve). Defaults to port 443 both when there is no colon at all and
@@ -752,7 +752,7 @@ fn is_hop_by_hop(name: &str) -> bool {
 }
 
 /// Forwards a plain (non-CONNECT) proxy request — request-target must be
-/// an absolute URI, e.g. `GET http://host/path HTTP/1.1` — via `reqwest`.
+/// an absolute URI, for example `GET http://host/path HTTP/1.1` — via `reqwest`.
 /// Scoped deviations from a literal `egress.js` port, both because this
 /// leg is the rare path (every shipped allowlist host is HTTPS-only, which
 /// always arrives via the CONNECT leg above; this leg exists mainly for

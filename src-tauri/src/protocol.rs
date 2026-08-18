@@ -144,8 +144,8 @@ fn confinement_error(what: &str, folders_synced: bool) -> String {
 /// followed by two hex digits) is passed through as a literal `%` rather
 /// than erroring, and the resulting bytes are interpreted as UTF-8 lossily
 /// (invalid sequences become U+FFFD) rather than failing — a decoded
-/// string that happens to contain replacement characters simply will not
-/// name a real file, and falls through to a 403 via the ordinary
+/// string that happens to contain replacement characters never names
+/// a real file, and falls through to a 403 via the ordinary
 /// extension/confinement gates below, no special-casing needed.
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
@@ -224,8 +224,8 @@ fn ext_lower_no_dot(path: &str) -> String {
 /// path), not the original query value's — matching `net.fetch`, which
 /// infers from the file it actually opens. Those two can differ: a
 /// `photo.png` symlink whose target is confined but happens to be named
-/// e.g. `cache.bin` passes the allowlist gate on the link name (`png`) but
-/// would be served with whatever `mime_for_ext("bin")` (i.e. the catch-all
+/// for example `cache.bin` passes the allowlist gate on the link name (`png`) but
+/// would be served with whatever `mime_for_ext("bin")` (that is the catch-all
 /// below) returns for the target — matching the original's own behavior
 /// in that same edge case, not a new decision made here.
 ///
@@ -323,7 +323,7 @@ async fn build_response<R: tauri::Runtime>(
 /// [`tauri::Builder::register_asynchronous_uri_scheme_protocol`] in
 /// `lib.rs::run()`. Runs on whatever thread wry's platform backend calls a
 /// registered async protocol handler on (its own docs: "here you can use a
-/// tokio task, thread pool or anything… e.g. downloading files" —
+/// tokio task, thread pool or anything… for example downloading files" —
 /// `UriSchemeResponder`/`RequestAsyncResponder` is explicitly `Send` for
 /// exactly this) — so, like every other async entry point in this crate,
 /// the real work happens inside a spawned task, and this function itself

@@ -22,12 +22,12 @@ use tauri::State;
 
 use crate::{confine, lock_gate, state::AppState};
 
-/// Extensions `doc_read_bytes` will serve bytes for — exactly the set
+/// Extensions `doc_read_bytes` serves bytes for — exactly the set
 /// `index.js`'s `doc:read` handler recognized before handing off to
 /// mammoth/SheetJS (`.docx` -> mammoth, `.xlsx`/`.xls` -> SheetJS,
 /// anything else -> `throw new Error('No viewer for ' + ext)`). Deliberately
 /// NOT widened to `TOME_SERVE_EXT` (the wider allowlist the not-yet-ported
-/// `tome://` protocol handler will use for images/pdf/text/source — see the
+/// `tome://` protocol handler uses for images/pdf/text/source — see the
 /// plan's "tome: protocol" bullet, Phase 6, not this slice): this command
 /// has exactly one caller today (the renderer's docx/xlsx viewer), and a
 /// generic confined "fetch me any file's bytes" primitive would be a wider

@@ -544,7 +544,7 @@ fn list_panes_merges_the_renderer_snapshot_with_registered_meta() {
     let (env, _sent, _logged) = fake_env();
     c.set_panes(json!([{ "id": "p1", "title": "one" }, { "id": "p2", "title": "two" }]));
     c.register("p1", "claude", "/work", true);
-    // p2 stays unregistered (e.g. a chat/brain pane) — passed through as-is.
+    // p2 stays unregistered (for example a chat/brain pane) — passed through as-is.
     let out = run_tool(&c, &env, "list_panes", &json!({}), "chat-1");
     let rows: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(rows[0]["kind"], json!("claude"));

@@ -26,7 +26,7 @@
 //! ## Storage-path-agnostic by design
 //! [`AuthLock::load`] takes a directory, not a hardcoded Tauri path,
 //! mirroring `initAuth(userData)`'s parameter exactly — the integrator
-//! wires it to `app_data_dir()` (or any other directory, e.g. a temp dir in
+//! wires it to `app_data_dir()` (or any other directory, for example a temp dir in
 //! tests) without this file needing to know Tauri exists.
 //!
 //! ## Secret-at-rest: why tests never touch the real OS keychain
@@ -113,7 +113,7 @@ const KEYRING_ACCOUNT: &str = "totp";
 // scrypt at default cost is tens of milliseconds — a speed bump, not a
 // wall, against IPC-speed brute force. Back off exponentially after
 // repeated failures (5th failure -> 30s, doubling each failure after,
-// capped at 30 minutes), per purpose, so e.g. the lock screen and a single
+// capped at 30 minutes), per purpose, so the lock screen and a single
 // pane's unlock throttle independently. Success resets the counter. Ported
 // as-is from `authlock.js`'s `attempts` map.
 const BACKOFF_AFTER: u32 = 5;

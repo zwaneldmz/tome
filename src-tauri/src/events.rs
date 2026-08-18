@@ -185,7 +185,7 @@ pub fn log_event<K: Into<String>>(
 }
 
 /// Lower-level half of [`log_event`]: takes an already-built
-/// [`EventRecord`] (from `eventlog::make_event`, e.g. with an injected `ts`)
+/// [`EventRecord`] (from `eventlog::make_event`, for example with an injected `ts`)
 /// rather than building one from `kind`/`fields`. Fires the disk append off
 /// on a background thread (never awaited — see the module doc comment for
 /// why a plain thread rather than `spawn_blocking`), pushes

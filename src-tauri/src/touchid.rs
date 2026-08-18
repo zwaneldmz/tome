@@ -94,7 +94,7 @@ pub async fn prompt() -> Result<(), String> {
                         .unwrap_or_else(|| "Touch ID failed.".to_string());
                     Err(msg)
                 };
-                // If the receiver hung up (caller dropped the future — e.g.
+                // If the receiver hung up (caller dropped the future — for example
                 // the app is quitting), dropping the send is the right move:
                 // the prompt outcome no longer has anyone to report to.
                 let _ = tx.send(result);

@@ -289,8 +289,8 @@ async fn build_agent_env(
 }
 
 /// Builds the real [`RunnerEnv`] `run_cmd::run` drives `start_run`
-/// through. `flow_path` is the exact string `start_run` itself will be
-/// called with — [`tome_flow::flow::model::flow_root`] derives this run's
+/// through. `flow_path` is the exact string `start_run` itself is called
+/// with — [`tome_flow::flow::model::flow_root`] derives this run's
 /// confinement root from it once, up front, the same way `start_run`
 /// derives its own internal `root` from that identical string.
 pub fn build(flow_path: &str, config_dir: PathBuf, state_dir: PathBuf) -> RunnerEnv {

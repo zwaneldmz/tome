@@ -198,7 +198,7 @@ fn validate_one(value: &Value) -> Result<String, String> {
         return Err("bare * matches every host".to_string());
     }
     // The last label is the effective TLD: wildcarding it (`*.com`, `*.*`)
-    // matches whole TLDs, i.e. a large slice of the internet.
+    // matches whole TLDs, that is a large slice of the internet.
     if labels.last() == Some(&"*") {
         return Err("wildcard TLD matches whole slices of the internet".to_string());
     }

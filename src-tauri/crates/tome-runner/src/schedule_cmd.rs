@@ -49,7 +49,7 @@ pub fn unit_stem(flow_path: &Path) -> String {
         })
         .collect();
     // Not just "is empty" — a name that sanitizes to nothing BUT
-    // underscores (e.g. "***.flow.json") is just as unhelpful in
+    // underscores (for example "***.flow.json") is just as unhelpful in
     // `systemctl list-timers` as a literally empty one; "flow" is a
     // clearer unit name than "___" in both cases.
     if sanitized.chars().any(|c| c.is_ascii_alphanumeric()) {

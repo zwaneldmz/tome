@@ -17,7 +17,7 @@ use crate::{confine, lock_gate, state::AppState};
 /// `shell_open_path` below is the only command in this file that needs the
 /// message, so a local copy is the smaller footprint. Worth folding into
 /// `confine.rs` proper later, since `index.js`'s `tome://` protocol handler
-/// (a different, not-yet-ported command) will want the identical text.
+/// (a different, not-yet-ported command) wants the identical text.
 fn confinement_error(what: &str, folders_synced: bool) -> String {
     if folders_synced {
         format!("{what}: path is outside the open workspace folders")

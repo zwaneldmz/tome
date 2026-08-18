@@ -1,5 +1,5 @@
 //! PTY core (Phase 2, slice P1): the spawn/read/batch/write/resize/kill
-//! mechanism every pane will eventually use. Ports the mechanism half of
+//! mechanism every pane uses. Ports the mechanism half of
 //! `src/main/index.js`'s `pty:*` handlers — the 4ms/64KB output batcher
 //! (`queuePtyData`/`flushPtyData`, lines 62-86) verbatim, and the
 //! `pty:write`/`pty:resize`/`pty:kill` handlers (lines 788-797) for real.
@@ -41,7 +41,7 @@
 //! portable-pty's own Unix `Read` impl already folds the EIO-on-hangup
 //! quirk into `Ok(0)` (see that crate's `unix.rs`), so `Ok(0)` is the only
 //! "this pty session is over" signal this module needs to recognize. That
-//! happens once the slave side has no more open references ANYWHERE — i.e.
+//! happens once the slave side has no more open references ANYWHERE — that is
 //! once the child (and anything that inherited its fds) has fully exited,
 //! whether it exited on its own or was just killed. So `reader_loop` is
 //! also the ONLY place that calls `child.wait()` and the ONLY place that
@@ -124,7 +124,7 @@ pub struct TerminalOpts {
     /// The renderer-generated pane id — becomes the `id` field of every
     /// `pty:data`/`pty:exit` message this pane produces.
     pub id: String,
-    /// Absolute path to the login shell, e.g. `index.js`'s
+    /// Absolute path to the login shell, for example `index.js`'s
     /// `const SHELL = process.env.SHELL || '/bin/zsh'` (line 138 — not this
     /// module's job to read that env var; the caller resolves it).
     pub shell: String,
@@ -168,7 +168,7 @@ struct PaneHandle {
     /// for this pane id is still the one it inserted — see `spawn_raw`'s
     /// doc comment on duplicate ids for the ABA race this closes.
     seq: u64,
-    /// Retained for a future slice's clean-shutdown path (e.g. the quit
+    /// Retained for a future slice's clean-shutdown path (for example the quit
     /// handshake enumerating every live pane and awaiting its teardown,
     /// mirroring index.js's `window-all-closed` doing
     /// `for (const p of ptys.values()) p.kill()`) — neither task is
@@ -531,7 +531,7 @@ fn build_terminal_command(opts: &TerminalOpts) -> CommandBuilder {
 /// race on two independent tasks with no inherent ordering, unlike the
 /// Electron original where `flushPtyData(id)` and the `pty:exit` send sit
 /// in the same synchronous callback (`p.onExit`) and JS's single-threaded
-/// event loop settles the ordering for free. A fast-exiting process (e.g.
+/// event loop settles the ordering for free. A fast-exiting process (for example
 /// `printf hi`) makes this a real, not theoretical, race: reader_loop can
 /// reach this point before the batcher's own `PTY_FLUSH_MS` timer has even
 /// fired.
@@ -921,7 +921,7 @@ mod tests {
     #[test]
     fn terminal_command_env_is_exactly_what_was_given_not_merged_with_this_process() {
         // Seed a known value into THIS process's env first, so the leak-check
-        // below stays meaningful even on a minimal CI container (e.g. fedora)
+        // below stays meaningful even on a minimal CI container (for example fedora)
         // that sets neither USER nor LOGNAME.
         std::env::set_var("USER", "tome-test-user");
         let cmd = build_terminal_command(&opts(vec![("PATH", "/usr/bin"), ("HOME", "/home/x")]));

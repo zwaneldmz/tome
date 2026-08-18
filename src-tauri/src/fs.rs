@@ -54,7 +54,7 @@ fn fmt_io_err(err: &std::io::Error, path: &str) -> String {
 /// `.sort((a, b) => b.dir - a.dir || a.name.localeCompare(b.name))`). The
 /// `localeCompare` half is approximated by folding ASCII case before
 /// comparing (`['Banana.txt','apple.txt','Zebra.txt'].sort(localeCompare)`
-/// interleaves case, e.g. `apple, Banana, Zebra` — plain ordinal `str`
+/// interleaves case, for example `apple, Banana, Zebra` — plain ordinal `str`
 /// ordering instead sorts every uppercase-initial name before every
 /// lowercase one, a directly user-visible divergence on any real,
 /// typically-mixed-case project tree). This is still not full locale
@@ -62,7 +62,7 @@ fn fmt_io_err(err: &std::io::Error, path: &str) -> String {
 /// ("file2" vs "file10") ordering can still diverge from `localeCompare`'s
 /// default-locale behavior — matching that exactly needs an ICU-backed
 /// collation crate this slice isn't scoped to add. Ties after case-folding
-/// (e.g. two entries differing only in case) fall back to ordinal
+/// (for example two entries differing only in case) fall back to ordinal
 /// comparison so the order is deterministic rather than dependent on
 /// whatever order the OS's `readdir` happened to return.
 pub async fn read_dir(dir: &str) -> Result<Value, String> {
@@ -186,7 +186,7 @@ where
         if matches!(result, Ok(events) if !events.is_empty()) {
             on_change();
         }
-        // A watch-backend error (e.g. the watched file got removed out
+        // A watch-backend error (for example the watched file got removed out
         // from under it) is swallowed here exactly like index.js's
         // `watcher.on('error', () => {})` — never surfaced to the renderer.
     };

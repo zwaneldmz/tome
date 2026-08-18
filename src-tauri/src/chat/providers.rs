@@ -14,7 +14,7 @@
 //! sidesteps only because vitest's single-threaded-per-file model
 //! serializes access to `process.env` in a way Rust's test runner does not;
 //! (2) it matches this crate's own established idiom for porting a JS
-//! function that reads ambient state (see e.g. `login_env::
+//! function that reads ambient state (see for example `login_env::
 //! default_shell_for_platform` taking `os: &str` instead of reading
 //! `std::env::consts::OS`, or `ipc::pty::pane_env` taking `process_env: &
 //! HashMap<String, String>`). The impure shell — gathering `std::env::

@@ -26,7 +26,7 @@
 //! Rust struct — deliberately: the whole point of this module is that the
 //! store's bytes are untrusted JSON of unknown shape (a hand edit, an
 //! older build, a compromised pre-login write), so a caller cannot
-//! type-check its way past this door the way it could for e.g.
+//! type-check its way past this door the way it could for for example
 //! `agent_spawn::build_agent_spawn_from`'s `model: Option<&str>` — there
 //! the underlying value genuinely cannot be anything but a string once it
 //! survives Tauri's own IPC deserialization, but here the "string" the

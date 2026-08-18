@@ -24,7 +24,7 @@
 //! otherwise be the obvious thing to reuse for the provenance fields
 //! below. The plan is explicit that this module moves into its own
 //! extracted crate once the products pipeline stabilizes, at which point
-//! `crate::git` simply will not exist on the other side of that boundary —
+//! `crate::git` simply does not exist on the other side of that boundary —
 //! so [`git_exec`] is a small, self-contained duplicate of `git.rs`'s own
 //! `git()` idiom (argv array, `-C <dir>`, 10s timeout, `kill_on_drop`), not
 //! a reuse of it, the same "duplicate rather than reach into a file this

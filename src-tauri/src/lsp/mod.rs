@@ -147,7 +147,7 @@ const LANG_BY_EXT: &[(&str, &str)] = &[
 /// on a path with no dot at all still yields the whole string as its sole
 /// element (`.pop()` returns it) — matched here by `rsplit('.').next()`,
 /// which has the same no-separator behavior; an empty result (a path
-/// ending in `.`, e.g. `"file."`) is falsy in the JS original (`ext &&
+/// ending in `.`, for example `"file."`) is falsy in the JS original (`ext &&
 /// ...`) and is handled the same way here.
 pub fn language_id_for(path: &str) -> Option<&'static str> {
     let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
@@ -837,7 +837,7 @@ async fn server_of(
         }
         Err(_) => {
             drop(guard);
-            // treat a server that will not start as absent: report once,
+            // treat a server that does not start as absent: report once,
             // then stay quiet — matches `catch { ...; if (!missing.has(mark))
             // { missing.add(mark); notifyMissing(...) } return null }`.
             if should_report_missing(

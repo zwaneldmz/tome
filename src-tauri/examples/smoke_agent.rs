@@ -144,7 +144,7 @@ async fn main() {
     // the BEGIN marker text) on the input line, so splitting on BEGIN
     // matches the echo, not the result block. The result block is the
     // text between the LAST occurrence of BEGIN before END and END
-    // itself — i.e. everything END is immediately preceded by.
+    // itself — that is everything END is immediately preceded by.
     let scrape = |output: &Arc<Mutex<String>>, n: usize| -> String {
         let snap = output.lock().unwrap().clone();
         let end = format!("PROBE{n}-RESULT-END");
