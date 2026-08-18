@@ -376,7 +376,10 @@ static SESSION: std::sync::Mutex<Option<Session>> = std::sync::Mutex::new(None);
 /// Pure helper: little-endian i16 mono samples → f32 (÷ 32768). The odd
 /// trailing byte of a chunk with an incomplete final sample is dropped by
 /// `chunks_exact(2)`; empty input → empty output. No clamp — int16 is
-/// already within [-1, 1].
+/// already within [-1, 1]. Off macOS its only caller is the cross-platform
+/// test suite (the streaming worker it feeds is `#[cfg(target_os =
+/// "macos")]`), so a non-macOS non-test build would see it as dead code.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn pcm16_to_f32(bytes: &[u8]) -> Vec<f32> {
     bytes
         .chunks_exact(2)
