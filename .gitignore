@@ -25,7 +25,6 @@ docs/*
 !docs/tour-*.png
 !docs/flow-creation-poster.png
 !docs/flow-creation.mp4
-!docs/COUNCIL-FINDINGS-PLAN.md
 !docs/THREATMODEL.md
 !docs/perf.md
 !docs/LINUX-LANDLOCK-DESIGN.md
