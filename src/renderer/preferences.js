@@ -913,21 +913,90 @@ export async function preferencesModal() {
   // ---------- voice ----------
   // Whisper availability + the launch warm-up opt-in the onboarding wizard's
   // Voice step writes — both surfaces use the same store key and the same
-  // stt:status probe, so they can never disagree.
+  // stt:status probe, so they can never disagree. The speech-engine select
+  // below resolves to Apple's on-device recognizer or whisper.cpp through
+  // the same resolution, so the hint can never claim an engine the probe
+  // didn't pick.
   const voice = el('section', 'prefs-section')
   voice.append(el('h4', '', 'Voice'))
-  const sttStatus = el('div', 'prefs-hint', 'Checking local whisper…')
-  voice.appendChild(sttStatus)
+  const sttStatus = el('div', 'prefs-hint', 'Checking local speech…')
+  // Task 5: one-click model download, shown only when whisper is the resolved
+  // engine and the model (not the binary) is what's missing — the binary
+  // still needs `brew install whisper-cpp` first, which no in-app button can
+  // do for the user.
+  const downloadBtn = el('button', 'ag-btn ghost', 'Download speech model')
+  downloadBtn.type = 'button'
+  downloadBtn.hidden = true
+  const statusRow = el('div', 'prefs-inline')
+  statusRow.append(sttStatus, downloadBtn)
+  voice.appendChild(statusRow)
+  const paintStatus = (s) => {
+    if (s.engine === 'apple') {
+      sttStatus.textContent = s.ready ? 'Apple on-device dictation — ready.' : s.why
+      downloadBtn.hidden = true
+    } else if (s.ready) {
+      sttStatus.textContent = 'Local whisper transcription is ready.'
+      downloadBtn.hidden = true
+    } else if (!s.bin) {
+      sttStatus.textContent = 'whisper-cli not found — install it (brew install whisper-cpp) and restart.'
+      downloadBtn.hidden = true
+    } else {
+      sttStatus.textContent = 'Speech model not downloaded.'
+      downloadBtn.hidden = false
+    }
+  }
+  downloadBtn.addEventListener('click', async () => {
+    downloadBtn.disabled = true
+    downloadBtn.textContent = 'Downloading…'
+    try {
+      const res = await tome.stt.downloadModel()
+      if (res?.error) {
+        sttStatus.textContent = res.error
+      } else {
+        sttStatus.textContent = 'Speech model downloaded.'
+        const s = await tome.stt.status().catch(() => null)
+        if (s) paintStatus(s)
+      }
+    } catch (err) {
+      sttStatus.textContent = err?.message || 'Download failed.'
+    } finally {
+      downloadBtn.disabled = false
+      downloadBtn.textContent = 'Download speech model'
+    }
+  })
   tome.stt
     .status()
-    .then((s) => {
-      sttStatus.textContent = s.ready
-        ? 'Local whisper transcription is ready.'
-        : !s.bin
-          ? 'whisper-cli not found — install it (brew install whisper-cpp) and restart.'
-          : 'Speech model missing — the push-to-talk error message carries the one-time download command.'
-    })
+    .then(paintStatus)
     .catch(() => (sttStatus.textContent = 'Whisper status unavailable.'))
+
+  const engineSelect = el('select')
+  for (const [value, label] of [
+    ['auto', 'Auto'],
+    ['apple', 'Apple on-device'],
+    ['whisper', 'whisper.cpp'],
+  ]) {
+    const opt = el('option', null, label)
+    opt.value = value
+    engineSelect.appendChild(opt)
+  }
+  // Restore the select from stt:engine's normalized `preference` field, not
+  // the raw store key — a never-set/cleared key normalizes to "auto" on both
+  // sides, so this never has to guess what a missing key means.
+  const engineInfo = await tome.stt.engine().catch(() => null)
+  engineSelect.value = engineInfo?.preference || 'auto'
+  engineSelect.addEventListener('change', () => {
+    tome.store.set('stt-engine', engineSelect.value)
+    tome.stt
+      .status()
+      .then(paintStatus)
+      .catch(() => (sttStatus.textContent = 'Whisper status unavailable.'))
+  })
+  row(
+    voice,
+    'Speech engine',
+    engineSelect,
+    'Apple uses on-device dictation; whisper.cpp needs the local CLI and model'
+  )
   toggleRow(
     voice,
     'Warm up whisper at launch',

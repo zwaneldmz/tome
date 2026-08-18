@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Tome transcribes your voice locally so you can talk to the assistant.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Tome uses the microphone for voice chat and dictation.</string>
+</dict>
+</plist>

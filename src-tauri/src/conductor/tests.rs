@@ -833,6 +833,31 @@ fn gate_question_returns_the_answer_value() {
     assert_eq!(out, "the-answer");
 }
 
+// ================= voice persona =================
+
+#[test]
+fn voice_prompt_text_marks_the_voice_assistant_persona() {
+    let text = tools::voice_prompt_text(&["claude".to_string()]);
+    assert!(!text.is_empty());
+    assert!(
+        text.contains("voice assistant"),
+        "voice prompt must identify the voice assistant: {text}"
+    );
+    assert!(
+        text.contains("read aloud"),
+        "voice prompt must mention the reply is read aloud: {text}"
+    );
+}
+
+#[test]
+fn voice_system_prompt_matches_voice_prompt_text_for_the_default_agents() {
+    let c = Conductor::new();
+    assert_eq!(
+        c.voice_system_prompt(),
+        tools::voice_prompt_text(&c.agent_ids())
+    );
+}
+
 // ================= strip_ansi / strip_control_chars =================
 // Ports test/conductor.test.js in full.
 

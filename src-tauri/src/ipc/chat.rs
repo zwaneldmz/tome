@@ -235,6 +235,7 @@ pub(crate) async fn complete_once(
 /// for the provider-resolution/tool-loop split with `conductor::chat`.
 #[tauri::command]
 #[allow(unused_variables)] // brain_ws: accepted for wire-shape completeness, unused this phase — see module doc comment
+#[allow(clippy::too_many_arguments)] // kept flat for consistency with the existing verbose/gate args; a struct arg would deserialize fine but is churn mid-contract
 pub async fn chat_send(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -243,12 +244,15 @@ pub async fn chat_send(
     brain_ws: Option<String>,
     verbose: Option<bool>,
     gate: Option<bool>,
+    voice: Option<bool>,
 ) -> Result<Value, String> {
     lock_gate::guard(&state, "chat:send")?;
-    // Backward-compatible: the renderer lands the `verbose`/`gate` flags in
-    // later slices; absent means the default (non-mentor) persona / gate on.
+    // Backward-compatible: the renderer lands the `verbose`/`gate`/`voice`
+    // flags in later slices; absent means the default (non-mentor) persona /
+    // gate on / non-voice session.
     let verbose = verbose.unwrap_or(false);
     let gate = gate.unwrap_or(true);
+    let voice = voice.unwrap_or(false);
 
     let (provider, betas, fallbacks) = match resolve_chat(&app, &state).await {
         Ok(r) => r,
@@ -262,9 +266,12 @@ pub async fn chat_send(
     // is not yet ported (see module doc comment); system is conductor's own
     // prompt alone, exactly the fallback `run_chat` would apply itself, made
     // explicit here to mirror index.js's `let system = conductor.SYSTEM`
-    // assignment site. `verbose: true` swaps in the mentor (teaching)
-    // persona — `conductor.mentor_system_prompt(gate)` — instead.
-    let system = if verbose {
+    // assignment site. `voice: true` swaps in the voice-session persona
+    // (`conductor.voice_system_prompt()`); `verbose: true` the mentor
+    // (teaching) persona (`conductor.mentor_system_prompt(gate)`).
+    let system = if voice {
+        state.conductor.voice_system_prompt()
+    } else if verbose {
         state.conductor.mentor_system_prompt(gate)
     } else {
         state.conductor.system_prompt()

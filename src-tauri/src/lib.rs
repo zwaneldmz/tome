@@ -46,6 +46,7 @@ mod remote;
 mod review;
 mod schedule;
 mod skills;
+mod speech;
 mod state;
 mod store;
 mod store_keys;
@@ -434,9 +435,15 @@ pub fn run() {
             ipc::remote::remote_runs,
             ipc::remote::remote_run_detail,
             // stt
+            ipc::stt::stt_engine,
             ipc::stt::stt_transcribe,
             ipc::stt::stt_warmup,
             ipc::stt::stt_status,
+            ipc::stt::stt_download_model,
+            ipc::stt::stt_begin,
+            ipc::stt::stt_append,
+            ipc::stt::stt_finish,
+            ipc::stt::stt_cancel,
             // chat
             ipc::chat::chat_send,
             ipc::chat::chat_abort,

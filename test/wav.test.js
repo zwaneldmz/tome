@@ -2,7 +2,7 @@
 // little-endian int16 scaling, and the clamp that keeps an overshooting
 // sample from wrapping into a full-scale click.
 import { describe, it, expect } from 'vitest'
-import { encodeWav } from '../src/shared/wav.js'
+import { encodeWav, floatToPcm16 } from '../src/shared/wav.js'
 
 const bytes = (buf, off, len) => new Uint8Array(buf, off, len)
 const tag = (buf, off) => String.fromCharCode(...bytes(buf, off, 4))
@@ -42,5 +42,27 @@ describe('encodeWav', () => {
     const v = new DataView(encodeWav(new Float32Array(0), 44100))
     expect(v.getUint32(24, true)).toBe(44100)
     expect(v.getUint32(28, true)).toBe(88200)
+  })
+})
+
+describe('floatToPcm16', () => {
+  it('round-trips known Float32 samples to little-endian int16 bytes', () => {
+    const out = floatToPcm16(new Float32Array([0, 0.5, -1]))
+    const v = new DataView(out.buffer)
+    expect(out.byteLength).toBe(6)
+    expect(v.getInt16(0, true)).toBe(0)
+    expect(v.getInt16(2, true)).toBe(16383) // 0.5 * 0x7fff truncated by setInt16
+    expect(v.getInt16(4, true)).toBe(-0x8000)
+  })
+
+  it('clips samples outside [-1, 1] instead of wrapping', () => {
+    const out = floatToPcm16(new Float32Array([1.5, -2]))
+    const v = new DataView(out.buffer)
+    expect(v.getInt16(0, true)).toBe(0x7fff)
+    expect(v.getInt16(2, true)).toBe(-0x8000)
+  })
+
+  it('returns zero bytes for an empty input', () => {
+    expect(floatToPcm16(new Float32Array(0)).byteLength).toBe(0)
   })
 })

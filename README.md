@@ -88,7 +88,7 @@ flows, notes.
 | **Assistant** | A chat that can also drive the grid — read scrollback, open panes, type into terminals. |
 | **Brain** | A per-workspace markdown note vault with `[[wikilinks]]`, backlinks, and a graph view. |
 | **Git** | Branch chip, live `+ ~ −` / `↑↓` counters, and a commit **History** pane. |
-| **Voice** | Push-to-talk, transcribed locally by whisper.cpp — audio never leaves the machine. |
+| **Voice** | Push-to-talk and hands-free voice chat, transcribed on-device (Apple Speech) with a local whisper.cpp fallback — audio never leaves the machine. |
 
 Drag panes to rearrange, drop one on another to stack them as tabs, tear a
 pane off into its own OS window with `⧉`. Your layout is saved and restored.
@@ -198,11 +198,14 @@ and files, and type into a terminal. Two guardrails:
 - It can **read** a terminal's scrollback only for panes you approve — Tome
   asks before the first read, and contained panes are never readable.
 
-**Voice is fully local.** The `🎙` button records push-to-talk audio and
-transcribes it with a local whisper.cpp sidecar — audio never leaves your
-machine, and the transcript lands in the composer for you to edit and send.
-One-time setup: `brew install whisper-cpp`, then the first click shows the
-exact command to fetch the model file.
+**Voice is fully local.** The topbar 🎤 toggles an ambient hands-free session
+— talk, and the assistant answers aloud. The chat composer's 🎙 is
+push-to-talk. On macOS, voice uses Apple's on-device speech recognition (no
+setup); whisper.cpp remains the offline/air-gap and Linux fallback. Pick the
+engine in Preferences → Voice (Auto / Apple on-device / whisper.cpp). The
+whisper engine needs `brew install whisper-cpp` and a one-click model
+download in Preferences. Audio never leaves the machine (on-device
+recognition).
 
 ## Everything else in the grid
 
@@ -274,7 +277,7 @@ platform-neutral.
 | Terminals | xterm, PTYs owned by the Rust backend |
 | Editor | CodeMirror 6 |
 | Documents | mammoth + SheetJS |
-| Voice | whisper.cpp sidecar (local) |
+| Voice | Apple on-device Speech (default) · whisper.cpp sidecar (fallback, local) |
 | Assistant | Anthropic SDK + OpenAI-compatible providers |
 
 ## Roadmap

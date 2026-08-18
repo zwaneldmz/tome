@@ -1,10 +1,14 @@
 //! Local speech-to-text for push-to-talk: write the renderer's WAV to a
 //! temp file, run the whisper.cpp CLI over it, hand back its
 //! (whitespace-collapsed) stdout. Ports `src/main/lib/stt.js` — see that
-//! file's own doc comment for why this is local-only by design (HANDOFF
-//! §5): audio never leaves the machine, so there is no new egress path or
-//! allowlist host to add, and the transcript is ordinary composer text
-//! once it lands.
+//! file's own doc comment for why *transcription* is local-only by design
+//! (HANDOFF §5): audio never leaves the machine, and the transcript is
+//! ordinary composer text once it lands. The one exception is the Task 5
+//! one-click model download ([`download_model`]): it fetches
+//! `ggml-base.en.bin` from Hugging Face on an explicit user action (the
+//! Settings/onboarding button) — a fixed egress host that bypasses the
+//! pane allowlist the same way the chat provider egress in `ipc::chat`
+//! does, and is never automatic at boot.
 //!
 //! Everything below is a plain function over explicit values (no
 //! `AppHandle`, no Tauri `State`) so it's directly unit-testable — the
@@ -39,6 +43,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const MODEL: &str = "ggml-base.en.bin";
 const MODEL_URL_BASE: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
 
+/// The full HTTPS URL for the one model this build supports — the single
+/// string both `stt:downloadModel` (Task 5) and [`stt_unavailable`]'s curl
+/// hint need, so the two can never drift apart.
+pub fn model_url() -> String {
+    format!("{MODEL_URL_BASE}{MODEL}")
+}
+
 /// Ports `CANDIDATES`: two absolute homebrew homes, then a bare name as
 /// the final, always-accepted fallback. GUI apps on macOS launch with a
 /// PATH that lacks the homebrew prefixes, so a bare `whisper-cli` alone
@@ -53,6 +64,13 @@ const CANDIDATES: &[&str] = &[
 
 pub const NO_BIN: &str =
     "whisper-cli not found. Install it (brew install whisper-cpp) or point TOME_WHISPER_BIN at the binary.";
+
+/// The one message `stt:status`'s `why` field reports when the Apple engine
+/// is selected but unavailable. Kept as a single shared string so the Rust
+/// status shape and every renderer surface that shows the reason (Settings,
+/// onboarding) can never drift apart — the renderer reads this via `why`,
+/// it never hard-codes its own wording.
+pub const APPLE_UNAVAILABLE: &str = "On-device speech recognition is unavailable on this Mac.";
 
 /// `transcribe`'s default hard timeout — ports `timeoutMs = 60_000`.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -149,12 +167,142 @@ pub fn stt_unavailable(bin: Option<&str>, model: &Path) -> Option<String> {
     if !model.exists() {
         let dir = model.parent().unwrap_or_else(|| Path::new(""));
         return Some(format!(
-            "Speech model missing. Download it once:\n  mkdir -p \"{}\" && curl -L -o \"{}\" {MODEL_URL_BASE}{MODEL}",
+            "Speech model missing. Download it once:\n  mkdir -p \"{}\" && curl -L -o \"{}\" {}",
             dir.display(),
             model.display(),
+            model_url(),
         ));
     }
     None
+}
+
+// ---- one-click model download (voice-0.4 Task 5) ----
+//
+// Until Task 5 the only way to obtain the model was the curl command
+// `stt_unavailable` prints. Task 5 adds an explicit-user-action download:
+// `ipc::stt::stt_download_model` resolves the URL + destination path, then
+// calls [`download_model`] here. The download is never automatic — only the
+// Settings/onboarding button triggers it — so there is no silent egress at
+// boot; the URL is a fixed, allowlisted host (Hugging Face's whisper.cpp
+// repo, the same one the curl hint already names).
+
+/// The first four bytes of any whisper.cpp ggml model — `"ggml"`. Checked
+/// before a download is accepted so a proxy error page or redirect-to-HTML
+/// can never be mistaken for the real model.
+const GGML_MAGIC: [u8; 4] = [0x67, 0x67, 0x6d, 0x6c];
+
+/// The floor a valid model must clear. The ggml base.en model is ~140 MB,
+/// but this threshold is deliberately a much lower 1 MB — anything at or
+/// below it is an error page or a truncated download, not a model. The
+/// exact size isn't pinned here, so a minor build-to-build size change
+/// never breaks the download.
+const MIN_MODEL_BYTES: u64 = 1_000_000;
+
+/// Pure validation of a fully-buffered model download: the ggml magic header
+/// plus a minimum size. Unit-tested directly; [`download_model`] is the only
+/// caller. This is the v1 integrity guard — the magic + size check catches an
+/// error page or a truncated download without pinning a hash. It should be
+/// replaced by a SHA-256 pin of the exact model build once that hash is
+/// captured, but no guessed hash is hardcoded in the meantime.
+fn validate_model_bytes(data: &[u8]) -> Result<(), &'static str> {
+    if data.len() as u64 <= MIN_MODEL_BYTES {
+        return Err("Downloaded file is not a valid speech model (too small).");
+    }
+    if data.len() < GGML_MAGIC.len() || data[..GGML_MAGIC.len()] != GGML_MAGIC {
+        return Err("missing ggml magic header");
+    }
+    Ok(())
+}
+
+/// `<dest>` with a `.part` suffix — the write target [`write_model_atomic`]
+/// writes into before the final rename, so a crash mid-download can never
+/// leave a half-written file at the real model path.
+fn part_path(dest: &Path) -> PathBuf {
+    let mut os = dest.as_os_str().to_os_string();
+    os.push(".part");
+    PathBuf::from(os)
+}
+
+/// Writes `bytes` to `<dest>.part` then renames it onto `dest` — atomic-ish
+/// (a half-written model is never visible at `dest`, and `ggml-base.en.bin`
+/// either exists complete or not at all). The `.part` is removed on either
+/// failure, matching the "clean up the `.part`" guarantee `download_model`
+/// documents for every error path.
+async fn write_model_atomic(bytes: &[u8], dest: &Path) -> Result<u64, String> {
+    if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| format!("Could not create the model folder: {e}"))?;
+    }
+    let part = part_path(dest);
+    if let Err(e) = tokio::fs::write(&part, bytes).await {
+        let _ = tokio::fs::remove_file(&part).await;
+        return Err(format!("Could not save the model: {e}"));
+    }
+    if let Err(e) = tokio::fs::rename(&part, dest).await {
+        let _ = tokio::fs::remove_file(&part).await;
+        return Err(format!("Could not finalize the model download: {e}"));
+    }
+    Ok(bytes.len() as u64)
+}
+
+/// `download_model`'s per-request timeout. The model is ~140 MB, so a slow
+/// connection needs real headroom; the cap exists only so a stalled
+/// connection can't leave the Settings/onboarding button stuck in
+/// "Downloading…" forever. Applied to THIS request via
+/// `.timeout(...)` on the builder — deliberately NOT set on the shared
+/// `http_client()`, whose chat traffic must not inherit a download-sized
+/// limit (or any limit a 300 s download would force on a streaming turn).
+const MODEL_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// One-shot model download: accumulates the response body into memory,
+/// validates it, then commits it to `dest` atomically. Takes the resolved
+/// URL + destination path (no `AppHandle`); `client` is the shared
+/// `reqwest::Client` handed in by the caller (`ipc::stt` passes
+/// `ipc::chat::http_client()`), so this stays a pure, directly-testable
+/// function — a cycle into `ipc` is avoided by threading the client in rather
+/// than reaching across module boundaries.
+///
+/// Returns the byte count on success; on any failure returns a friendly
+/// `Err(String)` and leaves no `.part` (and no `dest`) behind.
+pub async fn download_model(
+    client: &reqwest::Client,
+    model_url: &str,
+    dest: &Path,
+) -> Result<u64, String> {
+    let resp = client
+        .get(model_url)
+        .timeout(MODEL_DOWNLOAD_TIMEOUT)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "Model download timed out.".to_string()
+            } else {
+                format!("Model download failed — could not reach the model server ({e}).")
+            }
+        })?;
+    if !resp.status().is_success() {
+        return Err(format!("Model download failed (HTTP {}).", resp.status()));
+    }
+
+    let mut buf = Vec::new();
+    let mut stream = resp.bytes_stream();
+    use futures_util::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| {
+            if e.is_timeout() {
+                "Model download timed out.".to_string()
+            } else {
+                format!("Model download failed — the connection was interrupted ({e}).")
+            }
+        })?;
+        buf.extend_from_slice(&chunk);
+    }
+    validate_model_bytes(&buf)
+        .map_err(|_| "Downloaded file is not a valid speech model.".to_string())?;
+
+    write_model_atomic(&buf, dest).await
 }
 
 /// One `transcribe()` call's inputs — ports the JS original's
@@ -286,6 +434,45 @@ fn silence_wav(n_samples: u32, sample_rate: u32) -> Vec<u8> {
 /// magic numbers.
 pub fn warmup_silence() -> Vec<u8> {
     silence_wav(1_600, 16_000)
+}
+
+// ---- engine abstraction (voice-0.4 Task 1) ----
+//
+// Until Task 1 this module only knew about whisper.cpp. Task 1 introduced
+// the engine *surface* behind which Apple's on-device recognizer (Task 2,
+// `objc2-speech`, now live in `crate::speech`) and whisper.cpp both sit: an
+// `Engine` the resolver [`engine_kind`] picks from the `stt-engine`
+// preference. The Apple transcription path and its availability probe live
+// in `crate::speech`; this module only owns the choice.
+
+/// Which speech-to-text engine a resolved preference selects.
+#[derive(PartialEq, Eq, Debug)]
+pub enum Engine {
+    Apple,
+    Whisper,
+}
+
+impl Engine {
+    /// Wire name the renderer reads (`"apple"` / `"whisper"`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Engine::Apple => "apple",
+            Engine::Whisper => "whisper",
+        }
+    }
+}
+
+/// Resolves the `stt-engine` preference to a concrete engine. An explicit
+/// `"apple"`/`"whisper"` wins outright regardless of availability; anything
+/// else (including `"auto"` and the default `""`) prefers Apple when
+/// available and falls back to whisper otherwise.
+pub fn engine_kind(preference: &str, apple_available: bool) -> Engine {
+    match preference {
+        "apple" => Engine::Apple,
+        "whisper" => Engine::Whisper,
+        _ if apple_available => Engine::Apple,
+        _ => Engine::Whisper,
+    }
 }
 
 #[cfg(test)]
@@ -438,6 +625,106 @@ mod tests {
         assert!(!model_exists(Path::new("/nope/model.bin")));
     }
 
+    // ---- model download (Task 5) — validate_model_bytes is pure; the
+    // download/atomic-write helpers are exercised without any network by
+    // driving their failure paths directly.
+
+    fn fake_model() -> Vec<u8> {
+        let mut buf = Vec::with_capacity(MIN_MODEL_BYTES as usize + 1);
+        buf.extend_from_slice(&GGML_MAGIC);
+        buf.resize(MIN_MODEL_BYTES as usize + 1, 0);
+        buf
+    }
+
+    #[test]
+    fn validate_model_bytes_accepts_a_ggml_model_over_the_min_size() {
+        assert_eq!(validate_model_bytes(&fake_model()), Ok(()));
+    }
+
+    #[test]
+    fn validate_model_bytes_rejects_a_file_at_or_below_the_min_size() {
+        let mut too_small = vec![0u8; MIN_MODEL_BYTES as usize];
+        too_small[..4].copy_from_slice(&GGML_MAGIC);
+        assert_eq!(
+            validate_model_bytes(&too_small),
+            Err("Downloaded file is not a valid speech model (too small).")
+        );
+    }
+
+    #[test]
+    fn validate_model_bytes_rejects_a_wrong_magic_header() {
+        let mut wrong = fake_model();
+        wrong[0] = 0x00;
+        assert_eq!(
+            validate_model_bytes(&wrong),
+            Err("missing ggml magic header")
+        );
+    }
+
+    #[test]
+    fn validate_model_bytes_rejects_an_empty_buffer() {
+        assert_eq!(
+            validate_model_bytes(&[]),
+            Err("Downloaded file is not a valid speech model (too small).")
+        );
+    }
+
+    #[test]
+    fn part_path_appends_the_part_suffix() {
+        assert_eq!(
+            part_path(Path::new("/ud/models/ggml-base.en.bin")),
+            PathBuf::from("/ud/models/ggml-base.en.bin.part")
+        );
+    }
+
+    #[tokio::test]
+    async fn write_model_atomic_removes_the_part_on_a_failed_rename() {
+        let tmp = tempfile::tempdir().unwrap();
+        // `dest` is an existing directory, so the rename of a file onto it
+        // fails (EISDIR/ENOTEMPTY on Unix) — a deterministic, non-network
+        // way to drive the failure path and its `.part` cleanup.
+        let dest = tmp.path().join("models");
+        std::fs::create_dir(&dest).unwrap();
+        let part = part_path(&dest);
+
+        let err = write_model_atomic(&fake_model(), &dest).await.unwrap_err();
+        assert!(err.starts_with("Could not finalize"), "{err}");
+        assert!(!part.exists(), "the .part file must be cleaned up");
+    }
+
+    #[tokio::test]
+    async fn write_model_atomic_writes_and_renames_into_place() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("models").join("ggml-base.en.bin");
+        let bytes = fake_model();
+
+        let n = write_model_atomic(&bytes, &dest).await.unwrap();
+        assert_eq!(n, bytes.len() as u64);
+        assert_eq!(std::fs::read(&dest).unwrap(), bytes);
+        assert!(
+            !part_path(&dest).exists(),
+            "no .part should remain on success"
+        );
+    }
+
+    #[tokio::test]
+    async fn download_model_rejects_a_bad_url_and_leaves_no_part() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("models").join("ggml-base.en.bin");
+        let client = reqwest::Client::new();
+        // "not a URL" fails URL parsing before any socket is touched — a
+        // non-network error path that must still leave no `.part` behind.
+        let err = download_model(&client, "not a url", &dest)
+            .await
+            .unwrap_err();
+        assert!(err.starts_with("Model download failed"), "{err}");
+        assert!(
+            !part_path(&dest).exists(),
+            "no .part should remain on error"
+        );
+        assert!(!dest.exists(), "no model should exist on error");
+    }
+
     // ---- transcribe() — arg order, stdout collapsing, temp-file cleanup ----
     //
     // /bin/echo stands in for whisper-cli: its output IS its argv, which
@@ -533,6 +820,38 @@ mod tests {
     #[test]
     fn warmup_silence_is_1600_samples_at_16khz() {
         assert_eq!(warmup_silence().len(), 44 + 1_600 * 2);
+    }
+
+    // ---- engine_kind() / Engine ----
+
+    #[test]
+    fn engine_as_str_matches_the_wire_names() {
+        assert_eq!(Engine::Apple.as_str(), "apple");
+        assert_eq!(Engine::Whisper.as_str(), "whisper");
+    }
+
+    #[test]
+    fn engine_kind_auto_prefers_apple_when_available() {
+        assert_eq!(engine_kind("auto", true), Engine::Apple);
+    }
+
+    #[test]
+    fn engine_kind_auto_falls_back_to_whisper_when_apple_is_not_available() {
+        assert_eq!(engine_kind("auto", false), Engine::Whisper);
+    }
+
+    #[test]
+    fn engine_kind_explicit_preference_wins_regardless_of_availability() {
+        assert_eq!(engine_kind("apple", false), Engine::Apple);
+        assert_eq!(engine_kind("whisper", true), Engine::Whisper);
+    }
+
+    #[test]
+    fn engine_kind_treats_unknown_or_empty_preference_as_auto() {
+        assert_eq!(engine_kind("", true), Engine::Apple);
+        assert_eq!(engine_kind("", false), Engine::Whisper);
+        assert_eq!(engine_kind("bogus", true), Engine::Apple);
+        assert_eq!(engine_kind("bogus", false), Engine::Whisper);
     }
 
     // ---- real whisper-cli smoke (opt-in, not run by the normal gate) ----

@@ -20,8 +20,9 @@ import { floatingMenu, menuItem, menuLabel, menuRule } from './menus.js'
 import { preferencesModal } from './preferences.js'
 import { micIcon } from './icons.js'
 import { loadHistory, persistHistory, flushHistory } from './chat-history.js'
-import { encodeWav } from '../shared/wav.js'
+import { encodeWav, floatToPcm16 } from '../shared/wav.js'
 import { makeVad } from '../shared/vad.js'
+import { nextSpeakChunk } from '../shared/tts.js'
 import { VOICE_CHAT_ID } from './chat-lifecycle.js'
 
 // Canonical id, per the WS-A contract: the voice session and a chat pane
@@ -43,6 +44,11 @@ let bargeIn = true
 let reply = '' // accumulated deltas of the current assistant turn
 let spokenUpTo = 0 // reply prefix already handed to speechSynthesis
 let speakingNow = false // an utterance is currently playing
+let useApple = false // stream via Apple's on-device recognizer (set in initVoice)
+let streamReady = false // this utterance's streaming session is live (per-utterance)
+let streamedAny = false // at least one chunk actually reached the recognizer this utterance
+let heardSoFar = '' // latest streaming partial, for push-to-talk live-write
+let composerPrefix = '' // composer value before the current utterance began
 
 // State changes are not toasts (they'd spam the notification log), but
 // screen readers still need them — same #sr-live region toast() uses,
@@ -180,16 +186,13 @@ function speak(text) {
   speechSynthesis.speak(u)
 }
 
-// Complete sentences in the not-yet-spoken tail of the reply. Short
-// sentences ride along with the next one — a lone "Yes." is exactly the
-// fragment that makes streamed TTS sound choppy.
-const MIN_SPEAK_CHARS = 24
+// Complete sentences in the not-yet-spoken tail of the reply, sized by
+// nextSpeakChunk (shared/tts.js) so a lone "Yes." never ships alone.
 function takeSentences() {
-  const tail = reply.slice(spokenUpTo)
-  const m = tail.match(/^[\s\S]*[.!?](?=\s|$)/)
-  if (!m || m[0].length < MIN_SPEAK_CHARS) return ''
-  spokenUpTo += m[0].length
-  return m[0]
+  const chunk = nextSpeakChunk(reply.slice(spokenUpTo))
+  if (!chunk) return ''
+  spokenUpTo += chunk.length
+  return chunk
 }
 
 function stopSpeaking() {
@@ -220,11 +223,54 @@ async function startListening() {
   vad = makeVad({
     onSpeechStart: () => {
       utter = []
+      heardSoFar = ''
+      streamReady = false
+      streamedAny = false
+      // The composer contents at the moment this utterance began — streaming
+      // partials and the final text both rewrite `prefix + ' ' + <heard>`
+      // over it, so a user's already-typed text is never clobbered.
+      composerPrefix = pane()?.input?.value ?? ''
+      // Stream when Apple's recognizer is the engine: open a fresh session at
+      // the mic's actual rate (every utterance = one session). `begin` reports
+      // failure as a RESOLVED `{ error }` value, not a rejection, so the
+      // result shape is checked here — not just `.catch` — before `streamReady`
+      // flips. A failed/unavailable begin degrades to the batch path.
+      if (useApple) {
+        tome.stt
+          .begin(rec.ctx.sampleRate)
+          .then((r) => {
+            // The session stopped while begin was still in flight: never arm a
+            // dead session, and sweep up the late-born worker (stopVoice's own
+            // cancel was a no-op — no session existed yet when it ran).
+            if (!active) {
+              if (!r?.error) tome.stt.cancel().catch(() => {})
+              return
+            }
+            if (r?.error) {
+              useApple = false
+              streamReady = false
+            } else {
+              streamReady = true
+            }
+          })
+          .catch(() => {
+            if (!active) return
+            useApple = false
+            streamReady = false
+          })
+      }
       // Barge-in: talking over the assistant cancels TTS and becomes the
       // next user turn. The mic is live during 'speaking' precisely so this
       // can fire.
       if (state === 'speaking' && bargeIn) {
         stopSpeaking()
+        setState('listening')
+      }
+      // Interrupt-while-thinking: talking while the assistant is still
+      // composing cancels the in-flight turn and returns to the mic. The
+      // abort surfaces through onDone (aborted: true) — see below.
+      if (state === 'thinking') {
+        tome.chat.abort(VOICE_CHAT_ID)
         setState('listening')
       }
     },
@@ -241,8 +287,19 @@ async function startListening() {
     if (state === 'listening') {
       utter.push(c)
       vad.push(c)
+      // Stream the live chunk to the Apple recognizer as 16-bit PCM; a
+      // failed append is not worth surfacing (the utterance is already being
+      // collected in `utter`, so the batch fallback still has the audio).
+      // Only once the session is actually live — a begin that hasn't settled
+      // (or resolved `{ error }`) must not feed a recognizer that isn't there.
+      if (useApple && streamReady) {
+        tome.stt.append(floatToPcm16(c)).catch(() => {})
+        streamedAny = true
+      }
     } else if (state === 'speaking' && bargeIn) {
       vad.push(c) // only listening for the barge-in onset
+    } else if (state === 'thinking' && bargeIn) {
+      vad.push(c) // also listening for the barge-in onset while composing
     }
   }
   ctx.createMediaStreamSource(stream).connect(proc)
@@ -267,23 +324,39 @@ async function endUtterance() {
   const parts = r.utter()
   const total = parts.reduce((n, c) => n + c.length, 0)
   if (!total) return
-  const samples = new Float32Array(total)
-  let at = 0
-  for (const c of parts) {
-    samples.set(c, at)
-    at += c.length
-  }
-  // encode at the rate actually received — a device that refused 16 kHz still
-  // produces a valid WAV, and whisper's own error then says what's wrong
-  const wav = encodeWav(samples, r.ctx.sampleRate)
   setState('transcribing')
   let res
-  try {
-    res = await tome.stt.transcribe(wav)
-  } catch (err) {
-    toast('transcription failed: ' + (err?.message || err))
-    if (active) setState('listening') // mic is still open — keep the session
-    return
+  if (useApple && streamReady && streamedAny) {
+    // Streaming: chunks actually reached main via stt.append, so end the
+    // session and take its final transcription. Decided synchronously — never
+    // await beginPromise — so a begin that settles only after this endpoint
+    // (e.g. the first-use TCC prompt) has streamed nothing and falls through
+    // to the batch path below, instead of blocking finish() on an empty
+    // request for up to 60s and dropping the text.
+    try {
+      res = await tome.stt.finish()
+    } catch (err) {
+      toast('transcription failed: ' + (err?.message || err))
+      if (active) setState('listening') // mic is still open — keep the session
+      return
+    }
+  } else {
+    const samples = new Float32Array(total)
+    let at = 0
+    for (const c of parts) {
+      samples.set(c, at)
+      at += c.length
+    }
+    // encode at the rate actually received — a device that refused 16 kHz still
+    // produces a valid WAV, and whisper's own error then says what's wrong
+    const wav = encodeWav(samples, r.ctx.sampleRate)
+    try {
+      res = await tome.stt.transcribe(wav)
+    } catch (err) {
+      toast('transcription failed: ' + (err?.message || err))
+      if (active) setState('listening') // mic is still open — keep the session
+      return
+    }
   }
   if (!active) return // stopped while whisper was running
   if (res?.error) {
@@ -308,7 +381,12 @@ async function endUtterance() {
     if (!pane()) openTranscript()
     const input = pane()?.input
     if (input) {
-      input.value = input.value ? input.value.trimEnd() + ' ' + text : text
+      // Rewrite `prefix + ' ' + <heard>` with the final text — this
+      // overwrites the live partial (if any) and equals the batch path's
+      // append when no partial was ever written, so one expression serves
+      // both engines.
+      const prefix = composerPrefix.trimEnd()
+      input.value = prefix ? prefix + ' ' + text : text
       input.focus()
     } else {
       toast('open the voice transcript to review dictated text')
@@ -342,7 +420,7 @@ function sendTurn(text) {
   setState('thinking')
   // Brain injection is OFF for voice (no brainWs): an ambient session has no
   // workspace context picked, and surprise vault reads are worse than none.
-  tome.chat.send(VOICE_CHAT_ID, history).catch((err) => {
+  tome.chat.send(VOICE_CHAT_ID, history, undefined, false, undefined, true).catch((err) => {
     onDone({ id: VOICE_CHAT_ID, error: err?.message || String(err) })
   })
 }
@@ -384,7 +462,9 @@ function onDone({ id, error, aborted }) {
     } else if (!aborted) {
       toast('voice turn failed — it is back in the transcript composer')
     }
-    toast(String(error))
+    // An abort during a thinking interrupt surfaces as error "Stopped." —
+    // that is a normal return to the mic, not a failure worth a toast.
+    if (!aborted) toast(String(error))
     setState('listening')
     return
   }
@@ -425,6 +505,11 @@ export function stopVoice() {
   tome.chat.abort(VOICE_CHAT_ID)
   stopSpeaking()
   stopMic()
+  // A live streaming session is abandoned mid-utterance — cancel it so the
+  // recognizer stops consuming audio; the result (if any) is dropped.
+  if (useApple) tome.stt.cancel().catch(() => {})
+  streamReady = false
+  streamedAny = false
   // The pane (if open) keeps whatever partial reply it rendered — it
   // finalizes it when its own chat:done lands. Our copy flushes directly.
   if (!pane()) flushHistory(VOICE_CHAT_ID, history)
@@ -528,10 +613,32 @@ export async function initVoice() {
   tome.chat.onDelta(onDelta)
   tome.chat.onDone(onDone)
   tome.chat.onTool(onTool)
+  // Streaming partials: arrive once per recognizer result while Apple
+  // streaming is active. autoSend ignores them (the final text is what gets
+  // sent); push-to-talk live-writes them into the transcript composer so the
+  // user watches the dictation land. Never auto-sent here.
+  tome.stt.onPartial(({ text }) => {
+    if (!active) return
+    heardSoFar = text || ''
+    if (autoSend) return
+    const input = pane()?.input
+    if (!input) return
+    const prefix = composerPrefix.trimEnd()
+    input.value = prefix ? prefix + ' ' + heardSoFar : heardSoFar
+  })
   autoSend = (await tome.store.get('voice-auto-send')) !== false // default true
   bargeIn = (await tome.store.get('voice-bargein')) !== false // default true
   const rate = await tome.store.get('voice-rate')
   if (typeof rate === 'number' && rate > 0) speakRate = rate
   voiceName = await tome.store.get('voice-name') // null = automatic ranking
+  // Stream through Apple's on-device recognizer when it is the resolved
+  // engine; a status failure (or a non-apple engine) just leaves the batch
+  // path in charge.
+  try {
+    const status = await tome.stt.status()
+    useApple = status?.engine === 'apple'
+  } catch {
+    useApple = false
+  }
   setState('idle')
 }
