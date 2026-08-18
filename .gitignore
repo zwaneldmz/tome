@@ -19,14 +19,12 @@ docs/*
 !docs/index.html
 !docs/banner.svg
 !docs/viibi.html
-!docs/adoption-council.html
 !docs/affordance-mockups.html
 !docs/icon.png
 !docs/screenshot.png
 !docs/tour-*.png
 !docs/flow-creation-poster.png
 !docs/flow-creation.mp4
-!docs/technical-council.html
 !docs/COUNCIL-FINDINGS-PLAN.md
 !docs/THREATMODEL.md
 !docs/perf.md
