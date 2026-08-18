@@ -1,0 +1,1424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Clickable mockups of Tome's frontend and affordance improvements — the security model made legible, a keyboard spine, discoverable pane-grid moves, and an auditable conductor. Six interactive prototypes, not pictures.">
+<meta name="color-scheme" content="dark light">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Tome — affordance mockups">
+<meta property="og:description" content="Clickable mockups of Tome's frontend and affordance improvements: six interactive prototypes of the changes that make Tome's invisible safety and reachable features legible.">
+<link rel="icon" href="icon.png">
+<title>Tome — affordance mockups</title>
+<style>
+/* --------------------------------------------------------------------------
+   Tome — affordance mockups. One file, zero external requests. The palette,
+   radii, type scale and motion are lifted verbatim from src/renderer/style.css
+   (via how-tome-works.html), so each mockup reads as the app it proposes to
+   change, not as a foreign page wearing the same name. Dark first — the app
+   is — with the light values swapped in under prefers-color-scheme: light.
+   -------------------------------------------------------------------------- */
+:root {
+  color-scheme: dark;
+  --bg: #0b0b11;
+  --bg-sunken: #050508;
+  --surface-2: #151723;
+  --surface-2-b: #1b1e2d;
+  --line: rgba(255, 255, 255, 0.09);
+  --line-2: rgba(255, 255, 255, 0.16);
+  --text: #c9d4e3;
+  --bright: #eef4fb;
+  --muted: #737e96;
+  --faint: #5d6780;
+  --accent: #00e5ff;
+  --accent-soft: rgba(0, 229, 255, 0.14);
+  --accent-ring: rgba(0, 229, 255, 0.4);
+  --accent-fg: #04121a;
+  --ok: #3dff9e;
+  --ok-soft: rgba(61, 255, 158, 0.09);
+  --no: #ff3b5c;
+  --no-soft: rgba(255, 59, 92, 0.09);
+  --warn: #ffd23e;
+  --warn-soft: rgba(255, 210, 62, 0.14);
+  --spark: #ff2ea6;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 18px -6px rgba(0, 0, 0, 0.7);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.6), 0 26px 56px -18px rgba(0, 0, 0, 0.9);
+
+  --r-xs: 5px; --r-sm: 7px; --r: 10px; --r-lg: 14px; --r-pill: 999px;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+
+  --fs-micro: 11.5px; --fs-meta: 13px; --fs-ui: 15px; --fs-read: 17px;
+  --fs-title: 21px; --fs-section: 26px; --fs-display: clamp(28px, 5.2vw, 44px);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --bg-sunken: #eeeef2;
+    --surface-2: #f1f1f5;
+    --surface-2-b: #eaeaef;
+    --line: rgba(0, 0, 0, 0.1);
+    --line-2: rgba(0, 0, 0, 0.18);
+    --text: #35353d;
+    --bright: #101014;
+    --muted: #6b6b73;
+    --faint: #8a8a94;
+    --accent: #0071e3;
+    --accent-soft: rgba(0, 113, 227, 0.1);
+    --accent-ring: rgba(0, 113, 227, 0.3);
+    --accent-fg: #ffffff;
+    --ok: #12925a;
+    --ok-soft: rgba(18, 146, 90, 0.09);
+    --no: #d02a4d;
+    --no-soft: rgba(208, 42, 77, 0.08);
+    --warn: #a06d00;
+    --warn-soft: rgba(160, 109, 0, 0.12);
+    --spark: #d70a63;
+    --shadow-1: 0 0.5px 1px rgba(0, 0, 0, 0.05), 0 4px 14px -4px rgba(0, 0, 0, 0.14);
+    --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.06), 0 22px 48px -16px rgba(0, 0, 0, 0.28);
+  }
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fs-read)/1.6 var(--sans);
+  overflow-wrap: break-word;
+}
+h1, h2, h3 { font-family: var(--mono); font-weight: 600; color: var(--bright); line-height: 1.2; letter-spacing: -0.01em; margin: 0; }
+p { margin: 0; }
+a { color: var(--accent); text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-xs); }
+code { font-family: var(--mono); font-size: 0.84em; color: var(--bright); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 0.08em 0.34em; overflow-wrap: anywhere; }
+button { font: inherit; color: inherit; cursor: pointer; }
+.wrap { max-width: 1020px; margin: 0 auto; padding: 0 22px; }
+
+.badge {
+  font-family: var(--mono); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--text); background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--r-xs); padding: 1px 6px;
+}
+.label {
+  font-family: var(--mono); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted); margin: 0 0 8px;
+}
+
+/* ---- masthead ---- */
+.mast {
+  display: flex; align-items: center; gap: 10px; padding: 16px 22px;
+  max-width: 1020px; margin: 0 auto; font-family: var(--mono); font-size: var(--fs-meta);
+  border-bottom: 1px solid var(--line);
+}
+.mast img { width: 22px; height: 22px; border-radius: var(--r-xs); }
+.mast .name { color: var(--bright); font-weight: 600; }
+.mast .crumb { color: var(--muted); }
+.mast .src { margin-left: auto; }
+
+/* ---- hero ---- */
+.hero { padding: 40px 0 8px; }
+.hero .eyebrow { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; }
+.hero h1 { font-size: var(--fs-display); max-width: 24ch; letter-spacing: -0.02em; }
+.hero .sub { color: var(--muted); margin-top: 16px; max-width: 62ch; }
+.hero .sub b { color: var(--text); font-weight: 600; }
+
+/* the hero's live signature: a strip whose blocked count is a running machine */
+.hero-stage { margin: 30px 0 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.hero-card {
+  border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-2);
+  box-shadow: var(--shadow-1); padding: 22px 24px; max-width: 640px;
+}
+.hero-card .stripline {
+  display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  font-family: var(--mono); font-size: var(--fs-meta);
+  background: var(--accent-soft); border: 1px solid var(--accent-ring);
+  color: var(--accent); border-radius: var(--r); padding: 7px 12px;
+}
+.hero-card .stripline .count { color: var(--bright); }
+.hero-card .cap { margin-top: 14px; font-size: var(--fs-meta); color: var(--muted); }
+
+/* ---- sticky nav ---- */
+nav.sections {
+  position: sticky; top: 0; z-index: 50;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px);
+  -webkit-backdrop-filter: saturate(1.4) blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+nav.sections .wrap { display: flex; gap: 4px; overflow-x: auto; padding-top: 10px; padding-bottom: 10px; }
+nav.sections a {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--mono); font-size: var(--fs-meta); color: var(--muted);
+  text-decoration: none; padding: 6px 12px; border: 1px solid transparent; border-radius: var(--r-pill);
+  white-space: nowrap;
+}
+nav.sections a:hover { color: var(--text); }
+nav.sections a.is-on { color: var(--accent); border-color: var(--accent-ring); background: var(--accent-soft); }
+nav.sections a .n { color: var(--faint); }
+nav.sections a.is-on .n { color: var(--accent); }
+
+/* ---- mockup sections ---- */
+main { padding-bottom: 40px; }
+.m { padding: 54px 0 8px; scroll-margin-top: 64px; }
+.m + .m { border-top: 1px solid var(--line); }
+.m-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+.m-head h2 { font-size: var(--fs-section); }
+.m-sub { color: var(--muted); margin-top: 8px; max-width: 62ch; }
+.m-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 26px; margin-top: 26px; align-items: start; }
+.notes { position: sticky; top: 78px; }
+.notes .note-block { padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-2); }
+.notes .note-block + .note-block { margin-top: 12px; }
+.notes ul { margin: 0; padding-left: 18px; font-size: var(--fs-meta); color: var(--text); }
+.notes li { margin: 5px 0; }
+.notes li::marker { color: var(--muted); }
+.notes .ref { color: var(--muted); }
+.notes .ref b { color: var(--text); font-weight: 600; }
+
+/* ---- the reconstructed window ---- */
+.stage { position: relative; min-width: 0; }
+.win {
+  position: relative; display: flex; flex-direction: column;
+  border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden;
+  background: var(--bg); box-shadow: var(--shadow-1);
+}
+.win-top {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  background: var(--surface-2); border-bottom: 1px solid var(--line);
+}
+.dots { display: flex; gap: 6px; margin-right: 4px; }
+.dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--line-2); }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: var(--fs-meta); color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-pill);
+  padding: 3px 10px;
+}
+.chip .caret { color: var(--muted); }
+.win-top .spacer { flex: 1; }
+.gbtn {
+  width: 26px; height: 26px; display: grid; place-items: center;
+  border: 1px solid transparent; border-radius: var(--r-sm);
+  background: transparent; color: var(--muted); font-family: var(--mono); font-size: 14px;
+  position: relative;
+}
+.gbtn:hover { color: var(--bright); border-color: var(--line); background: var(--surface-2-b); }
+.gbtn[aria-expanded="true"] { color: var(--accent); border-color: var(--accent-ring); }
+
+.win-body { display: flex; min-height: 0; flex: 1; }
+.tree { flex: 0 0 auto; width: 148px; background: var(--bg-sunken); border-right: 1px solid var(--line); padding: 8px 6px; }
+.tree .row { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); padding: 2px 6px; border-radius: var(--r-xs); }
+.tree .row.is-dir { color: var(--text); }
+.tree .row.is-file { padding-left: 18px; }
+.tree .row.is-active { background: var(--accent-soft); color: var(--bright); }
+.dock { flex: 1; display: grid; grid-template-columns: 1fr 1fr; min-width: 0; }
+.pane { display: flex; flex-direction: column; min-width: 0; background: var(--bg); }
+.pane + .pane { border-left: 1px solid var(--line); }
+.pane-head {
+  display: flex; align-items: center; gap: 4px; min-height: 30px;
+  background: var(--surface-2); border-bottom: 1px solid var(--line); padding: 0 4px 0 0;
+}
+.tab {
+  display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px;
+  color: var(--muted); padding: 5px 12px; border-right: 1px solid var(--line);
+  background: transparent; border-top: 0; border-left: 0; border-bottom: 0; border-radius: 0;
+}
+.tab.is-active { color: var(--bright); background: var(--bg); box-shadow: inset 0 2px 0 var(--accent); }
+.pane-head .grow { flex: 1; }
+.pane-head .gbtn { width: 20px; height: 20px; font-size: 11px; opacity: 0.35; }
+.pane-head .gbtn:hover, .pane-head .gbtn:focus-visible { opacity: 1; }
+.pane-body { flex: 1; padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; line-height: 1.7; color: var(--text); overflow: hidden; }
+
+.win-foot {
+  display: flex; align-items: center; gap: 12px; padding: 4px 10px;
+  background: var(--surface-2); border-top: 1px solid var(--line);
+  font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted);
+}
+.win-foot .spacer { flex: 1; }
+.win-foot .net { color: var(--accent); }
+
+/* terminal-ish text */
+.term .p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term .dim { color: var(--muted); }
+.term .ac { color: var(--accent); }
+.term .ok { color: var(--ok); }
+.term .no { color: var(--no); }
+
+/* ---- the containment strip (M1 + hero) ---- */
+.strip {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 4px 10px; font-family: var(--mono); font-size: 11.5px;
+  background: var(--accent-soft); color: var(--accent);
+  border: 0; border-top: 1px solid var(--accent-ring); border-bottom: 1px solid var(--accent-ring);
+  width: 100%; text-align: left;
+}
+.strip:hover { background: color-mix(in srgb, var(--accent-soft) 80%, var(--accent) 20%); }
+.strip .blocked { color: var(--bright); }
+.strip .chev { margin-left: auto; color: var(--muted); }
+.strip.is-open { background: var(--warn-soft); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.strip.is-open .blocked { color: var(--text); }
+
+/* ---- popover ---- */
+.pop {
+  position: absolute; z-index: 30; width: 280px; right: 10px; top: 100%;
+  background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--r);
+  box-shadow: var(--shadow-2); padding: 12px 14px; font-size: var(--fs-meta);
+  animation: pop .18s var(--ease) both;
+}
+@keyframes pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.pop-head { display: flex; align-items: center; gap: 8px; font-family: var(--mono); color: var(--bright); font-weight: 600; margin-bottom: 10px; }
+.pop-head .x { margin-left: auto; background: transparent; border: 0; color: var(--muted); font-size: 13px; }
+.pop-head .x:hover { color: var(--bright); }
+.pop .rowlabel { font-family: var(--mono); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 12px 0 5px; }
+.pop .state { display: flex; align-items: center; gap: 8px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px; padding: 2px 9px; border-radius: var(--r-pill); border: 1px solid var(--accent-ring); color: var(--accent); background: var(--accent-soft); }
+.pill.is-warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent); color: var(--warn); background: var(--warn-soft); }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font-family: var(--mono); font-size: var(--fs-meta); font-weight: 600;
+  padding: 7px 14px; border-radius: var(--r-sm); border: 1px solid var(--line-2);
+  background: var(--surface-2-b); color: var(--bright);
+}
+.btn:hover { border-color: var(--text); }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.danger { border-color: color-mix(in srgb, var(--no) 40%, transparent); color: var(--no); }
+.btn.danger:hover { border-color: var(--no); background: var(--no-soft); }
+.btn.wide { width: 100%; margin-top: 10px; }
+.pop .host { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-family: var(--mono); font-size: 11.5px; }
+.pop .host .tag { color: var(--faint); font-size: 10px; }
+.pop .host .revoke { margin-left: auto; background: transparent; border: 0; color: var(--muted); font-size: 13px; padding: 2px 4px; border-radius: var(--r-xs); }
+.pop .host .revoke:hover { color: var(--no); background: var(--no-soft); }
+.pop .host .cnt { margin-left: auto; color: var(--muted); }
+.pop .foot-hint { margin-top: 12px; color: var(--muted); font-size: 11px; line-height: 1.5; border-top: 1px solid var(--line); padding-top: 9px; }
+
+/* ---- modal / scrim ---- */
+.scrim {
+  position: absolute; inset: 0; z-index: 40; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--bg-sunken) 60%, transparent);
+  border-radius: inherit;
+}
+.modal {
+  width: min(340px, 92%); background: var(--surface-2); border: 1px solid var(--line-2);
+  border-radius: var(--r); box-shadow: var(--shadow-2); padding: 18px; font-size: var(--fs-meta);
+}
+.modal h3 { font-size: var(--fs-title); margin-bottom: 8px; }
+.modal p { color: var(--muted); margin-bottom: 14px; }
+.modal .row { display: flex; gap: 8px; margin-top: 14px; justify-content: flex-end; }
+.modal .btn { flex: 0 0 auto; }
+.dur { display: flex; gap: 6px; margin: 12px 0; }
+.dur button {
+  flex: 1; font-family: var(--mono); font-size: var(--fs-meta); padding: 6px 0;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: transparent; color: var(--muted);
+}
+.dur button.is-on { border-color: var(--accent-ring); color: var(--accent); background: var(--accent-soft); }
+.code {
+  width: 100%; font-family: var(--mono); font-size: 20px; letter-spacing: 0.5em; text-indent: 0.2em;
+  padding: 9px 12px; background: var(--bg-sunken); border: 1px solid var(--line-2); border-radius: var(--r-sm); color: var(--bright);
+}
+.code:focus { border-color: var(--accent-ring); outline: none; }
+
+/* consent diff list */
+.diff { margin: 4px 0 14px; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.diff .drow { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-family: var(--mono); font-size: 12px; border-bottom: 1px solid var(--line); }
+.diff .drow:last-child { border-bottom: 0; }
+.diff .drow .plus { color: var(--ok); font-weight: 600; }
+.diff .drow.is-new { background: var(--ok-soft); color: var(--bright); }
+.diff .drow.is-new .plus { color: var(--ok); }
+.diff .drow .already { margin-left: auto; color: var(--faint); font-size: 10.5px; }
+
+/* ---- palette ---- */
+.palette {
+  position: absolute; inset: 0; z-index: 40; display: flex; justify-content: center; align-items: flex-start;
+  padding-top: 42px; background: color-mix(in srgb, var(--bg-sunken) 55%, transparent);
+}
+.palette-inner { width: min(440px, 92%); background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--r); box-shadow: var(--shadow-2); overflow: hidden; }
+.palette-top { display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--line); }
+.palette-top button {
+  font-family: var(--mono); font-size: var(--fs-meta); padding: 5px 11px; border-radius: var(--r-sm);
+  border: 1px solid transparent; background: transparent; color: var(--muted);
+}
+.palette-top button.is-on { border-color: var(--accent-ring); color: var(--accent); background: var(--accent-soft); }
+.palette-input { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.palette-input .prompt { font-family: var(--mono); color: var(--accent); }
+.palette-input input { flex: 1; background: transparent; border: 0; outline: 0; font: var(--fs-ui) var(--mono); color: var(--bright); }
+.palette-list { max-height: 250px; overflow-y: auto; padding: 6px; }
+.palette-list .pitem { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--r-sm); font-family: var(--mono); font-size: var(--fs-meta); color: var(--text); cursor: pointer; }
+.palette-list .pitem.is-active { background: var(--accent-soft); color: var(--bright); }
+.palette-list .pitem .kind { color: var(--faint); font-size: 10.5px; }
+.palette-list .pitem mark { background: transparent; color: var(--accent); }
+.palette-foot { padding: 6px 12px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 10.5px; color: var(--muted); display: flex; gap: 12px; }
+.palette-foot .kbd { color: var(--faint); }
+
+/* ---- shortcut overlay ---- */
+.shortcut-overlay {
+  position: absolute; inset: 0; z-index: 40; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--bg-sunken) 60%, transparent);
+}
+.shortcut-panel { width: min(420px, 94%); background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--r); box-shadow: var(--shadow-2); padding: 18px; }
+.shortcut-panel h3 { font-size: var(--fs-title); margin-bottom: 2px; }
+.shortcut-panel .sub { color: var(--muted); font-size: var(--fs-meta); margin-bottom: 14px; }
+.ks { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
+.ks .kg { font-family: var(--mono); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); grid-column: 1 / -1; margin: 10px 0 2px; }
+.ks .kg:first-child { margin-top: 0; }
+.ks .kr { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 3px 0; font-size: var(--fs-meta); }
+.ks .kr .keys { font-family: var(--mono); color: var(--muted); }
+.ks .kr .keys b { color: var(--bright); font-weight: 600; }
+kbd { font-family: var(--mono); font-size: 10.5px; color: var(--text); background: var(--bg-sunken); border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: var(--r-xs); padding: 1px 5px; }
+
+/* tooltip for glyph buttons */
+.tip {
+  position: absolute; z-index: 20; top: calc(100% + 7px); right: 0; white-space: nowrap;
+  background: var(--surface-2-b); border: 1px solid var(--line-2); border-radius: var(--r-sm);
+  box-shadow: var(--shadow-2); padding: 5px 9px; font-family: var(--mono); font-size: 11px; color: var(--text);
+  pointer-events: none;
+}
+.tip .k { color: var(--muted); margin-left: 6px; }
+
+/* ---- M5 grid ---- */
+.stage .dock.m5 { grid-template-columns: 1.1fr 1fr; }
+.divider { flex: 0 0 5px; cursor: col-resize; background: var(--surface-2); border-right: 1px solid var(--line); }
+.divider:hover, .divider.dragging { background: var(--accent-soft); }
+.coach {
+  position: absolute; right: 12px; bottom: 34px; z-index: 20; width: 230px;
+  background: var(--surface-2); border: 1px solid var(--accent-ring); border-radius: var(--r);
+  box-shadow: var(--shadow-2); padding: 12px 13px; font-size: var(--fs-meta);
+}
+.coach .coach-head { font-family: var(--mono); color: var(--bright); font-weight: 600; margin-bottom: 6px; }
+.coach .coach-row { display: flex; gap: 8px; margin: 4px 0; color: var(--text); }
+.coach .coach-row .g { color: var(--accent); }
+.coach .btn { margin-top: 8px; }
+.draggable-tab {
+  display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px;
+  color: var(--bright); background: var(--surface-2-b); border: 1px solid var(--line-2);
+  border-radius: var(--r-sm); padding: 5px 11px; cursor: grab; user-select: none; touch-action: none;
+}
+.draggable-tab.dragging { cursor: grabbing; opacity: 0.9; box-shadow: var(--shadow-2); }
+.dropzones { position: absolute; inset: 0; z-index: 25; display: none; pointer-events: none; }
+.dropzones.on { display: block; }
+.dz {
+  position: absolute; top: 0; bottom: 0; width: 28%;
+  display: grid; place-items: center; font-family: var(--mono); font-size: 11px; color: var(--muted);
+  background: color-mix(in srgb, var(--accent-soft) 30%, transparent);
+  border: 1px dashed var(--accent-ring); pointer-events: auto;
+}
+.dz::before { content: attr(data-hint); text-align: center; line-height: 1.4; padding: 0 8px; }
+.dz.l { left: 0; border-radius: var(--r-lg) 0 0 var(--r-lg); border-right: 0; }
+.dz.c { left: 28%; width: 44%; }
+.dz.r { right: 0; border-radius: 0 var(--r-lg) var(--r-lg) 0; border-left: 0; }
+.dz.hot { background: color-mix(in srgb, var(--accent-soft) 65%, transparent); color: var(--bright); }
+.stage .pane .strip { margin: 0; }
+
+/* ---- M6 chat ---- */
+.chat { display: flex; flex-direction: column; height: 100%; }
+.chat-log { flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 12px; }
+.msg { max-width: 88%; }
+.msg.user { align-self: flex-end; }
+.msg .bubble { padding: 8px 12px; border-radius: var(--r); font-size: var(--fs-meta); line-height: 1.55; }
+.msg.user .bubble { background: var(--accent-soft); border: 1px solid var(--accent-ring); color: var(--text); border-bottom-right-radius: var(--r-xs); }
+.msg.agent .bubble { background: var(--surface-2); border: 1px solid var(--line); border-bottom-left-radius: var(--r-xs); }
+.msg .who { font-family: var(--mono); font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+.toolchips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tchip {
+  font-family: var(--mono); font-size: 11px; display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg-sunken); border: 1px solid var(--line-2); border-radius: var(--r-pill);
+  padding: 3px 9px; color: var(--text);
+}
+.tchip:hover { border-color: var(--accent-ring); }
+.tchip .st { font-size: 10px; }
+.tchip .st.ok { color: var(--ok); }
+.tchip .st.no { color: var(--no); }
+.tdetail {
+  margin-top: 8px; border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--bg-sunken); padding: 9px 11px; font-family: var(--mono); font-size: 11px; line-height: 1.6;
+}
+.tdetail .td-cmd { color: var(--bright); }
+.tdetail .td-out { color: var(--muted); }
+.tdetail .td-out .ok { color: var(--ok); }
+.tdetail .td-out .no { color: var(--no); }
+.composer { border-top: 1px solid var(--line); padding: 9px 12px; display: flex; flex-direction: column; gap: 8px; }
+.composer .meta { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.composer .meta .live { color: var(--accent); }
+.composer .meta .spinner { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--accent-ring); border-top-color: var(--accent); animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.composer .meta .stop {
+  margin-left: auto; width: 22px; height: 22px; display: grid; place-items: center;
+  background: var(--no); color: #fff; border: 0; border-radius: var(--r-xs); font-size: 12px;
+}
+.composer .row { display: flex; align-items: center; gap: 8px; }
+.composer textarea {
+  flex: 1; resize: none; background: var(--bg-sunken); border: 1px solid var(--line-2); border-radius: var(--r-sm);
+  font: var(--fs-meta) var(--mono); color: var(--bright); padding: 7px 10px; height: 34px;
+}
+.composer textarea:focus { outline: none; border-color: var(--accent-ring); }
+.voice-btn { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; }
+.voice-state { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.voice-state.rec { color: var(--no); }
+.voice-state.trans { color: var(--accent); }
+.toggle-row { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.switch { position: relative; width: 30px; height: 17px; border-radius: var(--r-pill); background: var(--line-2); border: 0; }
+.switch::after { content: ''; position: absolute; left: 2px; top: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; transition: transform .15s var(--ease); }
+.switch.is-on { background: var(--accent); }
+.switch.is-on::after { transform: translateX(13px); }
+
+/* ---- toasts ---- */
+#toasts { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 100; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+.toast {
+  font-family: var(--mono); font-size: var(--fs-meta); color: var(--bright);
+  background: var(--surface-2-b); border: 1px solid var(--line-2); border-radius: var(--r-pill);
+  padding: 7px 16px; box-shadow: var(--shadow-2); animation: toastin .2s var(--ease) both;
+}
+@keyframes toastin { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.toast.is-out { opacity: 0; transition: opacity .3s; }
+
+/* ---- outro ---- */
+.outro { border-top: 1px solid var(--line); margin-top: 60px; padding: 46px 0 90px; }
+.outro h2 { font-size: var(--fs-section); margin-bottom: 16px; }
+.outro p { color: var(--muted); max-width: 66ch; }
+.cta { display: inline-block; margin-top: 12px; padding: 11px 20px; font-family: var(--mono); font-size: var(--fs-ui); color: var(--accent); text-decoration: none; border: 1px solid var(--accent-ring); border-radius: var(--r-pill); }
+.cta:hover { border-color: var(--accent); }
+
+/* ---- responsive ---- */
+@media (max-width: 880px) {
+  .m-grid { grid-template-columns: 1fr; }
+  .notes { position: static; }
+  .dock { grid-template-columns: 1fr; }
+  .dock.m5 { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .ks { grid-template-columns: 1fr; }
+  .wrap { padding: 0 14px; }
+  .stage { overflow-x: auto; }
+  .win { min-width: 520px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+<script>document.documentElement.classList.add('js')</script>
+</head>
+<body>
+
+<header class="mast">
+  <img src="icon.png" width="256" height="256" alt="">
+  <span class="name">tome</span>
+  <span class="crumb">/ affordance mockups</span>
+  <a class="src" href="index.html">home</a>
+  <a class="src" href="https://github.com/zwaneldmz/tome">source &#8599;</a>
+</header>
+
+<div class="wrap">
+<section class="hero" aria-labelledby="title">
+  <div class="eyebrow"><span class="badge">draft</span><span class="label" style="margin:0">frontend &amp; affordance</span></div>
+  <h1 id="title">Tome's differentiators are invisible by default.</h1>
+  <p class="sub">The containment, the allowlist, the conductor's tools — they all work, and they all hide. These six mockups are the same app, rebuilt in HTML, with the changes that make each one <b>perceivable, reachable, and auditable</b>. Every mockup is a machine you can drive, not a still.</p>
+  <div class="hero-stage">
+    <div class="hero-card">
+      <span class="stripline">&#9968; model APIs only <span class="count">· 4 blocked</span></span>
+      <p class="cap">The signature move: the containment strip's blocked count persists — it used to flash for four seconds and vanish (council E6). Scroll to mockup 01 to open it.</p>
+    </div>
+  </div>
+</section>
+</div>
+
+<nav class="sections" aria-label="Mockups">
+  <div class="wrap">
+    <a href="#m1" data-sec="m1"><span class="n">01</span> security center</a>
+    <a href="#m2" data-sec="m2"><span class="n">02</span> consent diff</a>
+    <a href="#m3" data-sec="m3"><span class="n">03</span> command palette</a>
+    <a href="#m4" data-sec="m4"><span class="n">04</span> shortcuts &amp; labels</a>
+    <a href="#m5" data-sec="m5"><span class="n">05</span> pane grid</a>
+    <a href="#m6" data-sec="m6"><span class="n">06</span> conductor</a>
+  </div>
+</nav>
+
+<main class="wrap">
+
+<!-- ============================== 01 · SECURITY CENTER ============================== -->
+<section class="m" id="m1" aria-labelledby="h-m1">
+  <div class="m-head"><span class="badge">01</span><h2 id="h-m1">Security center</h2></div>
+  <p class="m-sub">The containment strip becomes a button. Click it and the whole security picture for that pane opens — state, allowlist, revocation, and a blocked count that doesn't evaporate.</p>
+  <div class="m-grid">
+    <div class="stage">
+      <div class="win" style="height: 380px">
+        <div class="win-top">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span class="chip"><span class="sigil">▚</span> tome</span>
+          <span class="chip">main</span>
+          <span class="spacer"></span>
+          <span class="gbtn" title="Voice chat">🎙</span>
+          <span class="gbtn" title="Appearance">◐</span>
+          <span class="gbtn" title="Notifications">&#128276;</span>
+          <span class="gbtn" title="New pane">＋</span>
+        </div>
+        <div class="win-body" style="flex:1">
+          <div class="tree">
+            <div class="row is-dir">▾ src</div>
+            <div class="row is-file">renderer.js</div>
+            <div class="row is-file is-active">panes.js</div>
+            <div class="row is-dir">▾ test</div>
+            <div class="row is-file">panes.test.js</div>
+          </div>
+          <div class="dock" style="grid-template-columns: 1fr">
+            <div class="pane" style="position:relative">
+              <div class="pane-head">
+                <span class="tab is-active">&#9968; claude</span>
+                <span class="grow"></span>
+              </div>
+              <div class="pane-body term">
+                <div class="p dim">~ $ claude</div>
+                <div class="ac">◐ thinking…</div>
+                <div class="dim">  I'll read package.json first, then the panes module.</div>
+                <div class="ok">✓ fetched api.anthropic.com (allowed)</div>
+              </div>
+              <button class="strip" id="m1-strip" aria-expanded="false" aria-haspopup="true">
+                <span id="m1-strip-label">&#9968; model APIs only</span>
+                <span class="blocked" id="m1-strip-blocked">· 4 blocked</span>
+                <span class="chev">▾</span>
+              </button>
+              <div class="pop" id="m1-pop" hidden>
+                <div class="pop-head"><span>&#9968; claude · pty-3</span><button class="x" id="m1-close" aria-label="Close">✕</button></div>
+                <div class="rowlabel">Network</div>
+                <div class="state"><span class="pill" id="m1-pill">&#9968; model APIs only</span></div>
+                <button class="btn wide" id="m1-allow">Allow internet beyond model APIs</button>
+                <div class="rowlabel">Allowed hosts</div>
+                <div class="host"><span>api.anthropic.com</span><span class="tag">built-in</span></div>
+                <div class="host"><span>api.openai.com</span><button class="revoke" data-host="api.openai.com" aria-label="Revoke api.openai.com">✕</button></div>
+                <div class="host"><span>api.github.com</span><button class="revoke" data-host="api.github.com" aria-label="Revoke api.github.com">✕</button></div>
+                <div class="rowlabel">Blocked since unlock</div>
+                <div class="host"><span>github.com</span><span class="cnt">2</span></div>
+                <div class="host"><span>registry.npmjs.org</span><span class="cnt">2</span></div>
+                <p class="foot-hint">"Allow internet" widens the proxy for 15–60&nbsp;min — the sandbox never widens. Raw sockets, ssh and DNS stay dead.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="win-foot"><span>tome</span><span>claude · pty-3</span><span class="spacer"></span><span>1 pane</span><span class="net">&#9968; model APIs only</span></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <div class="note-block">
+        <p class="label">What changed</p>
+        <ul>
+          <li>The strip is a button: one click for the full per-pane picture — <span class="ref"><b>plan §1.1</b></span></li>
+          <li>Plain copy: "model APIs only" / "allow internet beyond model APIs" replace "gapped" / "free this pane" — <span class="ref"><b>council E6</b></span></li>
+          <li>The blocked count persists instead of a 4&nbsp;s flash — <span class="ref"><b>council E6</b></span></li>
+          <li>Revocation is one click, same prominence as consent.</li>
+        </ul>
+      </div>
+      <div class="note-block">
+        <p class="label">Try it</p>
+        <ul>
+          <li>Click the strip to open the popover.</li>
+          <li>"Allow internet" → give a second factor.</li>
+          <li>Revoke a host with ✕.</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================== 02 · CONSENT DIFF ============================== -->
+<section class="m" id="m2" aria-labelledby="h-m2">
+  <div class="m-head"><span class="badge">02</span><h2 id="h-m2">Consent diff</h2></div>
+  <p class="m-sub">When a repo's allowlist changes, Tome shows you what's new — not the whole list. You answer "what's new?" in one second, not "do I trust all nine hosts again?".</p>
+  <div class="m-grid">
+    <div class="stage">
+      <div class="win" style="height: 340px">
+        <div class="win-top">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span class="chip"><span class="sigil">▚</span> tome</span>
+          <span class="spacer"></span>
+          <span class="gbtn">＋</span>
+        </div>
+        <div class="win-body" style="flex:1">
+          <div class="tree" style="width:148px">
+            <div class="row is-dir">▾ .tome</div>
+            <div class="row is-file is-active">airgap.json</div>
+            <div class="row is-dir">▾ src</div>
+            <div class="row is-file">panes.js</div>
+          </div>
+          <div class="dock" style="grid-template-columns: 1fr">
+            <div class="pane"><div class="pane-head"><span class="tab is-active">airgap.json</span><span class="grow"></span></div>
+              <div class="pane-body term">
+                <div class="dim">{ "hosts": [</div>
+                <div class="dim">&nbsp;&nbsp;"api.anthropic.com",</div>
+                <div class="ac">&nbsp;&nbsp;"api.stripe.com",</div>
+                <div class="ac">&nbsp;&nbsp;"cdn.jsdelivr.net"</div>
+                <div class="dim">] }</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="win-foot"><span>tome</span><span class="spacer"></span><span class="net">&#9968; model APIs only</span></div>
+      </div>
+      <div class="scrim" id="m2-scrim">
+        <div class="modal">
+          <h3>New hosts in <code>.tome/airgap.json</code></h3>
+          <p>This workspace's allowlist changed since you last approved it. Nothing is allowed until you consent.</p>
+          <div class="diff" id="m2-diff">
+            <div class="drow is-new"><span class="plus">＋</span> api.stripe.com</div>
+            <div class="drow is-new"><span class="plus">＋</span> cdn.jsdelivr.net</div>
+            <div class="drow"><span>api.anthropic.com</span><span class="already">approved before</span></div>
+          </div>
+          <div class="row" style="justify-content:space-between">
+            <button class="btn" id="m2-full">Review full list</button>
+            <button class="btn primary" id="m2-allow">Allow 2 new hosts</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <aside class="notes">
+      <div class="note-block">
+        <p class="label">What changed</p>
+        <ul>
+          <li>A diff, not a wall: new hosts highlighted green, previously-approved collapsed to "approved before" — <span class="ref"><b>plan §1.3</b></span></li>
+          <li>Consent stays hash-pinned; editing one character re-prompts — <span class="ref"><b>README</b></span></li>
+        </ul>
+      </div>
+      <div class="note-block">
+        <p class="label">Try it</p>
+        <ul>
+          <li>"Review full list" shows all nine hosts.</li>
+          <li>"Allow 2 new hosts" consents and closes.</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================== 03 · COMMAND PALETTE ============================== -->
+<section class="m" id="m3" aria-labelledby="h-m3">
+  <div class="m-head"><span class="badge">03</span><h2 id="h-m3">Command palette</h2></div>
+  <p class="m-sub">⌘⇧P for every action, ⌘P for files — the single highest-leverage addition to a mouse-first app. Fuzzy, arrow-key, Enter to run.</p>
+  <div class="m-grid">
+    <div class="stage">
+      <div class="win" style="height: 360px">
+        <div class="win-top">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span class="chip"><span class="sigil">▚</span> tome</span>
+          <span class="spacer"></span>
+          <span class="gbtn" id="m3-open">&#8984;&#8679;P</span>
+        </div>
+        <div class="win-body" style="flex:1">
+          <div class="tree" id="m3-tree">
+            <div class="row is-dir">▾ src</div>
+            <div class="row is-file">renderer.js</div>
+            <div class="row is-file">style.css</div>
+            <div class="row is-dir">▾ test</div>
+            <div class="row is-file">panes.test.js</div>
+          </div>
+          <div class="dock" style="grid-template-columns: 1fr">
+            <div class="pane"><div class="pane-head"><span class="tab is-active">renderer.js</span><span class="grow"></span></div>
+              <div class="pane-body term">
+                <div class="dim">press <span class="ac">⌘⇧P</span> to open the palette</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="win-foot"><span>tome</span><span>renderer.js</span><span class="spacer"></span><span class="net">&#9968; model APIs only</span></div>
+      </div>
+      <div class="palette" id="m3-palette" hidden>
+        <div class="palette-inner">
+          <div class="palette-top">
+            <button data-mode="cmd" class="is-on">Commands ⌘⇧P</button>
+            <button data-mode="file">Files ⌘P</button>
+          </div>
+          <div class="palette-input"><span class="prompt">&gt;</span><input id="m3-input" type="text" autocomplete="off" aria-label="Type to filter"></div>
+          <div class="palette-list" id="m3-list" role="listbox"></div>
+          <div class="palette-foot"><span><span class="kbd">↑↓</span> move</span><span><span class="kbd">↵</span> run</span><span><span class="kbd">esc</span> dismiss</span></div>
+        </div>
+      </div>
+    </div>
+    <aside class="notes">
+      <div class="note-block">
+        <p class="label">What changed</p>
+        <ul>
+          <li>⌘⇧P palette + ⌘P quick-open — <span class="ref"><b>plan §2.1 / §2.2</b></span></li>
+          <li>Every menu action, pane opener and theme switch behind one fuzzy search — <span class="ref"><b>council E1 🔴</b></span></li>
+        </ul>
+      </div>
+      <div class="note-block">
+        <p class="label">Try it</p>
+        <ul>
+          <li>Open the palette, type "flow".</li>
+          <li>Run "Toggle sidebar" — it actually hides the tree.</li>
+          <li>Switch to Files and open one.</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================== 04 · SHORTCUTS & LABELS ============================== -->
+<section class="m" id="m4" aria-labelledby="h-m4">
+  <div class="m-head"><span class="badge">04</span><h2 id="h-m4">Shortcuts &amp; labels</h2></div>
+  <p class="m-sub">Glyph-only buttons (◐ 🎙 ＋) become decodable: hover or focus gives the action name and its key. A `?` overlay lists every binding.</p>
+  <div class="m-grid">
+    <div class="stage">
+      <div class="win" style="height: 340px">
+        <div class="win-top">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span class="chip"><span class="sigil">▚</span> tome</span>
+          <span class="spacer"></span>
+          <span class="gbtn" id="m4-voice">🎙<span class="tip" hidden>Voice chat <span class="k">⌘⇧V</span></span></span>
+          <span class="gbtn" id="m4-theme">◐<span class="tip" hidden>Appearance <span class="k">⌘,</span></span></span>
+          <span class="gbtn" id="m4-notifs">&#128276;<span class="tip" hidden>Notifications</span></span>
+          <span class="gbtn" id="m4-add">＋<span class="tip" hidden>New pane</span></span>
+          <span class="gbtn" id="m4-help">?<span class="tip" hidden>Shortcuts <span class="k">?</span></span></span>
+        </div>
+        <div class="win-body" style="flex:1">
+          <div class="tree" style="width:148px">
+            <div class="row is-dir">▾ src</div>
+            <div class="row is-file is-active">panes.js</div>
+            <div class="row is-dir">▾ test</div>
+            <div class="row is-file">panes.test.js</div>
+          </div>
+          <div class="dock" style="grid-template-columns: 1fr">
+            <div class="pane"><div class="pane-head"><span class="tab is-active">panes.js</span><span class="grow"></span></div>
+              <div class="pane-body term"><div class="dim">hover the glyphs · press <span class="ac">?</span></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="win-foot"><span>tome</span><span class="spacer"></span><span class="net">&#9968; model APIs only</span></div>
+      </div>
+      <div class="shortcut-overlay" id="m4-overlay" hidden>
+        <div class="shortcut-panel">
+          <h3>Shortcuts</h3>
+          <p class="sub">every binding, one place — close with <kbd>esc</kbd></p>
+          <div class="ks">
+            <div class="kg">Panes</div>
+            <div class="kr"><span>Close pane</span><span class="keys"><b>⌘</b>W</span></div>
+            <div class="kr"><span>Jump to tab</span><span class="keys"><b>⌘</b>1–9</span></div>
+            <div class="kr"><span>Cycle panes</span><span class="keys"><b>⌘⇧</b>[ / ]</span></div>
+            <div class="kr"><span>Tear off</span><span class="keys">⧉</span></div>
+            <div class="kg">Files</div>
+            <div class="kr"><span>Quick-open</span><span class="keys"><b>⌘</b>P</span></div>
+            <div class="kr"><span>Save</span><span class="keys"><b>⌘</b>S</span></div>
+            <div class="kg">Commands</div>
+            <div class="kr"><span>Palette</span><span class="keys"><b>⌘⇧</b>P</span></div>
+            <div class="kr"><span>Toggle sidebar</span><span class="keys"><b>⌘</b>B</span></div>
+            <div class="kr"><span>Shortcuts</span><span class="keys">?</span></div>
+            <div class="kg">Terminal</div>
+            <div class="kr"><span>Zoom in / out</span><span class="keys"><b>⌘</b>= / <b>⌘</b>−</span></div>
+            <div class="kr"><span>Reset zoom</span><span class="keys"><b>⌘</b>0</span></div>
+            <div class="kg">Appearance</div>
+            <div class="kr"><span>Preferences</span><span class="keys"><b>⌘</b>,</span></div>
+            <div class="kr"><span>Voice chat</span><span class="keys"><b>⌘⇧</b>V</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <aside class="notes">
+      <div class="note-block">
+        <p class="label">What changed</p>
+        <ul>
+          <li>Glyph buttons carry an action name + key on hover/focus — <span class="ref"><b>council E2</b></span></li>
+          <li>`?` overlay lists every binding — <span class="ref"><b>plan §2.3</b></span></li>
+          <li>Same ⌘, ⌘B, ⌘S, ⌘⇧V the app already ships — no new bindings invented.</li>
+        </ul>
+      </div>
+      <div class="note-block">
+        <p class="label">Try it</p>
+        <ul>
+          <li>Hover (or Tab to) the glyphs.</li>
+          <li>Press ? for the full reference.</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================== 05 · PANE GRID ============================== -->
+<section class="m" id="m5" aria-labelledby="h-m5">
+  <div class="m-head"><span class="badge">05</span><h2 id="h-m5">Pane grid</h2></div>
+  <p class="m-sub">The grid's moves become visible: ⧉ tear-off and ＋ sit at rest, a one-time hint teaches split / stack / tear-off, and the sidebar divider is full-height.</p>
+  <div class="m-grid">
+    <div class="stage">
+      <div class="win" style="height: 380px">
+        <div class="win-top">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span class="chip"><span class="sigil">▚</span> tome</span>
+          <span class="spacer"></span>
+          <span class="gbtn">＋</span>
+        </div>
+        <div class="win-body" style="flex:1; position:relative">
+          <div class="tree" id="m5-tree">
+            <div class="row is-dir">▾ src</div>
+            <div class="row is-file is-active">verdict.js</div>
+            <div class="row is-file">panes.js</div>
+            <div class="row is-dir">▾ test</div>
+            <div class="row is-file">panes.test.js</div>
+          </div>
+          <div class="divider" id="m5-divider" title="Drag to resize the sidebar" role="separator" aria-orientation="vertical"></div>
+          <div class="dock m5">
+            <div class="pane">
+              <div class="pane-head"><span class="tab is-active">verdict.js</span><span class="grow"></span><span class="gbtn" title="Tear off">⧉</span></div>
+              <div class="pane-body term">
+                <div class="dim">// adversarial review verdict</div>
+                <div class="ok">export const verdict = "SHIP";</div>
+                <div class="dim">export const findings = [];</div>
+              </div>
+            </div>
+            <div class="pane">
+              <div class="pane-head">
+                <span class="tab is-active">&#9968; claude</span>
+                <span class="tab">zsh</span>
+                <span class="grow"></span>
+                <span class="gbtn" title="New pane in group">＋</span>
+                <span class="gbtn" title="Tear off">⧉</span>
+              </div>
+              <div class="pane-body term">
+                <div class="dim">~ $ claude</div>
+                <div class="ac">◐ thinking…</div>
+                <div class="dim">  Reviewing the diff against the plan.</div>
+              </div>
+              <div class="strip" style="border-top:0">&#9968; model APIs only <span class="blocked" style="color:var(--bright)">· 1 blocked</span><span class="chev">▾</span></div>
+            </div>
+          </div>
+          <div class="dropzones" id="m5-zones">
+            <div class="dz l" data-zone="split" data-hint="split left"></div>
+            <div class="dz c" data-zone="stack" data-hint="stack as tab"></div>
+            <div class="dz r" data-zone="tear" data-hint="tear off"></div>
+          </div>
+          <div class="coach" id="m5-coach">
+            <div class="coach-head">First drag? Three outcomes.</div>
+            <div class="coach-row"><span class="g">↣ edge</span> split the pane</div>
+            <div class="coach-row"><span class="g">● center</span> stack as a tab</div>
+            <div class="coach-row"><span class="g">↦ past edge</span> tear off a window</div>
+            <button class="btn" id="m5-gotit">Got it</button>
+          </div>
+        </div>
+        <div class="win-foot"><span>tome</span><span>verdict.js</span><span class="spacer"></span><span>2 groups</span><span class="net">&#9968; model APIs only</span></div>
+      </div>
+      <div style="margin-top:12px; font-family:var(--mono); font-size:var(--fs-meta); color:var(--muted)">drag this tab onto a zone → <span class="draggable-tab" id="m5-tab" draggable="false">&#9662; src/renderer/renderer.js</span></div>
+    </div>
+    <aside class="notes">
+      <div class="note-block">
+        <p class="label">What changed</p>
+        <ul>
+          <li>⧉ and ＋ visible at rest (0.35 → hover 1.0) — <span class="ref"><b>council E2</b></span></li>
+          <li>One-time drop hint teaches the three outcomes — <span class="ref"><b>plan §3.2</b></span></li>
+          <li>Full-height divider replaces the 16 px corner grip — <span class="ref"><b>plan §3.3</b></span></li>
+        </ul>
+      </div>
+      <div class="note-block">
+        <p class="label">Try it</p>
+        <ul>
+          <li>Drag the divider to resize the tree.</li>
+          <li>Drag the tab onto a drop zone.</li>
+          <li>Dismiss the coach hint.</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================== 06 · CONDUCTOR ============================== -->
+<section class="m" id="m6" aria-labelledby="h-m6">
+  <div class="m-head"><span class="badge">06</span><h2 id="h-m6">Conductor transparency</h2></div>
+  <p class="m-sub">The assistant's actions become auditable: click a tool chip to see exactly what ran, watch the stream's clock and token count, and read the honest state of the mic.</p>
+  <div class="m-grid">
+    <div class="stage">
+      <div class="win" style="height: 420px">
+        <div class="win-top">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span class="chip"><span class="sigil">▚</span> tome</span>
+          <span class="spacer"></span>
+          <span class="gbtn">＋</span>
+        </div>
+        <div class="win-body" style="flex:1">
+          <div class="tree" style="width:148px">
+            <div class="row is-dir">▾ .tome</div>
+            <div class="row is-file">airgap.json</div>
+            <div class="row is-dir">▾ src</div>
+            <div class="row is-file is-active">panes.js</div>
+          </div>
+          <div class="dock" style="grid-template-columns: 1fr">
+            <div class="pane">
+              <div class="pane-head"><span class="tab is-active">assistant</span><span class="grow"></span></div>
+              <div class="chat">
+                <div class="chat-log">
+                  <div class="msg user"><div class="who">you</div><div class="bubble">what did the reviewer find?</div></div>
+                  <div class="msg agent">
+                    <div class="who">assistant</div>
+                    <div class="bubble">The reviewer shipped the diff. It found no blocking issues.</div>
+                    <div class="toolchips">
+                      <button class="tchip" data-tool="list_panes"><span class="st ok">✓</span> list_panes</button>
+                      <button class="tchip" data-tool="open_file"><span class="st ok">✓</span> open_file</button>
+                      <button class="tchip" data-tool="type_in_terminal"><span class="st" id="m6-typest">✗</span> type_in_terminal</button>
+                    </div>
+                    <div class="tdetail" id="m6-detail" hidden></div>
+                  </div>
+                </div>
+                <div class="composer">
+                  <div class="meta">
+                    <span class="spinner" id="m6-spinner" hidden></span>
+                    <span class="live" id="m6-live">streaming · 0:07 · 312 tokens</span>
+                    <button class="stop" aria-label="Stop">■</button>
+                  </div>
+                  <div class="row">
+                    <button class="gbtn voice-btn" id="m6-voice" style="width:auto; height:auto; padding:5px 9px">🎙</button>
+                    <span class="voice-state" id="m6-voicestate">tap to record</span>
+                  </div>
+                  <div class="toggle-row">
+                    <button class="switch" id="m6-switch" role="switch" aria-checked="false" aria-label="assistant may run commands"></button>
+                    assistant may run commands <span style="color:var(--faint)">— off by default</span>
+                  </div>
+                  <textarea rows="1" placeholder="ask the conductor…" aria-label="Composer"></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="win-foot"><span>tome</span><span>assistant</span><span class="spacer"></span><span class="net">&#9968; model APIs only</span></div>
+      </div>
+    </div>
+    <aside class="notes">
+      <div class="note-block">
+        <p class="label">What changed</p>
+        <ul>
+          <li>Tool chips are clickable — expand to the command, args and result — <span class="ref"><b>plan §4.1</b></span></li>
+          <li>Streaming shows elapsed + tokens; ■ stop is always visible — <span class="ref"><b>plan §4.2</b></span></li>
+          <li>Voice state is honest: recording / transcribing / unavailable-with-reason — <span class="ref"><b>plan §4.3</b></span></li>
+        </ul>
+      </div>
+      <div class="note-block">
+        <p class="label">Try it</p>
+        <ul>
+          <li>Click each tool chip to see what ran.</li>
+          <li>Toggle "may run commands" and reopen the ✗ chip.</li>
+          <li>Cycle the mic through its states.</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</section>
+
+</main>
+
+<footer class="outro"><div class="wrap">
+  <h2>Spend the capabilities already built</h2>
+  <p>None of these mockups invent a subsystem. Each one makes a working safety property perceivable, a working feature reachable, or an assistant action auditable — the same through-line as <a href="AFFORDANCES-PLAN.md">docs/AFFORDANCES-PLAN.md</a>. This page is a proposal in the same design language as the app; the code that realizes it lives with the rest of Tome.</p>
+  <a class="cta" href="how-tome-works.html">Take the tour instead</a>
+  <a class="cta" href="https://github.com/zwaneldmz/tome" style="margin-left:8px">Read the source</a>
+</div></footer>
+
+<div id="toasts" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---- shared toast ---- */
+  var toastWrap = document.getElementById('toasts');
+  function toast(msg) {
+    var t = document.createElement('div');
+    t.className = 'toast';
+    t.textContent = msg;
+    toastWrap.appendChild(t);
+    setTimeout(function () { t.classList.add('is-out'); }, 2400);
+    setTimeout(function () { t.remove(); }, 2800);
+  }
+
+  /* ---- scroll-spy nav ---- */
+  var secLinks = Array.prototype.slice.call(document.querySelectorAll('nav.sections a[data-sec]'));
+  var sections = secLinks.map(function (a) { return document.getElementById(a.getAttribute('data-sec')); });
+  function spy() {
+    var y = window.scrollY + 120;
+    var cur = null;
+    sections.forEach(function (s) { if (s && s.offsetTop <= y) cur = s; });
+    secLinks.forEach(function (a) {
+      a.classList.toggle('is-on', cur && a.getAttribute('data-sec') === cur.id);
+    });
+  }
+  window.addEventListener('scroll', spy, { passive: true });
+  spy();
+
+  /* ================================================================
+     01 · SECURITY CENTER
+     ================================================================ */
+  var strip = document.getElementById('m1-strip');
+  var pop = document.getElementById('m1-pop');
+  var pill = document.getElementById('m1-pill');
+  var stripLabel = document.getElementById('m1-strip-label');
+  var stripBlocked = document.getElementById('m1-strip-blocked');
+  var netFoot = document.querySelector('#m1 .win-foot .net');
+  var isOpen = false;
+
+  function setPop(open) {
+    pop.hidden = !open;
+    strip.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  strip.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setPop(pop.hidden);
+  });
+  document.getElementById('m1-close').addEventListener('click', function (e) {
+    e.stopPropagation(); setPop(false);
+  });
+  document.addEventListener('click', function () { if (!pop.hidden) setPop(false); });
+  pop.addEventListener('click', function (e) { e.stopPropagation(); });
+
+  // revoke hosts
+  Array.prototype.forEach.call(pop.querySelectorAll('.revoke'), function (btn) {
+    btn.addEventListener('click', function () {
+      var host = btn.getAttribute('data-host');
+      var row = btn.closest('.host');
+      row.remove();
+      toast('revoked ' + host + ' — blocked on the next request');
+    });
+  });
+
+  // allow internet → 2FA modal
+  var m1Scrim;
+  document.getElementById('m1-allow').addEventListener('click', function () {
+    setPop(false);
+    m1Scrim = document.createElement('div');
+    m1Scrim.className = 'scrim';
+    var mins = 15;
+    m1Scrim.innerHTML =
+      '<div class="modal">' +
+      '<h3>Second factor</h3>' +
+      '<p>Open internet for this pane. The sandbox stays sealed — only the proxy widens.</p>' +
+      '<input class="code" id="m1-code" inputmode="numeric" maxlength="6" placeholder="·······" aria-label="Authenticator code">' +
+      '<div class="dur">' +
+      '<button data-m="15" class="is-on">15 min</button>' +
+      '<button data-m="30">30 min</button>' +
+      '<button data-m="60">60 min</button>' +
+      '</div>' +
+      '<div class="row"><button class="btn" id="m1-cancel">Cancel</button><button class="btn primary" id="m1-confirm" disabled>Unlock for 15 min</button></div>' +
+      '</div>';
+    document.querySelector('#m1 .stage').appendChild(m1Scrim);
+
+    var code = m1Scrim.querySelector('#m1-code');
+    var confirm = m1Scrim.querySelector('#m1-confirm');
+    var durBtns = m1Scrim.querySelectorAll('.dur button');
+    code.addEventListener('input', function () {
+      confirm.disabled = code.value.length < 6;
+    });
+    durBtns.forEach(function (b) {
+      b.addEventListener('click', function () {
+        mins = parseInt(b.getAttribute('data-m'), 10);
+        durBtns.forEach(function (x) { x.classList.toggle('is-on', x === b); });
+        confirm.textContent = 'Unlock for ' + mins + ' min';
+      });
+    });
+    m1Scrim.querySelector('#m1-cancel').addEventListener('click', function () { m1Scrim.remove(); });
+    confirm.addEventListener('click', function () {
+      m1Scrim.remove();
+      isOpen = true;
+      strip.classList.add('is-open');
+      stripLabel.innerHTML = '&#9945; open internet';
+      stripBlocked.textContent = '· ' + mins + ':00';
+      pill.className = 'pill is-warn';
+      pill.innerHTML = '&#9945; open internet · ' + mins + ' min';
+      netFoot.innerHTML = '&#9945; open internet';
+      toast('pane pty-3 internet opened for ' + mins + ' min — relocks on its own');
+    });
+    setTimeout(function () { code.focus(); }, 20);
+  });
+
+  /* ================================================================
+     02 · CONSENT DIFF
+     ================================================================ */
+  var m2Scrim = document.getElementById('m2-scrim');
+  var m2Diff = document.getElementById('m2-diff');
+  var m2Allow = document.getElementById('m2-allow');
+  var m2Full = document.getElementById('m2-full');
+  var fullMode = false;
+  var fullHosts = ['api.anthropic.com', 'api.openai.com', 'api.github.com', 'api.stripe.com', 'cdn.jsdelivr.net', 'api.openai.com', 'api.moonshot.cn', 'api.zhipuai.cn', 'models.example.com'];
+
+  function renderDiff() {
+    if (!fullMode) {
+      m2Diff.innerHTML =
+        '<div class="drow is-new"><span class="plus">＋</span> api.stripe.com</div>' +
+        '<div class="drow is-new"><span class="plus">＋</span> cdn.jsdelivr.net</div>' +
+        '<div class="drow"><span>api.anthropic.com</span><span class="already">approved before</span></div>';
+      m2Allow.textContent = 'Allow 2 new hosts';
+      m2Full.textContent = 'Review full list';
+    } else {
+      var html = fullHosts.map(function (h) {
+        var isNew = h === 'api.stripe.com' || h === 'cdn.jsdelivr.net';
+        return isNew
+          ? '<div class="drow is-new"><span class="plus">＋</span> ' + h + '</div>'
+          : '<div class="drow"><span>' + h + '</span><span class="already">approved before</span></div>';
+      }).join('');
+      m2Diff.innerHTML = html;
+      m2Allow.textContent = 'Allow all 9 hosts';
+      m2Full.textContent = 'Back to diff';
+    }
+  }
+  m2Full.addEventListener('click', function () { fullMode = !fullMode; renderDiff(); });
+  m2Allow.addEventListener('click', function () {
+    m2Scrim.remove();
+    toast(fullMode ? '9 hosts allowed — pinned to #f3a9c1' : '2 new hosts allowed — pinned to #f3a9c1');
+  });
+
+  /* ================================================================
+     03 · COMMAND PALETTE
+     ================================================================ */
+  var m3Palette = document.getElementById('m3-palette');
+  var m3Input = document.getElementById('m3-input');
+  var m3List = document.getElementById('m3-list');
+  var m3Tree = document.getElementById('m3-tree');
+  var m3Mode = 'cmd';
+  var m3Active = 0;
+
+  var cmdItems = [
+    { kind: 'pane', label: 'New pane → agent (claude)' },
+    { kind: 'pane', label: 'New pane → terminal' },
+    { kind: 'pane', label: 'New pane → assistant chat' },
+    { kind: 'file', label: 'Open file…' },
+    { kind: 'file', label: 'New file…' },
+    { kind: 'flow', label: 'Flow diagram…' },
+    { kind: 'flow', label: 'Flow runs' },
+    { kind: 'flow', label: 'Run flow: review-pipeline' },
+    { kind: 'view', label: 'Toggle sidebar' },
+    { kind: 'view', label: 'Appearance: dark' },
+    { kind: 'app', label: 'Event log' },
+    { kind: 'app', label: 'Preferences…' }
+  ];
+  var fileItems = [
+    'src/renderer/renderer.js', 'src/renderer/style.css', 'src/renderer/panes.js',
+    'src/renderer/panels/chat.js', 'test/panes.test.js', 'docs/AFFORDANCES-PLAN.md', 'package.json'
+  ];
+
+  function currentItems() { return m3Mode === 'cmd' ? cmdItems : fileItems; }
+
+  function m3Render() {
+    var q = m3Input.value.trim().toLowerCase();
+    var items = currentItems();
+    var filtered = items.map(function (it, i) {
+      var label = typeof it === 'string' ? it : it.label;
+      return { it: it, label: label, i: i, hit: label.toLowerCase().indexOf(q) >= 0 };
+    }).filter(function (x) { return q === '' || x.hit; });
+    if (m3Active >= filtered.length) m3Active = 0;
+    m3List.innerHTML = filtered.map(function (x, idx) {
+      var label = x.label;
+      var shown = label;
+      if (q) {
+        var pos = label.toLowerCase().indexOf(q);
+        shown = label.slice(0, pos) + '<mark>' + label.slice(pos, pos + q.length) + '</mark>' + label.slice(pos + q.length);
+      }
+      var kind = typeof x.it === 'string' ? 'file' : x.it.kind;
+      return '<div class="pitem' + (idx === m3Active ? ' is-active' : '') + '" data-i="' + idx + '" role="option"><span class="kind">' + kind + '</span><span>' + shown + '</span></div>';
+    }).join('');
+    m3List.querySelectorAll('.pitem').forEach(function (el) {
+      el.addEventListener('click', function () {
+        m3Run(filtered[parseInt(el.getAttribute('data-i'), 10)]);
+      });
+    });
+  }
+
+  function m3Run(entry) {
+    var label = typeof entry.it === 'string' ? entry.it : entry.it.label;
+    if (label === 'Toggle sidebar') { m3Tree.style.display = m3Tree.style.display === 'none' ? '' : 'none'; toast('toggled sidebar'); }
+    else if (m3Mode === 'cmd' && label.indexOf('Appearance') === 0) { toast('appearance: dark'); }
+    else if (m3Mode === 'file') { toast('opened ' + label); }
+    else { toast('ran: ' + label.toLowerCase()); }
+    m3Close();
+  }
+
+  function m3Open(mode) {
+    m3Mode = mode || 'cmd';
+    m3Palette.querySelectorAll('.palette-top button').forEach(function (b) {
+      b.classList.toggle('is-on', b.getAttribute('data-mode') === m3Mode);
+    });
+    m3Input.value = '';
+    m3Active = 0;
+    m3Palette.hidden = false;
+    m3Render();
+    setTimeout(function () { m3Input.focus(); }, 20);
+  }
+  function m3Close() { m3Palette.hidden = true; }
+
+  document.getElementById('m3-open').addEventListener('click', function () { m3Open('cmd'); });
+  m3Palette.querySelectorAll('.palette-top button').forEach(function (b) {
+    b.addEventListener('click', function () { m3Open(b.getAttribute('data-mode')); });
+  });
+  m3Input.addEventListener('input', function () { m3Active = 0; m3Render(); });
+  m3Input.addEventListener('keydown', function (e) {
+    var items = m3List.querySelectorAll('.pitem');
+    if (e.key === 'ArrowDown') { e.preventDefault(); m3Active = Math.min(m3Active + 1, items.length - 1); m3Render(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); m3Active = Math.max(m3Active - 1, 0); m3Render(); }
+    else if (e.key === 'Enter') {
+      var q = m3Input.value.trim().toLowerCase();
+      var all = currentItems().map(function (it, i) {
+        var label = typeof it === 'string' ? it : it.label;
+        return { it: it, label: label, hit: label.toLowerCase().indexOf(q) >= 0 };
+      }).filter(function (x) { return q === '' || x.hit; });
+      if (all[m3Active]) m3Run(all[m3Active]);
+    }
+    else if (e.key === 'Escape') { m3Close(); }
+  });
+  m3Palette.addEventListener('click', function (e) { if (e.target === m3Palette) m3Close(); });
+  m3Render();
+
+  /* ================================================================
+     04 · SHORTCUTS & LABELS
+     ================================================================ */
+  ['m4-voice', 'm4-theme', 'm4-notifs', 'm4-add', 'm4-help'].forEach(function (id) {
+    var btn = document.getElementById(id);
+    var tip = btn.querySelector('.tip');
+    btn.addEventListener('mouseenter', function () { tip.hidden = false; });
+    btn.addEventListener('mouseleave', function () { tip.hidden = true; });
+    btn.addEventListener('focus', function () { tip.hidden = false; });
+    btn.addEventListener('blur', function () { tip.hidden = true; });
+  });
+  var m4Overlay = document.getElementById('m4-overlay');
+  document.getElementById('m4-help').addEventListener('click', function () { m4Overlay.hidden = false; });
+  m4Overlay.addEventListener('click', function (e) { if (e.target === m4Overlay) m4Overlay.hidden = true; });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !m4Overlay.hidden) m4Overlay.hidden = true;
+  });
+
+  /* ================================================================
+     05 · PANE GRID
+     ================================================================ */
+  var m5Tree = document.getElementById('m5-tree');
+  var m5Divider = document.getElementById('m5-divider');
+  (function () {
+    var dragging = false;
+    m5Divider.addEventListener('pointerdown', function (e) {
+      dragging = true;
+      m5Divider.classList.add('dragging');
+      m5Divider.setPointerCapture(e.pointerId);
+    });
+    m5Divider.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      var rect = m5Tree.parentElement.getBoundingClientRect();
+      var w = Math.min(300, Math.max(90, e.clientX - rect.left));
+      m5Tree.style.width = w + 'px';
+    });
+    m5Divider.addEventListener('pointerup', function () { dragging = false; m5Divider.classList.remove('dragging'); });
+    m5Divider.addEventListener('pointercancel', function () { dragging = false; m5Divider.classList.remove('dragging'); });
+  })();
+
+  var m5Coach = document.getElementById('m5-coach');
+  document.getElementById('m5-gotit').addEventListener('click', function () {
+    m5Coach.remove();
+    toast('hint dismissed — won\u2019t show again');
+  });
+
+  // draggable tab onto drop zones
+  var m5Tab = document.getElementById('m5-tab');
+  var m5Zones = document.getElementById('m5-zones');
+  var zones = m5Zones.querySelectorAll('.dz');
+  (function () {
+    var dragging = false, startX = 0, startY = 0;
+    var zoneNames = { split: 'split left', stack: 'stacked as a tab', tear: 'torn off into a window' };
+    m5Tab.addEventListener('pointerdown', function (e) {
+      dragging = true; startX = e.clientX; startY = e.clientY;
+      m5Tab.classList.add('dragging');
+      m5Tab.setPointerCapture(e.pointerId);
+      m5Zones.classList.add('on');
+    });
+    m5Tab.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      if (Math.abs(e.clientX - startX) < 4 && Math.abs(e.clientY - startY) < 4) return;
+      m5Zones.classList.add('on');
+      zones.forEach(function (z) {
+        var r = z.getBoundingClientRect();
+        var inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+        z.classList.toggle('hot', inside);
+      });
+    });
+    m5Tab.addEventListener('pointerup', function (e) {
+      if (!dragging) return;
+      dragging = false;
+      m5Tab.classList.remove('dragging');
+      m5Zones.classList.remove('on');
+      zones.forEach(function (z) { z.classList.remove('hot'); });
+      var target = document.elementFromPoint(e.clientX, e.clientY);
+      var dz = target && target.closest ? target.closest('.dz') : null;
+      if (dz) {
+        var kind = dz.getAttribute('data-zone');
+        toast('renderer.js ' + zoneNames[kind]);
+      } else {
+        toast('dropped — layout unchanged');
+      }
+    });
+    m5Tab.addEventListener('pointercancel', function () {
+      dragging = false; m5Tab.classList.remove('dragging'); m5Zones.classList.remove('on');
+      zones.forEach(function (z) { z.classList.remove('hot'); });
+    });
+  })();
+
+  /* ================================================================
+     06 · CONDUCTOR
+     ================================================================ */
+  var m6Detail = document.getElementById('m6-detail');
+  var m6Switch = document.getElementById('m6-switch');
+  var m6TypeSt = document.getElementById('m6-typest');
+  var canRun = false;
+
+  var toolData = {
+    list_panes: { cmd: 'list_panes()', out: '<span class="ok">ok</span> — 4 panes: claude · zsh · verdict.js · assistant' },
+    open_file: { cmd: 'open_file("/repo/.tome/flows/review-pipeline/n3-verdict.md")', out: '<span class="ok">ok</span> — opened beside this chat' },
+    type_in_terminal: {
+      cmd: 'type_in_terminal("cat n3-verdict.md", press_enter=true)',
+      outOff: '<span class="no">left at prompt</span> — "assistant may run commands" is off; nothing submitted',
+      outOn: '<span class="ok">ran</span> — cat n3-verdict.md submitted in zsh'
+    }
+  };
+
+  function renderTypeSt() { m6TypeSt.textContent = canRun ? '✓' : '✗'; m6TypeSt.className = 'st ' + (canRun ? 'ok' : 'no'); }
+
+  document.querySelectorAll('.tchip').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      var key = chip.getAttribute('data-tool');
+      var d = toolData[key];
+      var out = key === 'type_in_terminal' ? (canRun ? d.outOn : d.outOff) : d.out;
+      if (m6Detail.hidden || m6Detail.getAttribute('data-tool') !== key) {
+        m6Detail.innerHTML = '<div class="td-cmd">$ ' + d.cmd + '</div><div class="td-out">' + out + '</div>';
+        m6Detail.setAttribute('data-tool', key);
+        m6Detail.hidden = false;
+      } else {
+        m6Detail.hidden = true;
+      }
+    });
+  });
+
+  m6Switch.addEventListener('click', function () {
+    canRun = !canRun;
+    m6Switch.classList.toggle('is-on', canRun);
+    m6Switch.setAttribute('aria-checked', canRun ? 'true' : 'false');
+    renderTypeSt();
+    if (!m6Detail.hidden && m6Detail.getAttribute('data-tool') === 'type_in_terminal') {
+      var d = toolData.type_in_terminal;
+      m6Detail.querySelector('.td-out').innerHTML = canRun ? d.outOn : d.outOff;
+    }
+  });
+
+  // voice state cycle: idle → recording → transcribing → unavailable → idle
+  var voiceStates = [
+    { label: 'recording · 0:04', cls: 'rec', glyph: '⏺' },
+    { label: 'transcribing…', cls: 'trans', glyph: '◐' },
+    { label: 'unavailable — whisper-cpp not installed', cls: '', glyph: '🎙' }
+  ];
+  var voiceIdx = -1;
+  var m6Voice = document.getElementById('m6-voice');
+  var m6VoiceState = document.getElementById('m6-voicestate');
+  m6Voice.addEventListener('click', function () {
+    voiceIdx = (voiceIdx + 1) % (voiceStates.length + 1);
+    if (voiceIdx === voiceStates.length) {
+      m6Voice.textContent = '🎙';
+      m6VoiceState.textContent = 'tap to record';
+      m6VoiceState.className = 'voice-state';
+    } else {
+      var s = voiceStates[voiceIdx];
+      m6Voice.textContent = s.glyph;
+      m6VoiceState.textContent = s.label;
+      m6VoiceState.className = 'voice-state ' + s.cls;
+    }
+  });
+})();
+</script>
+</body>
+</html>

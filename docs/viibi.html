@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Viibi — Tome's mascot. A bookmark made of light, named for the vibe in vibe coding. Animated proof-of-concept across all five states, shown in the app's own chrome.">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="icon.png">
+<title>Viibi — Tome's mascot</title>
+<style>
+/* Tokens lifted from src/renderer/style.css. Dark first. */
+:root {
+  color-scheme: dark;
+  --bg: #0b0b11;
+  --bg-sunken: #050508;
+  --surface-2: #151723;
+  --surface-2-b: #1b1e2d;
+  --line: rgba(255, 255, 255, 0.09);
+  --line-2: rgba(255, 255, 255, 0.16);
+  --text: #c9d4e3;
+  --bright: #eef4fb;
+  --muted: #737e96;
+  --faint: #5d6780;
+  --accent: #00e5ff;
+  --accent-soft: rgba(0, 229, 255, 0.14);
+  --accent-ring: rgba(0, 229, 255, 0.4);
+  --accent-fg: #04121a;
+  --no: #ff3b5c;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 18px -6px rgba(0, 0, 0, 0.7);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.6), 0 26px 56px -18px rgba(0, 0, 0, 0.9);
+  --r-xs: 5px; --r-sm: 7px; --r: 10px; --r-lg: 14px; --r-pill: 999px;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+  --fs-micro: 11.5px; --fs-meta: 13px; --fs-ui: 15px; --fs-read: 17px; --fs-title: 21px; --fs-section: 26px; --fs-display: clamp(28px, 5.2vw, 44px);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --bg-sunken: #eeeef2;
+    --surface-2: #f1f1f5;
+    --surface-2-b: #eaeaef;
+    --line: rgba(0, 0, 0, 0.1);
+    --line-2: rgba(0, 0, 0, 0.18);
+    --text: #35353d;
+    --bright: #101014;
+    --muted: #6b6b73;
+    --faint: #8a8a94;
+    --accent: #0071e3;
+    --accent-soft: rgba(0, 113, 227, 0.1);
+    --accent-ring: rgba(0, 113, 227, 0.3);
+    --accent-fg: #ffffff;
+    --no: #d02a4d;
+    --shadow-1: 0 0.5px 1px rgba(0, 0, 0, 0.05), 0 4px 14px -4px rgba(0, 0, 0, 0.14);
+    --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.06), 0 22px 48px -16px rgba(0, 0, 0, 0.28);
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: var(--fs-read)/1.6 var(--sans); overflow-wrap: break-word; }
+h1, h2 { font-family: var(--mono); font-weight: 600; color: var(--bright); line-height: 1.2; letter-spacing: -0.01em; margin: 0; }
+p { margin: 0; }
+a { color: var(--accent); text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-xs); }
+code { font-family: var(--mono); font-size: 0.84em; color: var(--bright); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 0.08em 0.34em; }
+button { font: inherit; color: inherit; cursor: pointer; }
+.wrap { max-width: 1020px; margin: 0 auto; padding: 0 22px; }
+.badge { font-family: var(--mono); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.04em; color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 1px 6px; }
+.label { font-family: var(--mono); font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 8px; }
+
+.mast { display: flex; align-items: center; gap: 10px; padding: 16px 22px; max-width: 1020px; margin: 0 auto; font-family: var(--mono); font-size: var(--fs-meta); border-bottom: 1px solid var(--line); }
+.mast img { width: 22px; height: 22px; border-radius: var(--r-xs); }
+.mast .name { color: var(--bright); font-weight: 600; }
+.mast .crumb { color: var(--muted); }
+.mast .src { margin-left: auto; }
+
+.hero { padding: 40px 0 6px; }
+.hero .eyebrow { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; }
+.hero h1 { font-size: var(--fs-display); max-width: 22ch; letter-spacing: -0.02em; }
+.hero .sub { color: var(--muted); margin-top: 16px; max-width: 60ch; }
+
+.stage { margin-top: 34px; display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 34px; align-items: center; }
+.hero-card { display: grid; place-items: center; padding: 30px 18px 26px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-2); box-shadow: var(--shadow-1); }
+.viibi-holder-big { width: 150px; height: 212px; display: grid; place-items: center; }
+.viibi-holder-big .viibi, .viibi-holder-big svg { width: 100%; height: 100%; }
+.viibi-caption { font-family: var(--mono); font-size: var(--fs-title); color: var(--bright); text-align: center; margin-top: 10px; }
+.viibi-desc { font-family: var(--mono); font-size: var(--fs-meta); color: var(--muted); text-align: center; margin-top: 4px; min-height: 20px; }
+
+.states { display: flex; flex-direction: column; gap: 10px; }
+.sbtn { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-2); text-align: left; transition: border-color .15s var(--ease), background .15s var(--ease); }
+.sbtn:hover { border-color: var(--line-2); }
+.sbtn.is-on { border-color: var(--accent-ring); background: var(--accent-soft); }
+.sbtn .sname { font-family: var(--mono); font-size: var(--fs-ui); color: var(--bright); font-weight: 600; }
+.sbtn .strigger { font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); margin-top: 2px; }
+.sbtn .sdot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); flex: 0 0 auto; }
+.sbtn[data-state="blocked"] .sdot { background: var(--no); }
+.sbtn[data-state="error"] .sdot { background: var(--faint); }
+
+.app-note { margin: 46px 0 0; }
+.app-note .label { margin-bottom: 12px; }
+.win { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; background: var(--bg); box-shadow: var(--shadow-1); }
+.win-top { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.dots { display: flex; gap: 6px; margin-right: 4px; }
+.dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--line-2); }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: var(--fs-meta); color: var(--text); background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 3px 10px; }
+.win-top .spacer { flex: 1; }
+.gbtn { width: 26px; height: 26px; display: grid; place-items: center; border: 1px solid transparent; border-radius: var(--r-sm); background: transparent; color: var(--muted); font-family: var(--mono); font-size: 14px; }
+.win-body { display: flex; min-height: 200px; }
+.tree { flex: 0 0 auto; width: 148px; background: var(--bg-sunken); border-right: 1px solid var(--line); padding: 8px 6px; }
+.tree .row { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); padding: 2px 6px; border-radius: var(--r-xs); }
+.tree .row.is-dir { color: var(--text); }
+.tree .row.is-file { padding-left: 18px; }
+.dock { flex: 1; min-width: 0; }
+.pane { display: flex; flex-direction: column; height: 100%; }
+.pane-head { display: flex; align-items: center; gap: 6px; min-height: 30px; background: var(--surface-2); border-bottom: 1px solid var(--line); padding-right: 8px; }
+.tab { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); padding: 5px 12px; border-right: 1px solid var(--line); }
+.tab.is-active { color: var(--bright); background: var(--bg); box-shadow: inset 0 2px 0 var(--accent); }
+.pane-head .grow { flex: 1; }
+.pane-body { flex: 1; padding: 12px 14px; font-family: var(--mono); font-size: 11.5px; line-height: 1.7; color: var(--text); }
+.pane-body .dim { color: var(--muted); }
+.pane-body .ac { color: var(--accent); }
+.win-foot { display: flex; align-items: center; gap: 12px; padding: 4px 10px; background: var(--surface-2); border-top: 1px solid var(--line); font-family: var(--mono); font-size: var(--fs-micro); color: var(--muted); }
+.win-foot .spacer { flex: 1; }
+.viibi-holder { display: inline-flex; align-items: center; height: 18px; }
+.viibi-holder .viibi, .viibi-holder svg { width: 18px; height: 25px; }
+
+.why { margin: 46px 0 0; padding-top: 30px; border-top: 1px solid var(--line); display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 22px; }
+.why .card { padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-2); }
+.why .card h2 { font-size: var(--fs-title); margin-bottom: 8px; }
+.why .card p { color: var(--muted); font-size: var(--fs-meta); }
+
+.outro { border-top: 1px solid var(--line); margin-top: 56px; padding: 40px 0 80px; }
+.outro p { color: var(--muted); max-width: 66ch; }
+.cta { display: inline-block; margin-top: 14px; padding: 11px 20px; font-family: var(--mono); font-size: var(--fs-ui); color: var(--accent); text-decoration: none; border: 1px solid var(--accent-ring); border-radius: var(--r-pill); }
+.cta:hover { border-color: var(--accent); }
+
+@media (max-width: 820px) { .stage { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .viibi * { animation: none !important; }
+}
+
+/* ============================== VIBI ============================== */
+.viibi { --viibi: var(--accent); --viibi-fg: var(--accent-fg); --viibi-mid: #9ff1ff; --viibi-mist: #ffffff; display: block; }
+.viibi .body { fill: var(--viibi); filter: drop-shadow(var(--viibi-glow)); }
+.viibi .eye { fill: var(--viibi-fg); }
+.viibi .mouth { fill: none; stroke: var(--viibi-fg); stroke-width: 2.2; stroke-linecap: round; }
+.viibi .eye-arc { fill: none; stroke: var(--viibi-fg); stroke-width: 2.6; stroke-linecap: round; }
+.viibi .mouth-open { fill: var(--viibi-fg); stroke: none; }
+.viibi .mouth-o { fill: var(--viibi-fg); stroke: none; }
+.viibi .mouth-frown { fill: none; stroke: var(--viibi-fg); stroke-width: 2.2; stroke-linecap: round; }
+.viibi .shield { fill: var(--viibi); stroke: var(--viibi); filter: drop-shadow(var(--viibi-glow)); }
+.viibi .shieldcross { stroke: var(--viibi-fg); stroke-width: 3.5; fill: none; stroke-linecap: round; }
+.viibi .eyesx path { stroke: var(--viibi-fg); stroke-width: 2.4; fill: none; stroke-linecap: round; }
+.viibi .halo { animation: v-breathe 3.6s ease-in-out infinite; }
+.viibi .bodygroup { transform-box: fill-box; transform-origin: 50% 35%; animation: v-bob 3s ease-in-out infinite; }
+.viibi .eyes { transform-box: fill-box; transform-origin: 50% 50%; animation: v-blink 4.6s infinite; }
+.viibi .wisp { fill: var(--viibi-mist); filter: drop-shadow(0 0 3px var(--viibi-mist)); transform-box: fill-box; transform-origin: center; animation: v-wisp 1.8s linear infinite; animation-delay: var(--d, 0s); opacity: 0; }
+.viibi .spark { opacity: 0; }
+.viibi .eyesx { display: none; }
+.viibi .eyes-happy, .viibi .eyes-wide, .viibi .mouth-open, .viibi .mouth-o, .viibi .mouth-frown { display: none; }
+.viibi .shield { display: none; }
+
+/* reading — the tail streams, sparkles pop, the body tilts as it reads */
+.viibi.s-reading .bodygroup { animation: v-tilt 0.9s ease-in-out infinite; }
+.viibi.s-reading .wisp { animation-duration: 0.9s; }
+.viibi.s-reading .spark { animation: v-spark 1.6s infinite; }
+.viibi.s-reading .spark.s2 { animation-delay: 0.45s; }
+.viibi.s-reading .spark.s3 { animation-delay: 0.9s; }
+.viibi.s-reading .eyes { display: none; }
+.viibi.s-reading .eyes-happy { display: block; }
+.viibi.s-reading .mouth { display: none; }
+.viibi.s-reading .mouth-open { display: block; }
+
+/* gapped — ribbon becomes the shield */
+.viibi.s-gapped .wisps { display: none; }
+.viibi.s-gapped .shield { display: block; }
+.viibi.s-gapped .bodygroup { animation: v-breathe 2.2s ease-in-out infinite; }
+
+/* blocked — red, startled */
+.viibi.s-blocked { --viibi: var(--no); --viibi-fg: #fff; --viibi-mid: #ffb3bf; --viibi-mist: #ffd9de; }
+.viibi.s-blocked .wisps { display: none; }
+.viibi.s-blocked .bodygroup { animation: v-jolt 0.5s ease-in-out infinite; }
+.viibi.s-blocked .halo { animation: v-pulse 0.5s ease-in-out infinite; }
+.viibi.s-blocked .eyes { display: none; }
+.viibi.s-blocked .eyes-wide { display: block; }
+.viibi.s-blocked .mouth { display: none; }
+.viibi.s-blocked .mouth-o { display: block; }
+
+/* error — dims to an ember, X eyes */
+.viibi.s-error { --viibi: var(--faint); --viibi-fg: var(--text); --viibi-mid: #9aa3b4; --viibi-mist: #c3cad6; }
+.viibi.s-error .eyes { display: none; }
+.viibi.s-error .eyesx { display: block; }
+.viibi.s-error .mouth { display: none; }
+.viibi.s-error .mouth-frown { display: block; }
+.viibi.s-error .wisps { opacity: 0.4; }
+.viibi.s-error .bodygroup { animation: v-ember 2.4s ease-in-out infinite; }
+
+@keyframes v-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes v-breathe { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.85; } }
+@keyframes v-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@keyframes v-blink { 0%, 91%, 100% { transform: scaleY(1); } 94% { transform: scaleY(0.12); } }
+@keyframes v-tilt { 0%, 100% { transform: rotate(-5deg); } 50% { transform: rotate(5deg); } }
+@keyframes v-sway { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(5deg); } }
+@keyframes v-stream { 0%, 100% { transform: rotate(-8deg) scaleY(0.85); } 50% { transform: rotate(8deg) scaleY(1.1); } }
+@keyframes v-spark { 0%, 100% { opacity: 0; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-6px); } }
+@keyframes v-jolt { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(2.5px); } 40%, 80% { transform: translateX(-2.5px); } }
+@keyframes v-ember { 0%, 100% { opacity: 0.35; transform: rotate(6deg) translateY(8px); } 50% { opacity: 0.6; transform: rotate(5deg) translateY(8px); } }
+@keyframes v-wisp { 0% { opacity: 0; transform: translate(0, 0) scale(1); } 15% { opacity: 0.9; } 100% { opacity: 0; transform: translate(var(--tx, 0px), var(--ty, 46px)) scale(0.3); } }
+</style>
+<script>document.documentElement.classList.add('js')</script>
+</head>
+<body>
+
+<header class="mast">
+  <img src="icon.png" width="256" height="256" alt="">
+  <span class="name">tome</span>
+  <span class="crumb">/ viibi</span>
+  <a class="src" href="index.html">home</a>
+  <a class="src" href="https://github.com/zwaneldmz/tome">source &#8599;</a>
+</header>
+
+<div class="wrap">
+<section class="hero" aria-labelledby="title">
+  <div class="eyebrow"><span class="badge">mascot</span><span class="label" style="margin:0">proof-of-concept</span></div>
+  <h1 id="title">Viibi — a bookmark made of light.</h1>
+  <p class="sub">Tome's bookmark sigil, given the app's own glow, with a comet ribbon that trails its work. Viibi roams between panes, reads while the agents think, and holds the shield while the containment is doing its job. Named for the vibe in vibe coding.</p>
+</section>
+</div>
+
+<div class="wrap">
+<div class="stage">
+  <div class="hero-card" id="hero-card">
+    <div class="viibi-holder-big" id="viibi-big"></div>
+    <div class="viibi-caption" id="viibi-caption">resting</div>
+    <div class="viibi-desc" id="viibi-desc">nothing is running — Viibi breathes</div>
+  </div>
+  <div class="states" role="group" aria-label="Viibi states">
+    <button class="sbtn is-on" data-state="resting">
+      <span class="sdot"></span>
+      <span><span class="sname">resting</span><div class="strigger">idle · nothing being processed</div></span>
+    </button>
+    <button class="sbtn" data-state="reading">
+      <span class="sdot"></span>
+      <span><span class="sname">reading</span><div class="strigger">agent thinking · flow running · chat streaming · voice transcribing</div></span>
+    </button>
+    <button class="sbtn" data-state="gapped">
+      <span class="sdot"></span>
+      <span><span class="sname">gapped</span><div class="strigger">holding the containment — model APIs only</div></span>
+    </button>
+    <button class="sbtn" data-state="blocked">
+      <span class="sdot"></span>
+      <span><span class="sname">blocked</span><div class="strigger">a request was refused at the proxy</div></span>
+    </button>
+    <button class="sbtn" data-state="error">
+      <span class="sdot"></span>
+      <span><span class="sname">error</span><div class="strigger">something failed — Viibi dims to an ember</div></span>
+    </button>
+  </div>
+</div>
+
+<div class="app-note">
+  <p class="label">in context — status bar, next to the containment state</p>
+  <div class="win">
+    <div class="win-top">
+      <span class="dots"><i></i><i></i><i></i></span>
+      <span class="chip"><span class="sigil">▚</span> tome</span>
+      <span class="chip">main</span>
+      <span class="spacer"></span>
+      <span class="gbtn">🎙</span><span class="gbtn">◐</span><span class="gbtn">＋</span>
+    </div>
+    <div class="win-body">
+      <div class="tree">
+        <div class="row is-dir">▾ src</div>
+        <div class="row is-file">panes.js</div>
+        <div class="row is-file">renderer.js</div>
+        <div class="row is-dir">▾ test</div>
+        <div class="row is-file">panes.test.js</div>
+      </div>
+      <div class="dock">
+        <div class="pane">
+          <div class="pane-head"><span class="tab is-active">⛨ claude</span><span class="grow"></span></div>
+          <div class="pane-body">
+            <div class="dim">~ $ claude</div>
+            <div class="ac">◐ thinking…</div>
+            <div class="dim">&nbsp;&nbsp;Reading the diff against the plan.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="win-foot">
+      <span>tome</span><span>claude · pty-3</span>
+      <span class="spacer"></span>
+      <span class="viibi-holder" id="viibi-inbar"></span>
+      <span style="color:var(--accent)">⛨ model APIs only</span>
+    </div>
+  </div>
+</div>
+
+<div class="why">
+  <div class="card"><h2>It's a progress affordance</h2><p>The comet ribbon is work made visible — length maps to progress, and the trail you see fading is where Viibi has just been. Processing stops being a hidden spinner.</p></div>
+  <div class="card"><h2>It's the containment</h2><p>When Viibi holds the ⛨ shield, the sandbox is sealed. The mascot and the security model agree on one symbol, so the product's premise finally has a face.</p></div>
+  <div class="card"><h2>It's quiet</h2><p>Viibi respects reduced-motion, idles to near-invisibility, and never speaks. It glows when there is work and sleeps when there isn't.</p></div>
+</div>
+</div>
+
+<footer class="outro"><div class="wrap">
+  <p>This page is the design pass. The next step is extracting Viibi into <code>src/renderer/viibi.js</code> and driving its state from the real event stream — agent spawn, flow runs, conductor streaming, voice transcription, and blocked-host events.</p>
+  <a class="cta" href="affordance-mockups.html">Back to the mockups</a>
+  <a class="cta" href="https://github.com/zwaneldmz/tome" style="margin-left:8px">Read the source</a>
+</div></footer>
+
+<script>
+(function () {
+  'use strict';
+  var WISPS = [
+    [46, 95, 2.0, 5, 58, 0], [63, 97, 1.7, -4, 62, 0.18], [52, 99, 1.5, 7, 60, 0.36], [70, 101, 2.0, -5, 64, 0.54],
+    [44, 103, 1.8, 8, 62, 0.72], [58, 105, 1.6, -2, 66, 0.09], [67, 108, 1.7, -6, 68, 0.27], [49, 110, 2.1, 6, 64, 0.45],
+    [61, 113, 1.5, -3, 68, 0.63], [72, 116, 1.4, -7, 66, 0.81], [54, 118, 1.9, 7, 70, 0.15], [64, 122, 1.4, -5, 70, 0.33],
+    [47, 124, 1.7, 8, 72, 0.51], [57, 128, 1.6, -2, 70, 0.69], [68, 131, 1.3, -6, 72, 0.87], [50, 134, 1.5, 7, 72, 0.21],
+    [60, 138, 1.4, -1, 70, 0.39], [55, 142, 1.3, 5, 72, 0.57], [65, 146, 1.2, -5, 70, 0.75]
+  ];
+  var wispHtml = WISPS.map(function (w) {
+    return '<circle class="wisp" cx="' + w[0] + '" cy="' + w[1] + '" r="' + w[2] + '" style="--tx:' + w[3] + 'px; --ty:' + w[4] + 'px; --d:' + w[5] + 's"/>';
+  }).join('');
+  var n = 0;
+  function makeViibi() {
+    var gid = 'vgrad-' + (++n);
+    var el = document.createElement('div');
+    el.className = 'viibi s-resting';
+    el.innerHTML =
+      '<svg viewBox="0 0 120 170" role="img" aria-label="Viibi, resting">' +
+      '<defs>' +
+      '<radialGradient id="' + gid + '-halo"><stop offset="0" stop-color="var(--viibi)" stop-opacity="0.55"/><stop offset="1" stop-color="var(--viibi)" stop-opacity="0"/></radialGradient>' +
+      '<linearGradient id="' + gid + '-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--viibi)" stop-opacity="1"/><stop offset="0.5" stop-color="var(--viibi)" stop-opacity="1"/><stop offset="0.7" stop-color="var(--viibi-mid)" stop-opacity="1"/><stop offset="0.86" stop-color="var(--viibi-mist)" stop-opacity="0.9"/><stop offset="1" stop-color="var(--viibi-mist)" stop-opacity="0.85"/></linearGradient>' +
+      '</defs>' +
+      '<g class="halo"><circle cx="60" cy="50" r="50" fill="url(#' + gid + '-halo)"/></g>' +
+      '<g class="wisps">' + wispHtml + '</g>' +
+      '<g class="bodygroup">' +
+      '<path class="body" d="M40 20 Q40 14 46 14 L74 14 Q80 14 80 20 L80 84 Q80 92 72 92 L48 92 Q40 92 40 84 Z"/>' +
+      '<g class="eyes"><circle class="eye" cx="50" cy="40" r="3.4"/><circle class="eye" cx="70" cy="40" r="3.4"/></g>' +
+      '<g class="eyes-happy"><path class="eye-arc" d="M45 40 Q50 35 55 40"/><path class="eye-arc" d="M65 40 Q70 35 75 40"/></g>' +
+      '<g class="eyes-wide"><circle class="eye" cx="50" cy="40" r="5"/><circle class="eye" cx="70" cy="40" r="5"/></g>' +
+      '<g class="eyesx"><path d="M46 36 L54 44 M54 36 L46 44"/><path d="M66 36 L74 44 M74 36 L66 44"/></g>' +
+      '<path class="mouth" d="M54 52 Q60 58 66 52"/>' +
+      '<path class="mouth-open" d="M54 52 Q60 64 66 52 Z"/>' +
+      '<circle class="mouth-o" cx="60" cy="54" r="3.5"/>' +
+      '<path class="mouth-frown" d="M54 58 Q60 52 66 58"/>' +
+      '</g>' +
+      '<g class="shield"><path d="M46 24 L74 24 L74 50 C74 66 60 74 60 80 C60 74 46 66 46 50 Z"/><path class="shieldcross" d="M60 30 V72 M50 51 H70"/></g>' +
+      '<g class="sparkles"><circle class="spark s1" cx="93" cy="18" r="2.2"/><circle class="spark s2" cx="100" cy="42" r="1.6"/><circle class="spark s3" cx="22" cy="30" r="1.8"/></g>' +
+      '</svg>';
+    return el;
+  }
+
+  document.getElementById('viibi-big').appendChild(makeViibi());
+  document.getElementById('viibi-inbar').appendChild(makeViibi());
+
+  var glow = document.createElement('style');
+  glow.textContent = '.viibi { --viibi-glow: 0 0 12px rgba(0,229,255,0.45); }' +
+    '@media (prefers-color-scheme: light) { .viibi { --viibi-glow: 0 0 8px rgba(0,113,227,0.28); } }' +
+    '.viibi.s-blocked { --viibi-glow: 0 0 12px rgba(255,59,92,0.5); }';
+  document.head.appendChild(glow);
+
+  var states = {
+    resting: { label: 'resting', desc: 'nothing is running — Viibi breathes' },
+    reading: { label: 'reading', desc: 'processing — tail streams, sparkles rise' },
+    gapped: { label: 'gapped', desc: 'holding the containment — ribbon is the shield' },
+    blocked: { label: 'blocked', desc: 'a request was refused — startled, red' },
+    error: { label: 'error', desc: 'failed — dimmed to an ember, X eyes' }
+  };
+
+  var caption = document.getElementById('viibi-caption');
+  var desc = document.getElementById('viibi-desc');
+  var buttons = document.querySelectorAll('.sbtn');
+
+  function setState(s) {
+    document.querySelectorAll('.viibi').forEach(function (v) {
+      v.className = v.className.replace(/\bs-\w+/g, '').trim() + ' s-' + s;
+      var svg = v.querySelector('svg');
+      if (svg) svg.setAttribute('aria-label', 'Viibi, ' + states[s].label);
+    });
+    caption.textContent = states[s].label;
+    desc.textContent = states[s].desc;
+    buttons.forEach(function (b) { b.classList.toggle('is-on', b.getAttribute('data-state') === s); });
+  }
+
+  buttons.forEach(function (b) {
+    b.addEventListener('click', function () { setState(b.getAttribute('data-state')); });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400" width="1200" height="400" role="img" aria-label="Tome — one workspace for your coding agents, with the agents in a containment cell.">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b0b11"/>
+      <stop offset="1" stop-color="#050508"/>
+    </linearGradient>
+    <linearGradient id="bookfill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#00e5ff" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#00e5ff" stop-opacity="0.02"/>
+    </linearGradient>
+    <linearGradient id="ribbon" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff2ea6"/>
+      <stop offset="1" stop-color="#8f1f63"/>
+    </linearGradient>
+  </defs>
+
+  <!-- background -->
+  <rect width="1200" height="400" fill="url(#bg)"/>
+
+  <!-- tiling-grid hairline motif: one grid, faint -->
+  <g stroke="#1d1f2e" stroke-width="1">
+    <line x1="0" y1="200" x2="1200" y2="200"/>
+    <line x1="560" y1="0" x2="560" y2="400"/>
+    <line x1="0" y1="100" x2="560" y2="100"/>
+    <line x1="0" y1="300" x2="560" y2="300"/>
+    <line x1="280" y1="0" x2="280" y2="400"/>
+    <line x1="840" y1="0" x2="840" y2="400"/>
+  </g>
+
+  <!-- sigil: bookmark, pointed bottom, cyan outline + subtle fill -->
+  <g transform="translate(86 46)">
+    <path d="M 20 30 H 140 V 240 L 80 284 L 20 240 Z"
+          fill="url(#bookfill)" stroke="#00e5ff" stroke-width="3" stroke-linejoin="round"/>
+    <!-- ribbon band near the top -->
+    <rect x="20" y="66" width="120" height="30" fill="url(#ribbon)" opacity="0.92"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="280" y="196" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace" font-size="88" font-weight="600" letter-spacing="-1" fill="#eef4fb">tome</text>
+  <text x="282" y="242" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace" font-size="22" fill="#737e96">one workspace for your coding agents</text>
+
+  <!-- the containment cell, illustrated: a framed terminal pane -->
+  <g transform="translate(600 60)">
+    <rect x="0" y="0" width="540" height="280" rx="12" fill="#151723" stroke="#1d1f2e"/>
+    <!-- cyan strip: the model-APIs-only bar -->
+    <rect x="0" y="0" width="540" height="6" rx="3" fill="#00e5ff" opacity="0.85"/>
+    <rect x="0" y="44" width="540" height="1" fill="#1d1f2e"/>
+
+    <text x="26" y="30" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace" font-size="14" fill="#00e5ff">&#9960; agent pane · model APIs only</text>
+
+    <text x="26" y="86" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace" font-size="18" fill="#eef4fb"><tspan fill="#3dff9e">$</tspan> claude --model haiku</text>
+    <text x="26" y="122" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace" font-size="15" fill="#737e96">&#10003; api.anthropic.com <tspan fill="#3dff9e">allowed</tspan></text>
+    <text x="26" y="152" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace" font-size="15" fill="#737e96">&#10007; github.com <tspan fill="#ff3b5c">blocked</tspan></text>
+    <text x="26" y="182" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace" font-size="15" fill="#737e96">&#10007; raw sockets <tspan fill="#ff3b5c">denied</tspan></text>
+
+    <rect x="26" y="212" width="488" height="1" fill="#1d1f2e"/>
+    <text x="26" y="244" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace" font-size="14" fill="#5d6780">sandboxed · the only way out is the allowlist proxy</text>
+  </g>
+</svg>
