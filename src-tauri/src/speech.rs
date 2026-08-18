@@ -160,7 +160,11 @@ fn prepare_recognizer() -> Result<objc2::rc::Retained<objc2_speech::SFSpeechReco
 /// sends the standard `fmt `+`data` layout, so the data payload is simply
 /// everything after the 44-byte header (no `LIST`/`INFO` chunk walk
 /// needed). The RIFF/WAVE/fmt magic check rejects non-WAV input loudly
-/// instead of transcribing garbage into an empty result.
+/// instead of transcribing garbage into an empty result. Off macOS its only
+/// caller is the cross-platform test suite (the macOS `transcribe_wav` path
+/// is `#[cfg(target_os = "macos")]`), so a non-macOS non-test build would
+/// see it as dead code.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn parse_wav(wav: &[u8]) -> Result<(Vec<f32>, u32), String> {
     if wav.len() < 44 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" || &wav[12..16] != b"fmt "
     {

@@ -179,6 +179,17 @@ entries:
   is lock-gated. The write can therefore queue a vetted-shape entry for
   later, never execute one.
 
+### 9. The speech-model download is a fixed, user-triggered fetch from the main process
+
+The whisper.cpp fallback's one-click model download (`stt:downloadModel`,
+`src-tauri/src/ipc/stt.rs` → `src-tauri/src/stt.rs`'s `download_model`)
+fetches `ggml-base.en.bin` from a fixed `huggingface.co` URL in the **main
+process** — not through the pane allowlist — and only on an explicit button
+click in Preferences/onboarding, never automatically at boot. The downloaded
+bytes are validated (ggml magic header + minimum size) before being atomically
+renamed into place, so an error page or truncated download is never accepted
+as the model.
+
 ## Secondary invariants worth knowing
 
 - **Renderer names a pane kind, the backend builds the command line.**
