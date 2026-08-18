@@ -425,8 +425,8 @@ export function stopVoice() {
   tome.chat.abort(VOICE_CHAT_ID)
   stopSpeaking()
   stopMic()
-  // The pane (if open) keeps whatever partial reply it rendered — it will
-  // finalize it when its own chat:done lands. Our copy flushes directly.
+  // The pane (if open) keeps whatever partial reply it rendered — it
+  // finalizes it when its own chat:done lands. Our copy flushes directly.
   if (!pane()) flushHistory(VOICE_CHAT_ID, history)
   setState('idle')
 }

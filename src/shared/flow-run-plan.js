@@ -30,7 +30,7 @@ export const CONCURRENCY_CAP = 2
 export const RUN_PANE_PREFIX = 'run:'
 export const runPaneId = (runId, nodeId) => `${RUN_PANE_PREFIX}${runId}:${nodeId}`
 
-// A node in one of these has finished and will never run again.
+// A node in one of these has finished and never runs again.
 const TERMINAL = new Set(['done', 'failed', 'canceled', 'skipped'])
 // …and one of these means everything downstream must be given up on rather
 // than left pending forever: the node's handoff file was never written, so a

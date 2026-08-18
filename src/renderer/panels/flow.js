@@ -145,7 +145,7 @@ export class FlowPanel {
     } catch (err) {
       // Belt-and-suspenders: validateFlow assumes each node/edge is at least
       // an object with the expected fields. A hand-edited file that violates
-      // that (e.g. a node that's a bare string) shouldn't take the panel down
+      // that (for example a node that's a bare string) shouldn't take the panel down
       // with it — surface it the same way a parse failure is.
       return this.renderError(`"${this.name}" could not be read as a flow: ${err.message}`)
     }
@@ -947,7 +947,7 @@ export class FlowPanel {
       try {
         v.releasePointerCapture(e.pointerId)
       } catch {
-        /* already released (e.g. right after pointercancel) — fine */
+        /* already released (for example, right after pointercancel) — fine */
       }
       // A pointerdown/up on empty canvas that never moved past a few pixels
       // is a click, not a pan — treat it as "clicked the background" and
@@ -1325,7 +1325,7 @@ export class FlowPanel {
       return
     }
     // Dirty (or mid-edit): don't clobber it with a silent reload. Flag the
-    // conflict instead — Save will overwrite the newer file, which the
+    // conflict instead — Save overwrites the newer file, which the
     // warning strip now calls out, mirroring editor.js's "keep the buffer,
     // the next save overwrites" choice for a dirty pane.
     this.diskConflict = true

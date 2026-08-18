@@ -30,7 +30,7 @@ describe('isLive()', () => {
   })
 
   it('is false once expires has passed — the comparison this pins', () => {
-    // A flipped `Date.now() < expiresAt` (e.g. to <=, or the operands
+    // A flipped `Date.now() < expiresAt` (for example to <=, or the operands
     // swapped) would accept an expired exception; both directions are wrong.
     expect(isLive({ reason: 'vendor fix pending', expires: past })).toBe(false)
   })
@@ -119,7 +119,7 @@ describe('evaluateAudit()', () => {
   })
 
   it('does not skip an advisory exactly AT the threshold — the rank < threshold boundary', () => {
-    // Regression guard: an inverted or off-by-one skip condition (e.g.
+    // Regression guard: an inverted or off-by-one skip condition (for example
     // `rank <= threshold`) would wrongly drop the exact-threshold case.
     const { blocked, reviewed } = evaluateAudit({ p: vulnAt('high') }, {}, SEVERITY_RANK.high)
     expect(reviewed).toBe(1)

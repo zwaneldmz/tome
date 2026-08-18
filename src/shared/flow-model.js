@@ -28,7 +28,7 @@ function lowestUnusedId(items, prefix) {
 }
 
 // Mutates `flow` in place and returns the node (with its id filled in, if it
-// wasn't already set) so the caller — e.g. a "drop a new node" UI action —
+// wasn't already set) so the caller — for example a "drop a new node" UI action —
 // can read the generated id straight off the object it just handed in.
 export function addNode(flow, node) {
   if (node.id == null) node.id = lowestUnusedId(flow.nodes, 'n')
@@ -37,7 +37,7 @@ export function addNode(flow, node) {
 }
 
 // The prospective-edge check, factored out so the UI can call it *before*
-// committing a drag-drawn edge (e.g. to show a red port while hovering an
+// committing a drag-drawn edge (for example to show a red port while hovering an
 // invalid target) without mutating the flow. addEdge below is just this
 // check followed by the mutation. Returns a human-readable refusal, or null
 // if the edge is fine to add.
@@ -76,7 +76,7 @@ export function addEdge(flow, edge) {
 
 // Cascading delete: drops the node and every edge that touches it (either
 // endpoint) together, in one place. A future edit that only filters one side
-// (e.g. keeps `edge.from !== nodeId` but forgets `edge.to !== nodeId`) would
+// (for example keeps `edge.from !== nodeId` but forgets `edge.to !== nodeId`) would
 // leave a stale edge referencing a now-deleted node in flow.edges; Save
 // persists that straight to disk, and the next time the file opens,
 // validateFlow's structural "missing node" check (an error, not a warning)
@@ -237,7 +237,7 @@ export function validateFlow(flow) {
 //
 // Deterministic tie-break: nodes with no unmet dependency become runnable in
 // the order they appear in flow.nodes, and a node's outgoing edges are
-// walked in flow.edges order — i.e. ties resolve by insertion order, not by
+// walked in flow.edges order — that is, ties resolve by insertion order, not by
 // id string or any other derived ordering. Disconnected nodes have no
 // incoming edges, so they're runnable from the start and fall out in their
 // array position like everything else.
@@ -287,7 +287,7 @@ function handoffPath(artifactsDir, nodeId, outputName) {
 // relative to whatever folder contains this flow's own ".tome" — not to the
 // flow.json's own folder, which is two levels deeper (".tome/flows/"). A
 // flow saved under a workspace's .tome walks back up to that workspace root;
-// a hand-placed flow.json that was never put under a .tome at all (e.g. a
+// a hand-placed flow.json that was never put under a .tome at all (for example a
 // test fixture, or one dragged in from elsewhere) falls back to its own
 // directory so Run still has *some* cwd to spawn into, even though the
 // handoff paths it types won't resolve to anything meaningful in that case.
