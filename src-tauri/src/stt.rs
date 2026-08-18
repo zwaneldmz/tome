@@ -288,6 +288,62 @@ pub fn warmup_silence() -> Vec<u8> {
     silence_wav(1_600, 16_000)
 }
 
+// ---- engine abstraction (voice-0.4 Task 1) ----
+//
+// Until now this module only knew about whisper.cpp. Task 1 introduces the
+// engine *surface* behind which Apple's on-device recognizer (Task 2,
+// `objc2-speech`) and whisper.cpp both sit: an `Engine` the resolver
+// [`engine_kind`] picks from the `stt-engine` preference, plus a
+// placeholder availability probe for the Apple side. The actual Apple
+// transcription path is out of scope here — only the choice and the
+// availability reporting land now, so `ipc::stt` can report a resolved
+// engine before any Apple backend exists.
+
+/// Which speech-to-text engine a resolved preference selects. The Apple
+/// variant is not wired to a real recognizer yet — see [`apple_available`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Engine {
+    Apple,
+    Whisper,
+}
+
+impl Engine {
+    /// Wire name the renderer reads (`"apple"` / `"whisper"`).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Engine::Apple => "apple",
+            Engine::Whisper => "whisper",
+        }
+    }
+}
+
+/// Resolves the `stt-engine` preference to a concrete engine. An explicit
+/// `"apple"`/`"whisper"` wins outright regardless of availability; anything
+/// else (including `"auto"` and the default `""`) prefers Apple when
+/// available and falls back to whisper otherwise. `whisper_ready` is
+/// accepted for call-site symmetry with [`engine_kind`]'s one caller in
+/// `ipc::stt` (which already computes it for its own `ready`/`why` shape)
+/// but is not consulted here: `auto` only asks "can Apple run?", since a
+/// not-ready whisper is still the correct fallback target — its own
+/// unavailability is reported separately, not silently reselected around.
+pub fn engine_kind(preference: &str, apple_available: bool, _whisper_ready: bool) -> Engine {
+    match preference {
+        "apple" => Engine::Apple,
+        "whisper" => Engine::Whisper,
+        _ if apple_available => Engine::Apple,
+        _ => Engine::Whisper,
+    }
+}
+
+/// Whether Apple's on-device speech recognizer is usable on this Mac.
+/// Placeholder: Task 2 replaces this with the real `objc2-speech` probe —
+/// until then it always returns `false`, so `auto` resolves to whisper and
+/// an explicit `"apple"` preference reports not-ready with the "unavailable
+/// on this Mac" message.
+pub fn apple_available() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,6 +589,45 @@ mod tests {
     #[test]
     fn warmup_silence_is_1600_samples_at_16khz() {
         assert_eq!(warmup_silence().len(), 44 + 1_600 * 2);
+    }
+
+    // ---- engine_kind() / Engine ----
+
+    #[test]
+    fn engine_as_str_matches_the_wire_names() {
+        assert_eq!(Engine::Apple.as_str(), "apple");
+        assert_eq!(Engine::Whisper.as_str(), "whisper");
+    }
+
+    #[test]
+    fn engine_kind_auto_prefers_apple_when_available() {
+        assert_eq!(engine_kind("auto", true, true), Engine::Apple);
+        assert_eq!(engine_kind("auto", true, false), Engine::Apple);
+    }
+
+    #[test]
+    fn engine_kind_auto_falls_back_to_whisper_when_apple_is_not_available() {
+        assert_eq!(engine_kind("auto", false, true), Engine::Whisper);
+        assert_eq!(engine_kind("auto", false, false), Engine::Whisper);
+    }
+
+    #[test]
+    fn engine_kind_explicit_preference_wins_regardless_of_availability() {
+        assert_eq!(engine_kind("apple", false, false), Engine::Apple);
+        assert_eq!(engine_kind("whisper", true, true), Engine::Whisper);
+    }
+
+    #[test]
+    fn engine_kind_treats_unknown_or_empty_preference_as_auto() {
+        assert_eq!(engine_kind("", true, true), Engine::Apple);
+        assert_eq!(engine_kind("", false, true), Engine::Whisper);
+        assert_eq!(engine_kind("bogus", true, true), Engine::Apple);
+        assert_eq!(engine_kind("bogus", false, true), Engine::Whisper);
+    }
+
+    #[test]
+    fn apple_available_is_a_placeholder_that_reports_false_until_task_2() {
+        assert!(!apple_available());
     }
 
     // ---- real whisper-cli smoke (opt-in, not run by the normal gate) ----

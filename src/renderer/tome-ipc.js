@@ -386,6 +386,7 @@
       transcribe: (wav) => call('stt_transcribe', { wav }),
       warmup: () => call('stt_warmup'),
       status: () => call('stt_status'),
+      engine: () => call('stt_engine'),
     },
 
     chat: {

@@ -344,6 +344,8 @@ export async function showOnboarding() {
       .status()
       .then((s) => {
         if (state.step !== myStep) return // navigated away — body belongs to another step
+        const apple = s.engine === 'apple'
+        sttName.textContent = apple ? 'Apple on-device dictation' : 'local whisper transcription'
         if (s.ready) {
           sttDot.className = 'ob-dot-avail ok'
           sttDot.textContent = '●'
@@ -351,7 +353,11 @@ export async function showOnboarding() {
         } else {
           sttDot.className = 'ob-dot-avail off'
           sttDot.textContent = '○'
-          sttHint.textContent = !s.bin ? 'whisper-cli not installed' : 'speech model not downloaded'
+          sttHint.textContent = apple
+            ? 'on-device dictation unavailable'
+            : !s.bin
+              ? 'whisper-cli not installed'
+              : 'speech model not downloaded'
         }
       })
       .catch(() => {

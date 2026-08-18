@@ -7,14 +7,16 @@
 //!
 //! This file resolves `AppHandle` paths (`app_data_dir` for the model,
 //! `temp_dir` for the scratch WAV), the `TOME_WHISPER_BIN` env override,
-//! and the `voice-warmup` store-key gate, then hands plain values down to
-//! `crate::stt` — porting `src/main/index.js`'s three `stt:*` handlers
-//! (~lines 1211-1264) verbatim in shape: `stt:transcribe` and
+//! and the `voice-warmup`/`stt-engine` store-key gates, then hands plain
+//! values down to `crate::stt` — porting `src/main/index.js`'s `stt:*`
+//! handlers (~lines 1211-1264) verbatim in shape: `stt:transcribe` and
 //! `stt:warmup` never reject (failures come back as `{ error }`/
 //! `{ skipped: true }` values, matching the originals' try/catch-shaped
 //! bodies — the lock-gate check is the one `Err` either can still
 //! produce, same as every other gated command), `stt:status` never spawns
-//! a process.
+//! a process, and `stt:engine` is the Task 1 engine-resolver surface that
+//! reports the resolved Apple/whisper engine from the `stt-engine`
+//! preference.
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
@@ -41,6 +43,18 @@ fn whisper_bin_override() -> Option<String> {
 /// defaults on, so each gets its own small helper rather than sharing one.
 fn warmup_enabled(v: &Value) -> bool {
     !matches!(v, Value::Null | Value::Bool(false))
+}
+
+/// Reads the `stt-engine` preference from the stored value, defaulting to
+/// `"auto"` when the value is null, empty, or not a string — mirroring the
+/// renderer's own `(await store.get('stt-engine')) || 'auto'` fallback, so
+/// a never-set or cleared key resolves to the same auto behavior on both
+/// sides.
+fn engine_preference(v: &Value) -> String {
+    match v.as_str() {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => "auto".to_string(),
+    }
 }
 
 /// `stt:transcribe`. One finished WAV buffer in, `{ text }` or
@@ -139,8 +153,12 @@ pub async fn stt_warmup(app: AppHandle, state: State<'_, AppState>) -> Result<Va
 }
 
 /// `stt:status`. No spawn — the onboarding Voice step's status row reads
-/// this to show whether whisper is ready before the user presses Test,
-/// and which of the two installs (binary, model) is missing.
+/// this to show whether speech is ready before the user presses Test, and
+/// which of the two installs (binary, model) is missing for whisper. The
+/// top-level `ready`/`bin`/`model` keys are the original whisper-shaped
+/// result, kept verbatim so existing readers (onboarding) don't regress;
+/// `engine`/`preference`/`apple`/`whisper`/`why` are the Task 1 engine
+/// additions the Settings surface and future Apple backend consume.
 #[tauri::command]
 pub async fn stt_status(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
     lock_gate::guard(&state, "stt:status")?;
@@ -149,9 +167,74 @@ pub async fn stt_status(app: AppHandle, state: State<'_, AppState>) -> Result<Va
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let model = stt::model_path(&dir);
 
+    // Same store read shape as `stt_warmup`: the `stt-engine` key gate goes
+    // through `store::get` inside `spawn_blocking` (it is a file read, so it
+    // must not block the async runtime).
+    let locked = *state.locked.read().unwrap();
+    let dir_for_store = dir.clone();
+    let pref = tokio::task::spawn_blocking(move || store::get(&dir_for_store, "stt-engine", locked))
+        .await
+        .unwrap_or(Value::Null);
+    let preference = engine_preference(&pref);
+
+    let whisper_why = stt::stt_unavailable(bin.as_deref(), &model);
+    let whisper_ready = whisper_why.is_none();
+    let bin_ok = bin.as_deref().map(stt::bin_exists).unwrap_or(false);
+    let model_ok = stt::model_exists(&model);
+
+    let apple_available = stt::apple_available();
+    let engine = stt::engine_kind(&preference, apple_available, whisper_ready);
+
+    let ready = match engine {
+        stt::Engine::Apple => apple_available,
+        stt::Engine::Whisper => whisper_ready,
+    };
+    let why = match engine {
+        stt::Engine::Apple if !apple_available => {
+            Some("On-device speech recognition is unavailable on this Mac.".to_string())
+        }
+        stt::Engine::Whisper => whisper_why,
+        stt::Engine::Apple => None,
+    };
+
     Ok(json!({
-        "ready": stt::stt_unavailable(bin.as_deref(), &model).is_none(),
-        "bin": bin.as_deref().map(stt::bin_exists).unwrap_or(false),
-        "model": stt::model_exists(&model),
+        "ready": ready,
+        "bin": bin_ok,
+        "model": model_ok,
+        "engine": engine.as_str(),
+        "preference": preference,
+        "apple": { "available": apple_available },
+        "whisper": { "ready": whisper_ready, "bin": bin_ok, "model": model_ok },
+        "why": why,
+    }))
+}
+
+/// `stt:engine`. Reports the stored preference and the resolved engine (plus
+/// whether it is available) without spawning anything — a synchronous,
+/// read-only companion to `stt:status` for the Settings surface's
+/// engine-select row, which needs the resolution but not the full
+/// availability shape. Gated like every other command.
+#[tauri::command]
+pub fn stt_engine(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
+    lock_gate::guard(&state, "stt:engine")?;
+
+    let bin = stt::whisper_bin(whisper_bin_override().as_deref());
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let model = stt::model_path(&dir);
+    let locked = *state.locked.read().unwrap();
+    let preference = engine_preference(&store::get(&dir, "stt-engine", locked));
+
+    let whisper_ready = stt::stt_unavailable(bin.as_deref(), &model).is_none();
+    let apple_available = stt::apple_available();
+    let engine = stt::engine_kind(&preference, apple_available, whisper_ready);
+    let available = match engine {
+        stt::Engine::Apple => apple_available,
+        stt::Engine::Whisper => whisper_ready,
+    };
+
+    Ok(json!({
+        "preference": preference,
+        "engine": engine.as_str(),
+        "available": available,
     }))
 }

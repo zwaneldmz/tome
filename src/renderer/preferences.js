@@ -913,21 +913,56 @@ export async function preferencesModal() {
   // ---------- voice ----------
   // Whisper availability + the launch warm-up opt-in the onboarding wizard's
   // Voice step writes — both surfaces use the same store key and the same
-  // stt:status probe, so they can never disagree.
+  // stt:status probe, so they can never disagree. The speech-engine select
+  // below resolves to Apple's on-device recognizer or whisper.cpp through
+  // the same resolution, so the hint can never claim an engine the probe
+  // didn't pick.
   const voice = el('section', 'prefs-section')
   voice.append(el('h4', '', 'Voice'))
-  const sttStatus = el('div', 'prefs-hint', 'Checking local whisper…')
+  const sttStatus = el('div', 'prefs-hint', 'Checking local speech…')
   voice.appendChild(sttStatus)
+  const paintStatus = (s) => {
+    if (s.engine === 'apple') {
+      sttStatus.textContent = s.ready
+        ? 'Apple on-device dictation — ready.'
+        : 'On-device speech recognition is unavailable on this Mac.'
+    } else if (s.ready) {
+      sttStatus.textContent = 'Local whisper transcription is ready.'
+    } else if (!s.bin) {
+      sttStatus.textContent = 'whisper-cli not found — install it (brew install whisper-cpp) and restart.'
+    } else {
+      sttStatus.textContent = 'Speech model missing — the push-to-talk error message carries the one-time download command.'
+    }
+  }
   tome.stt
     .status()
-    .then((s) => {
-      sttStatus.textContent = s.ready
-        ? 'Local whisper transcription is ready.'
-        : !s.bin
-          ? 'whisper-cli not found — install it (brew install whisper-cpp) and restart.'
-          : 'Speech model missing — the push-to-talk error message carries the one-time download command.'
-    })
+    .then(paintStatus)
     .catch(() => (sttStatus.textContent = 'Whisper status unavailable.'))
+
+  const engineSelect = el('select')
+  for (const [value, label] of [
+    ['auto', 'Auto'],
+    ['apple', 'Apple on-device'],
+    ['whisper', 'whisper.cpp'],
+  ]) {
+    const opt = el('option', null, label)
+    opt.value = value
+    engineSelect.appendChild(opt)
+  }
+  engineSelect.value = (await tome.store.get('stt-engine')) || 'auto'
+  engineSelect.addEventListener('change', () => {
+    tome.store.set('stt-engine', engineSelect.value)
+    tome.stt
+      .status()
+      .then(paintStatus)
+      .catch(() => (sttStatus.textContent = 'Whisper status unavailable.'))
+  })
+  row(
+    voice,
+    'Speech engine',
+    engineSelect,
+    'Apple uses on-device dictation; whisper.cpp needs the local CLI and model'
+  )
   toggleRow(
     voice,
     'Warm up whisper at launch',

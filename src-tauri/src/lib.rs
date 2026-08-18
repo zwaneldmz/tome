@@ -434,6 +434,7 @@ pub fn run() {
             ipc::remote::remote_runs,
             ipc::remote::remote_run_detail,
             // stt
+            ipc::stt::stt_engine,
             ipc::stt::stt_transcribe,
             ipc::stt::stt_warmup,
             ipc::stt::stt_status,

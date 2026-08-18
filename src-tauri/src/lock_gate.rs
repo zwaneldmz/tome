@@ -206,6 +206,7 @@ pub const CHANNEL_OF_COMMAND: &[(&str, &str)] = &[
     ("remote_revoke", "remote:revoke"),
     ("remote_runs", "remote:runs"),
     ("remote_run_detail", "remote:runDetail"),
+    ("stt_engine", "stt:engine"),
     ("stt_transcribe", "stt:transcribe"),
     ("stt_warmup", "stt:warmup"),
     ("stt_status", "stt:status"),
