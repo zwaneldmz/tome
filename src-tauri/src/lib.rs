@@ -439,6 +439,10 @@ pub fn run() {
             ipc::stt::stt_transcribe,
             ipc::stt::stt_warmup,
             ipc::stt::stt_status,
+            ipc::stt::stt_begin,
+            ipc::stt::stt_append,
+            ipc::stt::stt_finish,
+            ipc::stt::stt_cancel,
             // chat
             ipc::chat::chat_send,
             ipc::chat::chat_abort,

@@ -387,6 +387,17 @@
       warmup: () => call('stt_warmup'),
       status: () => call('stt_status'),
       engine: () => call('stt_engine'),
+      // Live streaming (voice-0.4 Task 3): begin/append/finish/cancel drive
+      // the Apple on-device recognizer's streaming session; append passes the
+      // Uint8Array straight through — Tauri's IPC serializer converts a
+      // Uint8Array to a JSON array of bytes, which the Rust `Vec<u8>` command
+      // argument deserializes directly. onPartial mirrors the preload's
+      // plain `on(event, cb)` shape for main->renderer pushes.
+      begin: (sampleRate) => call('stt_begin', { sampleRate }),
+      append: (bytes) => call('stt_append', { bytes }),
+      finish: () => call('stt_finish'),
+      cancel: () => call('stt_cancel'),
+      onPartial: (cb) => on('stt:partial', cb),
     },
 
     chat: {

@@ -31,3 +31,20 @@ export function encodeWav(samples, sampleRate = 16000) {
   }
   return buf
 }
+
+// 16-bit PCM mono encoder for live streaming (voice-0.4 Task 3): the same
+// little-endian int16 scaling as encodeWav's payload loop, but as a bare
+// byte stream — no WAV header — because the Apple streaming path appends
+// raw PCM chunks to a live SFSpeechAudioBufferRecognitionRequest rather than
+// handing whisper.cpp a finished file. Pure on purpose (Float32 samples in,
+// Uint8Array bytes out) so vitest exercises it without an AudioContext.
+export function floatToPcm16(samples) {
+  const out = new Uint8Array(samples.length * 2)
+  const v = new DataView(out.buffer)
+  for (let i = 0; i < samples.length; i++) {
+    // Same clamp as encodeWav: an overshooting sample must not wrap.
+    const s = Math.max(-1, Math.min(1, samples[i]))
+    v.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+  }
+  return out
+}

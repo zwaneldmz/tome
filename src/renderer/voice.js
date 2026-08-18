@@ -20,7 +20,7 @@ import { floatingMenu, menuItem, menuLabel, menuRule } from './menus.js'
 import { preferencesModal } from './preferences.js'
 import { micIcon } from './icons.js'
 import { loadHistory, persistHistory, flushHistory } from './chat-history.js'
-import { encodeWav } from '../shared/wav.js'
+import { encodeWav, floatToPcm16 } from '../shared/wav.js'
 import { makeVad } from '../shared/vad.js'
 import { VOICE_CHAT_ID } from './chat-lifecycle.js'
 
@@ -43,6 +43,9 @@ let bargeIn = true
 let reply = '' // accumulated deltas of the current assistant turn
 let spokenUpTo = 0 // reply prefix already handed to speechSynthesis
 let speakingNow = false // an utterance is currently playing
+let useApple = false // stream via Apple's on-device recognizer (set in initVoice)
+let heardSoFar = '' // latest streaming partial, for push-to-talk live-write
+let composerPrefix = '' // composer value before the current utterance began
 
 // State changes are not toasts (they'd spam the notification log), but
 // screen readers still need them — same #sr-live region toast() uses,
@@ -220,6 +223,20 @@ async function startListening() {
   vad = makeVad({
     onSpeechStart: () => {
       utter = []
+      heardSoFar = ''
+      // The composer contents at the moment this utterance began — streaming
+      // partials and the final text both rewrite `prefix + ' ' + <heard>`
+      // over it, so a user's already-typed text is never clobbered.
+      composerPrefix = pane()?.input?.value ?? ''
+      // Stream when Apple's recognizer is the engine: open a fresh session at
+      // the mic's actual rate (every utterance = one session). If begin fails
+      // (not authorized/available after all), drop to the batch path for the
+      // rest of this session rather than hard-failing the whole voice toggle.
+      if (useApple) {
+        tome.stt.begin(rec.ctx.sampleRate).catch(() => {
+          useApple = false
+        })
+      }
       // Barge-in: talking over the assistant cancels TTS and becomes the
       // next user turn. The mic is live during 'speaking' precisely so this
       // can fire.
@@ -241,6 +258,10 @@ async function startListening() {
     if (state === 'listening') {
       utter.push(c)
       vad.push(c)
+      // Stream the live chunk to the Apple recognizer as 16-bit PCM; a
+      // failed append is not worth surfacing (the utterance is already being
+      // collected in `utter`, so the batch fallback still has the audio).
+      if (useApple) tome.stt.append(floatToPcm16(c)).catch(() => {})
     } else if (state === 'speaking' && bargeIn) {
       vad.push(c) // only listening for the barge-in onset
     }
@@ -267,23 +288,36 @@ async function endUtterance() {
   const parts = r.utter()
   const total = parts.reduce((n, c) => n + c.length, 0)
   if (!total) return
-  const samples = new Float32Array(total)
-  let at = 0
-  for (const c of parts) {
-    samples.set(c, at)
-    at += c.length
-  }
-  // encode at the rate actually received — a device that refused 16 kHz still
-  // produces a valid WAV, and whisper's own error then says what's wrong
-  const wav = encodeWav(samples, r.ctx.sampleRate)
   setState('transcribing')
   let res
-  try {
-    res = await tome.stt.transcribe(wav)
-  } catch (err) {
-    toast('transcription failed: ' + (err?.message || err))
-    if (active) setState('listening') // mic is still open — keep the session
-    return
+  if (useApple) {
+    // Streaming: the chunks already went to main via stt.append; end the
+    // session and take its final transcription (same { text } / { error }
+    // shape the batch path produces, so the handling below is shared).
+    try {
+      res = await tome.stt.finish()
+    } catch (err) {
+      toast('transcription failed: ' + (err?.message || err))
+      if (active) setState('listening') // mic is still open — keep the session
+      return
+    }
+  } else {
+    const samples = new Float32Array(total)
+    let at = 0
+    for (const c of parts) {
+      samples.set(c, at)
+      at += c.length
+    }
+    // encode at the rate actually received — a device that refused 16 kHz still
+    // produces a valid WAV, and whisper's own error then says what's wrong
+    const wav = encodeWav(samples, r.ctx.sampleRate)
+    try {
+      res = await tome.stt.transcribe(wav)
+    } catch (err) {
+      toast('transcription failed: ' + (err?.message || err))
+      if (active) setState('listening') // mic is still open — keep the session
+      return
+    }
   }
   if (!active) return // stopped while whisper was running
   if (res?.error) {
@@ -308,7 +342,12 @@ async function endUtterance() {
     if (!pane()) openTranscript()
     const input = pane()?.input
     if (input) {
-      input.value = input.value ? input.value.trimEnd() + ' ' + text : text
+      // Rewrite `prefix + ' ' + <heard>` with the final text — this
+      // overwrites the live partial (if any) and equals the batch path's
+      // append when no partial was ever written, so one expression serves
+      // both engines.
+      const prefix = composerPrefix.trimEnd()
+      input.value = prefix ? prefix + ' ' + text : text
       input.focus()
     } else {
       toast('open the voice transcript to review dictated text')
@@ -425,6 +464,9 @@ export function stopVoice() {
   tome.chat.abort(VOICE_CHAT_ID)
   stopSpeaking()
   stopMic()
+  // A live streaming session is abandoned mid-utterance — cancel it so the
+  // recognizer stops consuming audio; the result (if any) is dropped.
+  if (useApple) tome.stt.cancel().catch(() => {})
   // The pane (if open) keeps whatever partial reply it rendered — it
   // finalizes it when its own chat:done lands. Our copy flushes directly.
   if (!pane()) flushHistory(VOICE_CHAT_ID, history)
@@ -528,10 +570,32 @@ export async function initVoice() {
   tome.chat.onDelta(onDelta)
   tome.chat.onDone(onDone)
   tome.chat.onTool(onTool)
+  // Streaming partials: arrive once per recognizer result while Apple
+  // streaming is active. autoSend ignores them (the final text is what gets
+  // sent); push-to-talk live-writes them into the transcript composer so the
+  // user watches the dictation land. Never auto-sent here.
+  tome.stt.onPartial(({ text }) => {
+    if (!active) return
+    heardSoFar = text || ''
+    if (autoSend) return
+    const input = pane()?.input
+    if (!input) return
+    const prefix = composerPrefix.trimEnd()
+    input.value = prefix ? prefix + ' ' + heardSoFar : heardSoFar
+  })
   autoSend = (await tome.store.get('voice-auto-send')) !== false // default true
   bargeIn = (await tome.store.get('voice-bargein')) !== false // default true
   const rate = await tome.store.get('voice-rate')
   if (typeof rate === 'number' && rate > 0) speakRate = rate
   voiceName = await tome.store.get('voice-name') // null = automatic ranking
+  // Stream through Apple's on-device recognizer when it is the resolved
+  // engine; a status failure (or a non-apple engine) just leaves the batch
+  // path in charge.
+  try {
+    const status = await tome.stt.status()
+    useApple = status?.engine === 'apple'
+  } catch {
+    useApple = false
+  }
   setState('idle')
 }

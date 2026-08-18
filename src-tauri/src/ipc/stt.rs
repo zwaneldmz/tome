@@ -284,3 +284,55 @@ pub async fn stt_engine(app: AppHandle, state: State<'_, AppState>) -> Result<Va
         "available": available,
     }))
 }
+
+// ---- streaming Apple recognition (voice-0.4 Task 3) ----
+//
+// `stt_begin`/`stt_append`/`stt_finish`/`stt_cancel` are the four commands
+// behind the renderer's live dictation: main feeds the recognizer PCM chunks
+// as the mic captures them (`stt_append`) and returns the final text when the
+// VAD endpoint fires (`stt_finish`). All four delegate straight to
+// `crate::speech`'s streaming session — no whisper fallback here, because
+// whisper.cpp is a one-shot CLI, not a streaming engine; a non-Apple host
+// falls back to the batch `stt_transcribe` path in the renderer instead.
+
+/// `stt:begin`. Opens a streaming session at the mic's sample rate.
+#[tauri::command]
+pub async fn stt_begin(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    sample_rate: u32,
+) -> Result<Value, String> {
+    lock_gate::guard(&state, "stt:begin")?;
+    Ok(match speech::begin(app, sample_rate).await {
+        Ok(()) => json!({ "ok": true }),
+        Err(e) => json!({ "error": e }),
+    })
+}
+
+/// `stt:append`. Feeds one raw 16-bit mono PCM chunk to the live session.
+#[tauri::command]
+pub async fn stt_append(state: State<'_, AppState>, bytes: Vec<u8>) -> Result<Value, String> {
+    lock_gate::guard(&state, "stt:append")?;
+    Ok(match speech::append(bytes) {
+        Ok(()) => json!({ "ok": true }),
+        Err(e) => json!({ "error": e }),
+    })
+}
+
+/// `stt:finish`. Ends the live session and returns the final transcription.
+#[tauri::command]
+pub async fn stt_finish(state: State<'_, AppState>) -> Result<Value, String> {
+    lock_gate::guard(&state, "stt:finish")?;
+    Ok(match speech::finish().await {
+        Ok(text) => json!({ "text": text }),
+        Err(e) => json!({ "error": e }),
+    })
+}
+
+/// `stt:cancel`. Aborts the live session, if any.
+#[tauri::command]
+pub async fn stt_cancel(state: State<'_, AppState>) -> Result<Value, String> {
+    lock_gate::guard(&state, "stt:cancel")?;
+    speech::cancel();
+    Ok(json!({ "ok": true }))
+}
