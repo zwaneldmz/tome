@@ -1,10 +1,14 @@
 //! Local speech-to-text for push-to-talk: write the renderer's WAV to a
 //! temp file, run the whisper.cpp CLI over it, hand back its
 //! (whitespace-collapsed) stdout. Ports `src/main/lib/stt.js` — see that
-//! file's own doc comment for why this is local-only by design (HANDOFF
-//! §5): audio never leaves the machine, so there is no new egress path or
-//! allowlist host to add, and the transcript is ordinary composer text
-//! once it lands.
+//! file's own doc comment for why *transcription* is local-only by design
+//! (HANDOFF §5): audio never leaves the machine, and the transcript is
+//! ordinary composer text once it lands. The one exception is the Task 5
+//! one-click model download ([`download_model`]): it fetches
+//! `ggml-base.en.bin` from Hugging Face on an explicit user action (the
+//! Settings/onboarding button) — a fixed egress host that bypasses the
+//! pane allowlist the same way the chat provider egress in `ipc::chat`
+//! does, and is never automatic at boot.
 //!
 //! Everything below is a plain function over explicit values (no
 //! `AppHandle`, no Tauri `State`) so it's directly unit-testable — the
@@ -187,19 +191,22 @@ pub fn stt_unavailable(bin: Option<&str>, model: &Path) -> Option<String> {
 /// can never be mistaken for the real model.
 const GGML_MAGIC: [u8; 4] = [0x67, 0x67, 0x6d, 0x6c];
 
-/// Minimum sane size for the ggml base.en model (~140 MB). Anything at or
-/// below this is an error page or a truncated download, not a model.
+/// The floor a valid model must clear. The ggml base.en model is ~140 MB,
+/// but this threshold is deliberately a much lower 1 MB — anything at or
+/// below it is an error page or a truncated download, not a model. The
+/// exact size isn't pinned here, so a minor build-to-build size change
+/// never breaks the download.
 const MIN_MODEL_BYTES: u64 = 1_000_000;
 
 /// Pure validation of a fully-buffered model download: the ggml magic header
 /// plus a minimum size. Unit-tested directly; [`download_model`] is the only
-/// caller. This is the v1 guard — a SHA-256 pin should replace it once the
-/// exact model build's hash is captured (see THREATMODEL §7); until then the
-/// magic + size check is the best integrity signal available without
-/// hardcoding a guessed hash.
+/// caller. This is the v1 integrity guard — the magic + size check catches an
+/// error page or a truncated download without pinning a hash. It should be
+/// replaced by a SHA-256 pin of the exact model build once that hash is
+/// captured, but no guessed hash is hardcoded in the meantime.
 fn validate_model_bytes(data: &[u8]) -> Result<(), &'static str> {
     if data.len() as u64 <= MIN_MODEL_BYTES {
-        return Err("model is smaller than the expected ~140 MB ggml file");
+        return Err("Downloaded file is not a valid speech model (too small).");
     }
     if data.len() < GGML_MAGIC.len() || data[..GGML_MAGIC.len()] != GGML_MAGIC {
         return Err("missing ggml magic header");
@@ -208,7 +215,7 @@ fn validate_model_bytes(data: &[u8]) -> Result<(), &'static str> {
 }
 
 /// `<dest>` with a `.part` suffix — the write target [`write_model_atomic`]
-/// streams into before the final rename, so a crash mid-download can never
+/// writes into before the final rename, so a crash mid-download can never
 /// leave a half-written file at the real model path.
 fn part_path(dest: &Path) -> PathBuf {
     let mut os = dest.as_os_str().to_os_string();
@@ -239,12 +246,22 @@ async fn write_model_atomic(bytes: &[u8], dest: &Path) -> Result<u64, String> {
     Ok(bytes.len() as u64)
 }
 
-/// One-shot model download: streams the response body, validates it, then
-/// commits it to `dest` atomically. Takes the resolved URL + destination
-/// path (no `AppHandle`); `client` is the shared `reqwest::Client` handed in
-/// by the caller (`ipc::stt` passes `ipc::chat::http_client()`), so this
-/// stays a pure, directly-testable function — a cycle into `ipc` is avoided
-/// by threading the client in rather than reaching across module boundaries.
+/// `download_model`'s per-request timeout. The model is ~140 MB, so a slow
+/// connection needs real headroom; the cap exists only so a stalled
+/// connection can't leave the Settings/onboarding button stuck in
+/// "Downloading…" forever. Applied to THIS request via
+/// `.timeout(...)` on the builder — deliberately NOT set on the shared
+/// `http_client()`, whose chat traffic must not inherit a download-sized
+/// limit (or any limit a 300 s download would force on a streaming turn).
+const MODEL_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// One-shot model download: accumulates the response body into memory,
+/// validates it, then commits it to `dest` atomically. Takes the resolved
+/// URL + destination path (no `AppHandle`); `client` is the shared
+/// `reqwest::Client` handed in by the caller (`ipc::stt` passes
+/// `ipc::chat::http_client()`), so this stays a pure, directly-testable
+/// function — a cycle into `ipc` is avoided by threading the client in rather
+/// than reaching across module boundaries.
 ///
 /// Returns the byte count on success; on any failure returns a friendly
 /// `Err(String)` and leaves no `.part` (and no `dest`) behind.
@@ -253,9 +270,17 @@ pub async fn download_model(
     model_url: &str,
     dest: &Path,
 ) -> Result<u64, String> {
-    let resp =
-        client.get(model_url).send().await.map_err(|e| {
-            format!("Model download failed — could not reach the model server ({e}).")
+    let resp = client
+        .get(model_url)
+        .timeout(MODEL_DOWNLOAD_TIMEOUT)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                "Model download timed out.".to_string()
+            } else {
+                format!("Model download failed — could not reach the model server ({e}).")
+            }
         })?;
     if !resp.status().is_success() {
         return Err(format!("Model download failed (HTTP {}).", resp.status()));
@@ -266,7 +291,11 @@ pub async fn download_model(
     use futures_util::StreamExt;
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| {
-            format!("Model download failed — the connection was interrupted ({e}).")
+            if e.is_timeout() {
+                "Model download timed out.".to_string()
+            } else {
+                format!("Model download failed — the connection was interrupted ({e}).")
+            }
         })?;
         buf.extend_from_slice(&chunk);
     }
@@ -618,7 +647,7 @@ mod tests {
         too_small[..4].copy_from_slice(&GGML_MAGIC);
         assert_eq!(
             validate_model_bytes(&too_small),
-            Err("model is smaller than the expected ~140 MB ggml file")
+            Err("Downloaded file is not a valid speech model (too small).")
         );
     }
 
@@ -636,7 +665,7 @@ mod tests {
     fn validate_model_bytes_rejects_an_empty_buffer() {
         assert_eq!(
             validate_model_bytes(&[]),
-            Err("model is smaller than the expected ~140 MB ggml file")
+            Err("Downloaded file is not a valid speech model (too small).")
         );
     }
 

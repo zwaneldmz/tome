@@ -304,7 +304,7 @@ pub async fn stt_download_model(
         return Ok(json!({ "ok": true, "already": true, "path": model }));
     }
     match stt::download_model(crate::ipc::chat::http_client(), &stt::model_url(), &model).await {
-        Ok(bytes) => Ok(json!({ "ok": true, "bytes": bytes, "path": model })),
+        Ok(bytes) => Ok(json!({ "ok": true, "bytes_written": bytes, "path": model })),
         Err(e) => Ok(json!({ "error": e })),
     }
 }
