@@ -192,7 +192,7 @@ export class ChatPanel {
     this.micBtn.classList.remove('rec')
     rec.proc.disconnect()
     for (const t of rec.stream.getTracks()) t.stop()
-    // encode at the rate we actually got — a device that refused 16 kHz still
+    // encode at the rate actually received — a device that refused 16 kHz still
     // produces a valid WAV, and whisper's own error then says what's wrong
     const rate = rec.ctx.sampleRate
     rec.ctx.close().catch(() => {})

@@ -24,7 +24,7 @@
 //! ([`decide_due_schedule`]): the CURRENTLY stored hash is compared against a
 //! FRESH read of the same file, and a mismatch suspends the schedule
 //! ([`DueOutcome::Suspend`]) rather than run content nobody has reviewed
-//! since it changed — the scheduler's own analogue of the repo allowlist's
+//! since it changed — the scheduler's own analog of the repo allowlist's
 //! re-prompt-on-change.
 //!
 //! ## Always gapped — an override, not a preference read

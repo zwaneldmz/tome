@@ -82,7 +82,7 @@ export class RunsPanel {
     this.rows = new Map() // run id -> the elements of one row (see buildRow)
     this.openRun = null // which run's pipeline is expanded
     this.openNode = null // which node's log is showing, inside that run
-    this.logPath = null // the log we are tailing, if any
+    this.logPath = null // the log being tailed, if any
     this.logWatched = false // …and whether main actually gave us a watch on it
     this.tailPinned = true // stick to the bottom until the reader scrolls up
     // Remote run visibility (plan phase 3, remote.rs): one group per
@@ -139,7 +139,7 @@ export class RunsPanel {
       this.listEl.replaceChildren(el('div', 'runs-empty', 'no flow runs yet — press Run on a flow'))
       this.rows.clear()
       this.openRun = null
-      this.closeLog() // whatever we were tailing went with them
+      this.closeLog() // whatever was being tailed went with them
       return
     }
     // Snapshots come newest-first and a run's start time never changes, so
@@ -662,7 +662,7 @@ export class RunsPanel {
     const path = this.logPath
     if (this.logWatched || !path) return
     const ok = await tome.fs.watch(path)
-    // Only record success: main refcounts watches, and claiming one we never
+    // Only record success: main refcounts watches, and claiming one the app never
     // got would send an unwatch that decrements somebody else's.
     if (this.logPath === path && ok) this.logWatched = true
   }

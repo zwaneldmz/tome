@@ -94,7 +94,7 @@ function setState(next) {
   if (ui.say) announce(ui.say)
 }
 
-// The pane that shares our transcript, when it's open. Voice turns render
+// The pane that shares the voice transcript, when it's open. Voice turns render
 // live through it; when it's absent voice.js keeps history itself — the two
 // never write concurrently, because the pane's own send() only fires while
 // the voice session is idle (a pane busy on a voice turn has its own busy
@@ -273,7 +273,7 @@ async function endUtterance() {
     samples.set(c, at)
     at += c.length
   }
-  // encode at the rate we actually got — a device that refused 16 kHz still
+  // encode at the rate actually received — a device that refused 16 kHz still
   // produces a valid WAV, and whisper's own error then says what's wrong
   const wav = encodeWav(samples, r.ctx.sampleRate)
   setState('transcribing')

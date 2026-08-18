@@ -623,7 +623,7 @@ async fn app_config_dir_is_hidden_by_the_bwrap_tmpfs() {
         "test precondition: the marker file must exist on the HOST"
     );
 
-    // Rebuild the inner command now that we know the real marker path
+    // Rebuild the inner command now that the real marker path is known
     // (tempdir paths aren't known until build_fixture runs) — a second,
     // tiny bwrap argv reusing the SAME fixture's proxy/config dir, rather
     // than plumbing the path through build_fixture's own signature.

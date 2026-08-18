@@ -622,7 +622,7 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
 
 // ---- scheduling loop ----
 
-/// One scheduling step: ask the plan what may happen given the statuses we
+/// One scheduling step: ask the plan what may happen given the statuses the runner
 /// have, then make it happen. Re-entrant on purpose — every process exit
 /// calls it again.
 ///
@@ -996,7 +996,7 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
                         .map(|r| r.canceling)
                         .unwrap_or(false)
                 };
-                // Cancelled beats failed: a node we killed exits non-zero
+                // Cancelled beats failed: a node killed by a cancel exits non-zero
                 // by definition, and reporting that as a failure would
                 // blame the flow for the user's own Cancel click.
                 let status = if canceling_now {
@@ -1245,7 +1245,7 @@ fn spawn_promotion(
 
 // ---- cancel / kill ----
 
-/// Signal the node's whole PROCESS GROUP first, not just the process we
+/// Signal the node's whole PROCESS GROUP first, not just the process the runner
 /// spawned — an agent CLI's own tool calls are grandchildren, and a
 /// signal to the CLI alone leaves those running long after the run says
 /// 'canceled'. Falls back to the single-pid `kill_fn` only when the

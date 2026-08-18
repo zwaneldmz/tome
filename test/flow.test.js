@@ -562,7 +562,7 @@ describe('composeBootstrapPrompt', () => {
   })
 
   it('drops the label clause when the edge label is empty, rather than typing "undefined"', () => {
-    // The labelled fixture above is the exception, not the rule: the
+    // The labeled fixture above is the exception, not the rule: the
     // edge-drag UI writes label: '' and nothing in the app ever edits it, so
     // this is the line every real run actually pastes into the terminal.
     const { flow, editor } = pipeline()

@@ -74,7 +74,7 @@ export async function buildAgentsSection() {
   // Enabled/disabled picker — the same 'agents-disabled' key the onboarding
   // wizard's Agents step writes and the ＋ menu reads. Built-ins first, then
   // customs; an unavailable CLI can be toggled here (it will simply offer
-  // itself greyed-out when it lands back in the menu).
+  // itself grayed-out when it lands back in the menu).
   const disabled = new Set((await tome.store.get('agents-disabled')) || [])
   if (listed.length) {
     for (const a of listed) {

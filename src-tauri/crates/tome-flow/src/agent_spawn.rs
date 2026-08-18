@@ -62,7 +62,7 @@ pub const AGENTS: &[&str] = &["claude", "opencode", "pi"];
 /// per-agent alias catalogs a flow node (or a pane) may pin a model from.
 /// `opencode`/`pi` resolve models from a dynamic provider catalog, so they
 /// ship a deliberately empty list — see that file's header for why an
-/// empty list is the intended v1 behaviour, not a placeholder. A plain
+/// empty list is the intended v1 behavior, not a placeholder. A plain
 /// `&[(&str, &[&str])]` rather than a `HashMap`/`phf` map: this crate has
 /// no `phf`/`once_cell` dependency yet (`Cargo.toml` is out of scope for
 /// this slice) and the table is tiny, so a linear scan in `models_for`
@@ -113,7 +113,7 @@ fn is_safe_model(s: &str) -> bool {
 /// dependency to route it through yet), while the public builders below
 /// still `eprintln!` it at the point they fall back to the CLI default,
 /// preserving the operator-visible "this is your only trace of the
-/// substitution" behaviour the JS comment calls load-bearing.
+/// substitution" behavior the JS comment calls load-bearing.
 fn vet_model_against(
     models: &[&str],
     cmd: &str,
@@ -459,7 +459,7 @@ mod tests {
     fn kinds_with_an_empty_allowlist_spawn_bare_whatever_model_is_asked_for() {
         // Their catalogs are dynamic (agent-models.js), so v1 ships no
         // vetted aliases — and an empty list means every value is
-        // off-allowlist, which is the intended behaviour rather than an
+        // off-allowlist, which is the intended behavior rather than an
         // oversight.
         for kind in ["opencode", "pi"] {
             assert_eq!(build_agent_spawn(kind, None), Some(kind.to_string()));

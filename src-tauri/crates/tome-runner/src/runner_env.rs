@@ -1,5 +1,5 @@
 //! Builds the headless [`RunnerEnv`] `run_cmd::run` drives
-//! `tome_flow::flow::runner::start_run` through — this crate's analogue of
+//! `tome_flow::flow::runner::start_run` through — this crate's analog of
 //! the main crate's `flow_env.rs::production_env`, rebuilt from scratch
 //! because `flow_env.rs` reaches `tauri::AppHandle`/`crate::state::AppState`
 //! at almost every step and this binary has no Tauri dependency at all

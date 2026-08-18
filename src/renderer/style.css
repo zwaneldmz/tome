@@ -42,7 +42,7 @@
   --g-del-soft: rgba(208, 42, 77, 0.08);
   --g-add-soft: rgba(18, 146, 90, 0.09);
 
-  /* brain graph canvas — read by JS, so they must be concrete colours */
+  /* brain graph canvas — read by JS, so they must be concrete colors */
   --graph-edge: rgba(0, 113, 227, 0.22);
   --graph-node: #0071e3;
   --graph-node-active: #d70a63;
@@ -166,7 +166,7 @@ body {
   color: var(--text);
   font-family: var(--sans);
   font-size: var(--fs-ui);
-  /* No -webkit-font-smoothing override: greyscale AA drops ~half a weight on
+  /* No -webkit-font-smoothing override: grayscale AA drops ~half a weight on
      macOS, which read as "thin" across the whole app. Let the OS render. */
 }
 
@@ -740,7 +740,7 @@ body.tree-collapsed #btn-sidebar .chev {
 }
 #statusbar .sb-ctx-icon {
   display: inline-flex;
-  /* centres a one-character glyph as happily as it does a 13px SVG — some
+  /* centers a one-character glyph as happily as it does a 13px SVG — some
      panels draw their icon, some just have a symbol (runs.js) */
   align-items: center;
   justify-content: center;
@@ -754,7 +754,7 @@ body.tree-collapsed #btn-sidebar .chev {
 }
 /* Background runs: a button, because clicking it opens the runs pane — the
    only interactive item in the bar. Stripped back to look like its
-   neighbours, since a chrome-heavy button in a 26px bar reads as an error. */
+   neighbors, since a chrome-heavy button in a 26px bar reads as an error. */
 #sb-runs {
   font: inherit;
   color: var(--accent);
@@ -1442,7 +1442,7 @@ body.tree-anim #tree {
   /* A pinned model rides in this badge too ("claude · haiku", buildNodeCard).
      The listed aliases are short, but a hand-edited flow can carry a long
      `provider/model` string, and the card's width is fixed — clip it here
-     rather than let it spill across the card border onto its neighbours. The
+     rather than let it spill across the card border onto its neighbors. The
      cap is generous enough that no real kind + alias pair reaches it, so the
      name still gets the rest of the row in every ordinary case. */
   max-width: 78%;
@@ -2387,7 +2387,7 @@ canvas.brain-graph {
   transform: translateX(16px);
   background: var(--accent);
 }
-/* mentor "Question mix" — a wrapped row of labelled switches */
+/* mentor "Question mix" — a wrapped row of labeled switches */
 .prefs-mix {
   display: flex;
   flex-wrap: wrap;
@@ -2947,9 +2947,9 @@ canvas.brain-graph {
 
 /* ================= flow runs =================
    A CI pipeline in Tome's tokens: run rows that expand into layer columns of
-   node pills, joined by connectors on --graph-edge — the same colour the
+   node pills, joined by connectors on --graph-edge — the same color the
    brain graph draws its edges in, so "a line between two things that depend
-   on each other" means one thing across the app. Every colour here is a
+   on each other" means one thing across the app. Every color here is a
    token, so both themes come out of the same rules. */
 .panel-runs {
   height: 100%;
@@ -3055,7 +3055,7 @@ canvas.brain-graph {
 }
 /* Written out rather than left to inherit the base badge: 'canceling…' is
    deliberately the quiet state between 'running' and 'canceled', and a later
-   change to the base must not silently give it a colour of its own. */
+   change to the base must not silently give it a color of its own. */
 .runs-badge.runs-st-canceling {
   color: var(--muted);
   border-color: var(--line-2);

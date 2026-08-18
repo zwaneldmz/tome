@@ -2,7 +2,7 @@
 //! (Phase 4 — see this repo's rewrite plan, "Linux sandbox" section, and
 //! `src-tauri/src/ipc/pty.rs`'s `resolve_gapped_spawn`, which this crate
 //! replaces the fail-closed refusal for on Linux). macOS enforcement
-//! (`sandbox-exec` + the seatbelt profile, Phase 3) needs no analogue of
+//! (`sandbox-exec` + the seatbelt profile, Phase 3) needs no analog of
 //! this binary at all — it is Linux-only, full stop, including this
 //! `main()`'s own dispatch below.
 //!

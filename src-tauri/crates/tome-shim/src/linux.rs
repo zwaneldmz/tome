@@ -123,7 +123,7 @@ pub fn run(args: ShimArgs) -> ! {
         }
     }
 
-    // Whether bwrap already unshared the net namespace for us or we just
+    // Whether bwrap already unshared the net namespace for this process or the shim just
     // did it ourselves above, a fresh netns's loopback interface starts
     // administratively down — every path through here needs this.
     if let Err(e) = bring_loopback_up() {

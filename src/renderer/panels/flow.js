@@ -311,7 +311,7 @@ export class FlowPanel {
     saveBtn.type = 'button'
     saveBtn.addEventListener('click', () => this.save())
     // Run is a split button: the primary half is the background run, the ▾
-    // half is the older behaviour, which is now a deliberate choice rather
+    // half is the older behavior, which is now a deliberate choice rather
     // than the default. Two real <button>s rather than one with a hit-test,
     // so both are reachable from the keyboard and announce separately.
     const runSplit = el('div', 'flow-run-split')
@@ -796,7 +796,7 @@ export class FlowPanel {
     nameInput.value = node.name || ''
 
     const kindOptions = [...AGENTS, 'terminal']
-    // A hand-edited flow.json can carry a kind we don't offer (plan §2.2
+    // A hand-edited flow.json can carry a kind this build doesn't offer (plan §2.2
     // warns rather than blocks on this) — keep it selectable so opening this
     // modal and saving without touching Kind can't silently "fix" it away.
     if (node.kind && !kindOptions.includes(node.kind)) kindOptions.unshift(node.kind)

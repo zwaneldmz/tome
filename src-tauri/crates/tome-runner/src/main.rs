@@ -35,7 +35,7 @@
 //!
 //! This binary has no lock screen to bypass (there is nothing to
 //! authenticate to — it is not interactive), so the project's "nothing
-//! spawns while locked" invariant has no analogue to weaken. What DOES
+//! spawns while locked" invariant has no analog to weaken. What DOES
 //! apply, and is enforced identically: every flow node this binary spawns
 //! is gapped, unconditionally (`runner_env::build`'s `egress_default`
 //! is frozen `true` — see that module's doc comment), and a gapped node's

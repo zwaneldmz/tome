@@ -197,11 +197,12 @@ window.addEventListener('drop', (e) => {
 // (dockviewComponent.updateOptions → updateDragAndDropState re-sets every
 // tab's `draggable` and its drag handler), and wry's handler only sees a
 // drag session when some element inside the webview is actually
-// `draggable`. So: whenever a dockview drag starts, we disable DnD — no
-// draggable element remains, the OS drag ends with it, wry's handler
-// never sees a native session to claim, and WKWebView's DragController
-// dispatches the full HTML5 sequence into the DOM exactly as with the
-// flag off. When the drag ends we re-enable, so OS file drops from
+// `draggable`. So: whenever a dockview drag starts, this handler disables
+// DnD — no draggable element remains, the OS drag ends with it, wry's
+// handler never sees a native session to claim, and WKWebView's
+// DragController dispatches the full HTML5 sequence into the DOM exactly
+// as with the flag off. When the drag ends this handler re-enables, so OS
+// file drops from
 // outside the window work the rest of the time. An OS file drag entering
 // from OUTSIDE can't collide with this: it isn't a dockview drag, so
 // onWillDrag* never fires for it.
@@ -315,7 +316,7 @@ document.addEventListener(
 // ---------- tear-off: drag a pane past the window edge ----------
 // Inside the window dockview already handles the drop (rearrange or stack as
 // a tab). If the drag ends outside the window — another display, or just the
-// desktop — we take that as "give this its own window" and pop the group out
+// desktop — this handler treats that as "give this its own window" and pop the group out
 // where it was dropped.
 const POPOUT_SIZE = { width: 940, height: 640 }
 
@@ -356,7 +357,7 @@ function popout(item, at) {
 }
 
 // A popped-out window asked to close. Main vetoed the close and is holding
-// the window open until we call popout.close(id) — so cancelling is simply
+// the window open until the handler calls popout.close(id) — so cancelling is simply
 // never calling it. dockview names each popout window `${dockId}-${groupId}`,
 // which is how the window maps back to the panes inside it.
 tome.popout.onCloseRequest(async ({ id, name }) => {
@@ -516,7 +517,7 @@ tome.conductor.onReadRequest(async ({ paneId }) => {
 // once more via the main-process quit handshake.
 //
 // Terminals/agents are the exception: a pty is a live process and cannot be
-// resumed. On restore we recreate each terminal/agent pane as a FRESH SHELL
+// resumed. On restore the app recreates each terminal/agent pane as a FRESH SHELL
 // in its saved position (same kind/cwd/egress), rather than skipping it — the
 // grid shape survives even though scrollback and running processes don't.
 let restoring = false
@@ -552,7 +553,7 @@ tome.app.onBeforeQuit(() => {
 const DOC_MODES = new Set(['pdf', 'img', 'doc', 'binary'])
 
 // fromJSON gives us the panel shell (id, title, params, position) but not the
-// component instance — infer what to respawn from the params we persisted.
+// component instance — infer what to respawn from the persisted params.
 function componentOf(panel) {
   const params = panel.params || {}
   if (params.ptyId) return 'terminal'

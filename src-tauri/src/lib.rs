@@ -83,7 +83,7 @@ fn truthy_env(name: &str) -> bool {
 /// ~411-437). dockview tears a pane group off with `window.open()` on
 /// `popout.html`; wry has no same-context `window.open`, so Tauri routes
 /// that navigation through this plugin's `window_created_with` hook, which
-/// turns it into a real `WebviewWindow` (labelled `popout-*`, matching
+/// turns it into a real `WebviewWindow` (labeled `popout-*`, matching
 /// `capabilities/default.json`'s window scope) and vetoes the navigation
 /// in the original webview.
 ///
@@ -169,7 +169,7 @@ fn boot_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 
 /// Boot-time load: `authlock::AuthLock::load` (the passphrase/TOTP store)
 /// and `egress::EgressState::load_repo_consents` (persisted repo-allowlist
-/// consents), both off `app_data_dir` — Tauri's per-OS analogue of
+/// consents), both off `app_data_dir` — Tauri's per-OS analog of
 /// Electron's `app.getPath('userData')`, which is what both
 /// `authlock.initAuth(userData)` and `egress.loadRepoConsents(userData)`
 /// receive at their one real call site in `index.js` (~548-552). Also

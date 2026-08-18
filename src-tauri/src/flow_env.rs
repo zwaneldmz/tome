@@ -48,7 +48,7 @@ use crate::state::AppState;
 
 // ---- production wiring ----
 
-/// `path.resolve(p)`'s single-argument behaviour — duplicated from
+/// `path.resolve(p)`'s single-argument behavior — duplicated from
 /// `confine.rs`'s private `resolve1`/`normalize_lexically` (that module
 /// does not export a lexical-only, `open_folders`-aware predicate matching
 /// `isConfinedPath`, and this slice does not own `confine.rs` to add one —
