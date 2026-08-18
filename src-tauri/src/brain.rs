@@ -1093,7 +1093,7 @@ mod tests {
     #[test]
     fn ensure_brain_creates_the_vault_dir_and_agents_md() {
         let tmp = tempdir().unwrap();
-        // ensure_brain resolves the vault path off $HOME, which we can't
+        // ensure_brain resolves the vault path off $HOME, which the app can't
         // override cleanly here without a real home-dir dependency — so
         // exercise the same logic build_index_at/confine_real already
         // cover via a hand-rolled equivalent instead.

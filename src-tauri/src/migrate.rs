@@ -259,9 +259,7 @@ pub fn migrate_egress_filenames(dir: &Path) -> usize {
     for (old, new) in PAIRS {
         let old_path = dir.join(old);
         let new_path = dir.join(new);
-        if old_path.exists()
-            && !new_path.exists()
-            && std::fs::rename(&old_path, &new_path).is_ok()
+        if old_path.exists() && !new_path.exists() && std::fs::rename(&old_path, &new_path).is_ok()
         {
             moved += 1;
         }

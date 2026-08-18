@@ -284,7 +284,7 @@ mod tests {
         // Sanity floor on the scrape itself: if `generate_handler!` were
         // ever reformatted onto one line (or the marker text changed
         // subtly enough to still be found but parse wrong), this catches
-        // "found something, but not what we think" rather than silently
+        // "found something, but not what the caller expected" rather than silently
         // passing on an empty or near-empty set.
         assert!(
             registered.len() > 60,

@@ -147,7 +147,7 @@ footer a { color: var(--muted); }
     <b>only shipping answer</b> to "how do I let my team run Claude Code without it being able to
     <code>curl</code> my source anywhere on the internet."</p>
     <ul class="findings">
-      <li class="g"><span class="sev g">🟢</span><b>The wedge is governance, not productivity.</b> "Agents, terminals, editors and chat in one grid" is a Cursor-adjacent pitch and loses. "Run any agent CLI behind a per-pane egress allowlist enforced by the macOS seatbelt, with a second factor to open the pipe" has no competitor. Lead with it.</li>
+      <li class="g"><span class="sev g">🟢</span><b>The wedge is governance, not productivity.</b> "Agents, terminals, editors, and chat in one grid" is a Cursor-adjacent pitch and loses. "Run any agent CLI behind a per-pane egress allowlist enforced by the macOS seatbelt, with a second factor to open the pipe" has no competitor. Lead with it.</li>
       <li class="g"><span class="sev g">🟢</span><b>Agent-agnostic is an adoption superpower.</b> Claude Code, opencode, pi light up on PATH with no config — Tome rides every model wave instead of betting on one. The tool survives the next model switch.</li>
       <li class="o"><span class="sev o">🟠</span><b>The buyer and the user are different people.</b> The champion is an IC; the approver is the tech lead; the blocker is security. The README speaks only to the champion. THREATMODEL.md is excellent but reads like maintainer notes — ship an evaluation-facing <code>SECURITY.md</code>.</li>
       <li class="o"><span class="sev o">🟠</span><b>No audit trail.</b> Governance buyers ask "what did the agent do?" The blocked-host flash vanishes in 4 s. A persistent, exportable event log — conductor tool calls, unlocks, blocked egress — turns the containment from a feature into <b>evidence</b>.</li>
@@ -164,7 +164,7 @@ footer a { color: var(--muted); }
     </div>
     <ul class="findings">
       <li class="g"><span class="sev g">🟢</span><b>Clear ICP:</b> senior IC / tech lead at a 20–500 person SaaS company, macOS-heavy eng org, already paying for agent CLIs, nervous about egress. Real and reachable.</li>
-      <li class="r"><span class="sev r">🔴</span><b>Zero onboarding path for a team.</b> Workspaces, flows and allowlists are per-machine. The first thing a tech lead wants is "commit a recommended Tome config so my team gets the same setup." <code>.tome/flows/</code> proves the instinct — extend it to workspace definitions and allowlists as committable files.</li>
+      <li class="r"><span class="sev r">🔴</span><b>Zero onboarding path for a team.</b> Workspaces, flows, and allowlists are per-machine. The first thing a tech lead wants is "commit a recommended Tome config so my team gets the same setup." <code>.tome/flows/</code> proves the instinct — extend it to workspace definitions and allowlists as committable files.</li>
       <li class="o"><span class="sev o">🟠</span><b>The conductor's default-off auto-run is the right product call</b> — market it: "the assistant proposes, you dispose." It captures the anti-Cursor sentiment precisely.</li>
       <li class="o"><span class="sev o">🟠</span><b>Docs assume discovery.</b> Glyph iconography plus hidden tear-off/tabs means a 10-minute evaluation never finds the best features. <code>how-tome-works.html</code> is the best onboarding asset you have — link it from the README's first screen.</li>
       <li class="y"><span class="sev y">🟡</span><b>Version optics:</b> v0.1.0 and <code>private: true</code> matter less than installability — see E5.</li>

@@ -1,5 +1,5 @@
 //! Linux sandbox wrap assembly + fallback ladder (Phase 4, slice L2) — the
-//! Linux analogue of `egress::seatbelt`. Where `seatbelt.rs` builds an SBPL
+//! Linux analog of `egress::seatbelt`. Where `seatbelt.rs` builds an SBPL
 //! *profile string* for `sandbox-exec` to interpret, Linux has no single
 //! interpreter: the enforcement primitive is a **fresh network namespace**
 //! (`unshare(CLONE_NEWNET)`, deny-all egress by construction — see THE
@@ -957,7 +957,7 @@ mod tests {
     }
 
     // ==== cross-crate contract: tome_shim::args::parse_args accepts what
-    // we build ====
+    // this module builds ====
     //
     // Every test above (and every test in crates/tome-shim/src/args.rs's
     // own suite) only ever exercises ONE side of this wire contract in

@@ -147,7 +147,7 @@ struct ProxyState {
     tunnels: Mutex<HashMap<u64, TunnelEntry>>,
     next_tunnel_id: AtomicU64,
     next_block_generation: AtomicU64,
-    /// Flips true on `shutdown()` — the Rust analogue of `!panes.get(id)`
+    /// Flips true on `shutdown()` — the Rust analog of `!panes.get(id)`
     /// in `egress.js`'s TOME-002 recheck (see the module doc comment):
     /// `PaneProxy` doesn't disappear from a shared map the way a JS pane
     /// entry does, but this flag is the same "has this pane already been

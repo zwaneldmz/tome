@@ -5,7 +5,7 @@
 //! explicitly rather than re-read ad hoc at each call site.
 //!
 //! Also home to [`lexical_resolve`] — `path.resolve(p)`'s single-argument,
-//! no-symlinks-followed behaviour, duplicated from the main crate's
+//! no-symlinks-followed behavior, duplicated from the main crate's
 //! `flow_env.rs::lexical_resolve` (out of this slice's file surface, and
 //! not `pub` even if it were reachable) for the same reason that module's
 //! own doc comment gives for ITS copy: small, self-contained, and cheaper
@@ -53,7 +53,7 @@ pub fn state_dir(home: &Path) -> PathBuf {
     home.join(".local").join("state").join("tome-runner")
 }
 
-/// `path.resolve(p)`'s single-argument behaviour: absolutize against the
+/// `path.resolve(p)`'s single-argument behavior: absolutize against the
 /// current directory when `p` is relative, then collapse `.`/`..`
 /// components lexically — no filesystem access, no symlink ever followed
 /// (that is `flow::confine::confine_real_abs`'s job, applied deeper inside

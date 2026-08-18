@@ -7,7 +7,7 @@ Electron/browser-process overhead: a 6-pane workspace runs the same single
 webview as a 1-pane workspace. We don't publish a single "footprint" number
 because it depends on your machine, your scrollback, and which agents you
 run; the model and the measuring commands below are more useful than a
-number from our hardware.
+number from the author's hardware.
 
 ## What to expect
 

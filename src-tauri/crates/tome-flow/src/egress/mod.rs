@@ -72,7 +72,7 @@
 //! [`EgressState::unlock_pane`] only does the first half: it validates and
 //! records the deadline, returning it so the integrator can arm a real
 //! `tokio::time::sleep_until` (or equivalent) that calls
-//! [`EgressState::relock_pane`] when it fires — the closest Rust analogue
+//! [`EgressState::relock_pane`] when it fires — the closest Rust analog
 //! to the original's per-pane `setTimeout`. [`EgressState::sweep_expired`]
 //! is the other valid integration strategy (a periodic tick over every open
 //! pane) and is also what lets this module's own tests pin the "deadline is
@@ -120,7 +120,7 @@ use sha1::{Digest, Sha1};
 ///
 /// The JS original's own test additionally rejects non-integer shapes
 /// (`'15'` as a string, `NaN`, `Infinity`) that arrive over an untyped
-/// `ipcMain.handle` payload. Those have no analogue here: `minutes: i64` in
+/// `ipcMain.handle` payload. Those have no analog here: `minutes: i64` in
 /// [`EgressState::unlock_pane`] makes them unrepresentable by the time a
 /// Tauri command's argument deserialization would even call in — the same
 /// type-level simplification `pty_authority.rs` and `confine.rs` document
@@ -232,7 +232,7 @@ pub enum ConsentOutcome {
     /// Always `"file changed"` today — the only failure mode
     /// `consentRepoAllowlist` has once `root`/`hash` are guaranteed strings
     /// by Rust's type system (the JS original's separate `'bad request'`
-    /// branch for non-string `root`/`hash` has no analogue here; see this
+    /// branch for non-string `root`/`hash` has no analog here; see this
     /// module's top doc comment on the same simplification pattern used
     /// throughout this codebase's port).
     Err(String),
@@ -934,7 +934,7 @@ mod tests {
     #[test]
     fn rejects_minutes_outside_the_allowed_set_without_mutating_pane_state() {
         // '15' (string) / NaN / Infinity from the JS suite have no Rust
-        // analogue — see ALLOWED_UNLOCK_MINUTES's doc comment.
+        // analog — see ALLOWED_UNLOCK_MINUTES's doc comment.
         for bad in [0, -1, 999] {
             let state = EgressState::new();
             state.register_pane("pty-1");

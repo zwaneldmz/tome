@@ -24,7 +24,7 @@ use tokio::process::Command;
 /// What the runner asks the spawn backend to start. Fixed choices the JS
 /// original also hardcodes at its one call site — `stdio: ['ignore', 'pipe',
 /// 'pipe']`, `detached: true` — are NOT part of this request: they are
-/// [`spawn_process`]'s own unconditional behaviour (see its doc comment),
+/// [`spawn_process`]'s own unconditional behavior (see its doc comment),
 /// not something any caller should vary.
 pub struct SpawnRequest {
     pub cmd: String,

@@ -1,5 +1,5 @@
 //! `tome-runner`'s own persistent event log —
-//! `~/.local/state/tome-runner/events.jsonl`. A small, hand-rolled analogue
+//! `~/.local/state/tome-runner/events.jsonl`. A small, hand-rolled analog
 //! of the desktop app's `eventlog.rs`/`events.rs` pair (main crate, out of
 //! this slice's file surface, and `tauri::AppHandle`-coupled besides): the
 //! same on-disk shape (one JSON object per line, `ts`/`kind` first, then

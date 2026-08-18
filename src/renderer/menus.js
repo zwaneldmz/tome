@@ -348,7 +348,7 @@ export async function populateAddMenu(menu, target) {
     })
   }
   // User-declared CLIs (Preferences → Agents) spawn exactly like built-ins —
-  // same addTerminal path, same greyed-with-a-hint treatment when the bin
+  // same addTerminal path, same grayed-with-a-hint treatment when the bin
   // isn't on PATH; main re-vets the kind again at pty:create.
   const customs = agents.filter((a) => a.custom && !disabled.has(a.name))
   if (customs.length) {

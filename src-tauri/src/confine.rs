@@ -49,7 +49,7 @@ use crate::state::AppState;
 // `confined_real_path` does its own, separate, filesystem-touching
 // resolution afterward via `std::fs::canonicalize` (see that function).
 
-/// `path.resolve(p)`'s single-argument behaviour: absolute-ify against the
+/// `path.resolve(p)`'s single-argument behavior: absolute-ify against the
 /// current working directory if `p` isn't already absolute, then
 /// lexically collapse `.`/`..`/repeated separators (clamping `..` at the
 /// root instead of erroring, same as Node).
@@ -62,7 +62,7 @@ fn resolve1(p: &Path) -> PathBuf {
     normalize_lexically(&abs)
 }
 
-/// `path.resolve(root, rel)`'s two-argument behaviour: if `rel` is itself
+/// `path.resolve(root, rel)`'s two-argument behavior: if `rel` is itself
 /// absolute, `root` is discarded entirely (matching Node's right-to-left
 /// resolution); otherwise `rel` is joined onto `root` and the result is
 /// run through the same absolutize+normalize as `resolve1`.
@@ -113,7 +113,7 @@ fn normalize_lexically(p: &Path) -> PathBuf {
 ///
 /// The JS original also rejects non-string `rel` (`null`/`undefined`/a
 /// number/an array all hit its `typeof rel !== 'string'` guard). There is
-/// no Rust analogue to port: `rel: &str` makes that whole input class
+/// no Rust analog to port: `rel: &str` makes that whole input class
 /// unrepresentable at the type level, so those cases are dropped rather
 /// than translated.
 pub fn confine(root: &Path, rel: &str, require_md: bool) -> Option<PathBuf> {

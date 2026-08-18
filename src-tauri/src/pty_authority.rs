@@ -35,7 +35,7 @@ use std::path::{Component, Path, PathBuf};
 /// (`undefined`, `null`, `0`, `''`) — a Tauri command parameter typed
 /// `bool`/`Option<bool>` can only ever be a real boolean (or absent) by
 /// the time it reaches Rust code, so those extra JS shapes have no
-/// analogue to port; the caller folds an absent renderer value to `false`
+/// analog to port; the caller folds an absent renderer value to `false`
 /// before calling in, same as it must already do for `policy_default`
 /// (`index.js` computes that side as `(await readStore('egress-default'))
 /// !== false`).
@@ -45,7 +45,7 @@ pub fn resolve_gapping(renderer_gapped: bool, policy_default: bool) -> bool {
 
 // ---- spawn cwd ----
 
-/// `path.resolve(p)`'s single-argument behaviour: absolute-ify against the
+/// `path.resolve(p)`'s single-argument behavior: absolute-ify against the
 /// process's current directory if `p` isn't already absolute, then
 /// lexically collapse `.`/`..`/repeated separators (clamping `..` at the
 /// root instead of erroring, same as Node) — never touches disk, never

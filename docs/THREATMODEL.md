@@ -17,7 +17,7 @@ design leans on.
 - Provider API keys (Anthropic/OpenAI/etc.) read from the user's login shell.
 - The user's project files, exposed to agent CLIs running in pty panes.
 
-`<app_data_dir>` is Tauri's per-OS app-data directory — the analogue of
+`<app_data_dir>` is Tauri's per-OS app-data directory — the analog of
 Electron's `app.getPath('userData')` (see `src-tauri/src/lib.rs`).
 
 ## Trust boundaries
@@ -93,7 +93,7 @@ Unlocking a pane flips its per-pane proxy from "providers allowlist" to
 `src-tauri/src/egress/proxy.rs`'s `host_allowed`). The sandbox wrap (macOS
 seatbelt profile / Linux bwrap or self-unshare argv) is fixed at spawn and
 **no code path weakens the sandbox after spawn** — sandboxed processes can't
-be re-profiled, and we don't try. All lock/unlock/relock state lives in the
+be re-profiled, and the code doesn't try. All lock/unlock/relock state lives in the
 backend proxy. Corollary: the sandbox denies egress even in "open" mode; the
 proxy is still the only route out. `egress/proxy.rs` also re-checks
 pane-alive + host-allowed at CONNECT-completion time (TOME-002), so a tunnel

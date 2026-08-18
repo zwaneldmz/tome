@@ -56,7 +56,7 @@
 
   // Plain event subscription — mirrors ipcRenderer.on(chan, (e, payload) =>
   // cb(payload)). Preload never hands back an unsubscribe for these, so
-  // neither do we (only events:appended / runs:changed get that treatment).
+  // neither does this layer (only events:appended / runs:changed get that treatment).
   function on(event, cb) {
     listen(event, (e) => cb(e.payload)).catch(console.warn)
   }

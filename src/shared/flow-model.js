@@ -129,7 +129,7 @@ const unsafeSegmentError = (what, value) =>
 // Errors vs. warnings is a hard line, not a style choice: errors mean the
 // *graph* is broken (topoSort/rendering can't trust node/edge references),
 // so Run must refuse them. Warnings mean only the declared *contract* is
-// off (a port name that doesn't exist, a kind we don't recognize) — the
+// off (a port name that doesn't exist, a kind that isn't recognized) — the
 // graph itself still stands, and hand-edited flow.json files must still be
 // able to open and render (plan §2.2), so those never block loading.
 export function validateFlow(flow) {
@@ -334,7 +334,7 @@ export function composeBootstrapPrompt(flow, node, artifactsDir) {
     // edge-drag UI writes label: '' (flow.js) and nothing edits it afterwards
     // — so it can't be interpolated unconditionally: that typed a literal
     // "from Researcher: undefined" at every agent in every real run, and only
-    // the always-labelled test fixture hid it. Absent label, the port name and
+    // the always-labeled test fixture hid it. Absent label, the port name and
     // the handoff path already say everything the line needs to.
     const described = edge.label ? `: ${edge.label}` : ''
     lines.push(`- "${edge.fromOutput}" from ${upstreamName}${described} (read from ${path})`)

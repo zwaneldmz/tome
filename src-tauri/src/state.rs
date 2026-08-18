@@ -112,7 +112,7 @@ pub struct AppState {
     pub proxies: Mutex<HashMap<String, Arc<egress::proxy::PaneProxy>>>,
 
     /// One scheduled auto-relock task per currently-`Open` pane, keyed by
-    /// pane id — the Rust analogue of `egress.js`'s per-pane `st.timer`
+    /// pane id — the Rust analog of `egress.js`'s per-pane `st.timer`
     /// (`setTimeout(() => relockPane(paneId), minutes * 60_000)`), which
     /// `unlockPane` `clearTimeout`s and replaces on every fresh unlock.
     /// Neither `egress::EgressState` (framework-free, no timers of its own

@@ -17,7 +17,7 @@
    no webfont, no analytics. The only things fetched are the two images sitting
    next to this page.
 
-   Palette, radii and type scale are lifted from src/renderer/style.css. Dark
+   Palette, radii, and type scale are lifted from src/renderer/style.css. Dark
    first, because the app is; the app's light values swap in under
    prefers-color-scheme: light.
    -------------------------------------------------------------------------- */
@@ -399,7 +399,7 @@ main { padding-bottom: 40px; }
 <h2 id="h-create" tabindex="-1">Grow the tree</h2>
 <p>Click the new-file button in the tree header, or ＋ → New file…, and type a path relative to the active root — src/review/verdict.js. Tome creates the parent folders first, then the file itself with an exclusive write, and opens it in an editor pane. A name that can't work comes back as a sentence — "path may not contain '..'" — rather than a raw <code>ENOENT</code>, and an existing file toasts "already exists" instead of being clobbered.</p>
 <figure class="media">
-<figcaption id="cap-create-shot"><span class="badge">png</span> The ＋ menu, live: the installed agent kinds, both safety defaults on, panes and files — and Flow diagram…</figcaption>
+<figcaption id="cap-create-shot"><span class="badge">png</span> The ＋ menu, live: the installed agent kinds, both safety defaults on, panes, and files — and Flow diagram…</figcaption>
 <div class="shot"><img src="tour-plus-menu.png" width="2560" height="1600" loading="lazy" alt="The ＋ menu open in Tome: claude and opencode listed as agents; 'spawn agents contained' ON; 'assistant may run commands' ON; assistant chat, terminal, brain; Open file, New file, New folder, Flow diagram; event log; preferences."></div>
 </figure>
 <figure class="board"><svg class="sb" viewBox="0 0 520 148" role="img" aria-label="Sketch of the new-file prompt with the path src/review/verdict.js typed in, and the tree it produces: src, then review, then verdict.js — parents made first, the file itself written with an exclusive flag that never overwrites." focusable="false"><rect class="sb-box" x="6" y="8" width="508" height="32" rx="7"/><text class="sb-t sb-xs" x="18" y="29">new file</text><text class="sb-tb" x="74" y="29">src/review/verdict.js</text><rect class="sb-caret" x="212" y="17" width="1.5" height="14"/><path class="sb-line" d="M 30 76 V 128 M 48 118 H 58"/><text class="sb-tb" x="20" y="70">&#9662; src</text><text class="sb-tb" x="40" y="98">&#9662; review</text><text class="sb-tb" x="62" y="126">verdict.js</text><path class="sb-line sb-dash" d="M 160 62 H 246"/><text class="sb-t sb-xs" x="256" y="66">1 &#183; made first, if missing</text><path class="sb-line sb-dash" d="M 160 90 H 246"/><text class="sb-t sb-xs" x="256" y="94">2 &#183; then this one</text><path class="sb-line sb-dash" d="M 160 118 H 246"/><text class="sb-t sb-xs" x="256" y="122">3 &#183; 'wx' — never overwrites</text></svg></figure>
@@ -439,7 +439,7 @@ for (const seg of segments) {
 <section class="step" id="flow" aria-labelledby="h-flow">
 <p class="eyebrow"><span class="badge">05</span><span class="nodename">flow</span></p>
 <h2 id="h-flow" tabindex="-1">Draw the flow</h2>
-<p>＋ → Flow diagram…, name it review-pipeline: Tome writes <code>.tome/flows/review-pipeline.flow.json</code> and opens it as a canvas rather than as text. Add nodes with "＋ node", drag them where you want them, and drag from an output dot to an input dot to wire an edge; click a card to edit Name, Kind, Instructions, Expects, Produces and its ports. Save writes formatted JSON, and "Open as text" puts the same file in an editor tab beside the canvas.</p>
+<p>＋ → Flow diagram…, name it review-pipeline: Tome writes <code>.tome/flows/review-pipeline.flow.json</code> and opens it as a canvas rather than as text. Add nodes with "＋ node", drag them where you want them, and drag from an output dot to an input dot to wire an edge; click a card to edit Name, Kind, Instructions, Expects, Produces, and its ports. Save writes formatted JSON, and "Open as text" puts the same file in an editor tab beside the canvas.</p>
 <figure class="media">
 <figcaption id="cap-flow-video"><span class="badge">rec</span> Recorded in the app — one 62-second take, uncut: ＋ → Flow diagram… → "release-notes", three claude nodes added and edited, gather pinned to haiku, two edges wired, ⌘S.</figcaption>
 <div class="shot"><video controls muted playsinline preload="metadata" poster="flow-creation-poster.png" width="1280" height="800" aria-labelledby="cap-flow-video"><source src="flow-creation.mp4" type="video/mp4">This browser can't play MP4 — the file is flow-creation.mp4, next to this page.</video></div>
@@ -468,7 +468,7 @@ for (const seg of segments) {
 <section class="step" id="models" aria-labelledby="h-models">
 <p class="eyebrow"><span class="badge">06</span><span class="nodename">models</span></p>
 <h2 id="h-models" tabindex="-1">Pin cheaper models</h2>
-<p>Open the triage node and set Model to haiku — its card now reads claude · haiku, while every other node stays (default), meaning whatever the CLI would have chosen. The select only appears for kinds that have an allowlist: claude offers sonnet, opus, haiku and fable today, while opencode and pi resolve models from their own dynamic catalogs, so their field stays hidden rather than sitting there empty.</p>
+<p>Open the triage node and set Model to haiku — its card now reads claude · haiku, while every other node stays (default), meaning whatever the CLI would have chosen. The select only appears for kinds that have an allowlist: claude offers sonnet, opus, haiku, and fable today, while opencode and pi resolve models from their own dynamic catalogs, so their field stays hidden rather than sitting there empty.</p>
 <figure class="media">
 <figcaption id="cap-models-shot"><span class="badge">png</span> The node editor on gather, from the take above — Model set to haiku; draft and review carry no model key at all.</figcaption>
 <div class="shot"><img src="tour-node-editor.png" width="2560" height="1600" loading="lazy" alt="Tome's Edit node dialog: Name gather, Kind claude, Model haiku, Instructions 'List the merged PRs since the last tag and write them into a short bullet list.', one declared output named list, and Save and Cancel buttons."></div>
@@ -594,7 +594,7 @@ submit."</code></pre>
 </main>
 <footer class="outro"><div class="wrap">
 <h2>Everything here is a file you can read</h2>
-<p>The pipeline is a <code>.flow.json</code>, the policy is a <code>.tome/egress.json</code>, the handoffs are markdown, and the sandbox is six lines of seatbelt profile. Nothing in that run depended on a modified agent CLI or a service we host. Tome runs on macOS and Linux — the wall is seatbelt (<code>sandbox-exec</code>) on macOS and bubblewrap network namespaces on Linux; the allowlist proxy between them is platform-neutral. Packaged builds are unsigned for now, so a fresh copy into <code>/Applications</code> needs <code>xattr -dr com.apple.quarantine</code> once.</p>
+<p>The pipeline is a <code>.flow.json</code>, the policy is a <code>.tome/egress.json</code>, the handoffs are markdown, and the sandbox is six lines of seatbelt profile. Nothing in that run depended on a modified agent CLI or a service Tome hosts. Tome runs on macOS and Linux — the wall is seatbelt (<code>sandbox-exec</code>) on macOS and bubblewrap network namespaces on Linux; the allowlist proxy between them is platform-neutral. Packaged builds are unsigned for now, so a fresh copy into <code>/Applications</code> needs <code>xattr -dr com.apple.quarantine</code> once.</p>
 <a class="cta" href="https://github.com/zwaneldmz/tome/releases">Download for macOS or Linux</a>
 <a class="cta cta-2" href="https://github.com/zwaneldmz/tome">Read the source</a>
 </div></footer>
