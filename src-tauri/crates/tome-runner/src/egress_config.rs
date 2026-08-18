@@ -1,21 +1,21 @@
 //! The server-owner-controlled egress allowlist `tome-runner`'s per-node
-//! `PaneProxy` is built from: `~/.config/tome-runner/airgap.json`, shape
+//! `PaneProxy` is built from: `~/.config/tome-runner/egress.json`, shape
 //! `{"allow": [...]}` — the same shape as the desktop app's own
-//! `<app_data_dir>/airgap.json` override file and a repo's own
-//! `.tome/airgap.json` (see `tome_flow::airgap::allowlist`'s doc comment
+//! `<app_data_dir>/egress.json` override file and a repo's own
+//! `.tome/egress.json` (see `tome_flow::egress::allowlist`'s doc comment
 //! for the pattern-matching rules every entry is validated against).
 //!
-//! **Deliberately NEVER the repo checkout's own `.tome/airgap.json`, and
+//! **Deliberately NEVER the repo checkout's own `.tome/egress.json`, and
 //! this is load-bearing, not a convenience choice.** The interactive
-//! desktop app treats a repo's `.tome/airgap.json` as a CONSENT-gated
+//! desktop app treats a repo's `.tome/egress.json` as a CONSENT-gated
 //! suggestion: a human reads the diff in a review UI, clicks Allow, and
-//! only then does `AirgapState::consent_repo_allowlist` fold its hosts
+//! only then does `EgressState::consent_repo_allowlist` fold its hosts
 //! into the effective allowlist. `tome-runner` runs unattended — there is
 //! no human at the keyboard to click Allow — and the flow file (plus
 //! everything else checked into the same repo) is exactly the input an
 //! agent's own prior output, or a malicious PR, can shape. If this binary
 //! ever read a repo-supplied allowlist automatically, a compromised or
-//! adversarial flow.json could ship its own `.tome/airgap.json` alongside
+//! adversarial flow.json could ship its own `.tome/egress.json` alongside
 //! itself and grant its own future runs wider egress with nobody to
 //! approve anything — a straightforward prompt-injection / supply-chain
 //! escalation, not a hypothetical one. The ONLY allowlist source this
@@ -27,17 +27,17 @@
 
 use std::path::Path;
 
-use tome_flow::airgap::allowlist::{self, DEFAULT_ALLOW};
+use tome_flow::egress::allowlist::{self, DEFAULT_ALLOW};
 
-/// Reads and validates `<config_dir>/airgap.json`'s `allow` array, and
+/// Reads and validates `<config_dir>/egress.json`'s `allow` array, and
 /// returns the shipped provider defaults ([`DEFAULT_ALLOW`] — every
 /// gapped pane, everywhere in this codebase, starts from this same
 /// baseline) plus every additional pattern that passes
-/// [`tome_flow::airgap::allowlist::validate_repo_allowlist`].
+/// [`tome_flow::egress::allowlist::validate_repo_allowlist`].
 ///
 /// Missing file, unreadable file, malformed JSON, or a missing/non-array
 /// `allow` key all collapse to "no extra hosts" — the same fail-closed
-/// posture `AirgapState::read_repo_allowlist` uses for this exact file
+/// posture `EgressState::read_repo_allowlist` uses for this exact file
 /// shape: a server owner who hasn't configured this file yet gets the
 /// shipped provider hosts only, never a wider gap by accident. Individual
 /// rejected entries are silently dropped (not reported) here — this is a
@@ -46,7 +46,7 @@ use tome_flow::airgap::allowlist::{self, DEFAULT_ALLOW};
 /// module's doc comment for the pattern rules, or `docs/remote-runner.md`.
 pub fn load_allowed(config_dir: &Path) -> Vec<String> {
     let mut hosts: Vec<String> = DEFAULT_ALLOW.iter().map(|s| s.to_string()).collect();
-    let Ok(text) = std::fs::read_to_string(config_dir.join("airgap.json")) else {
+    let Ok(text) = std::fs::read_to_string(config_dir.join("egress.json")) else {
         return hosts;
     };
     let Ok(patterns) = allowlist::parse_repo_allowlist(&text) else {
@@ -62,7 +62,7 @@ mod tests {
 
     fn scratch_dir(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "tome-runner-airgap-config-test-{}-{}-{tag}",
+            "tome-runner-egress-config-test-{}-{}-{tag}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn malformed_json_falls_back_to_defaults_only() {
         let dir = scratch_dir("malformed");
-        std::fs::write(dir.join("airgap.json"), "not json").unwrap();
+        std::fs::write(dir.join("egress.json"), "not json").unwrap();
         assert_eq!(load_allowed(&dir).len(), DEFAULT_ALLOW.len());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn missing_allow_key_falls_back_to_defaults_only() {
         let dir = scratch_dir("no-allow-key");
-        std::fs::write(dir.join("airgap.json"), r#"{"other":[]}"#).unwrap();
+        std::fs::write(dir.join("egress.json"), r#"{"other":[]}"#).unwrap();
         assert_eq!(load_allowed(&dir).len(), DEFAULT_ALLOW.len());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -104,7 +104,7 @@ mod tests {
     fn valid_extra_hosts_are_added_on_top_of_the_defaults() {
         let dir = scratch_dir("valid-extra");
         std::fs::write(
-            dir.join("airgap.json"),
+            dir.join("egress.json"),
             r#"{"allow":["internal.example.com","*.corp.example.net"]}"#,
         )
         .unwrap();
@@ -122,7 +122,7 @@ mod tests {
     fn invalid_entries_are_dropped_but_valid_siblings_still_apply() {
         let dir = scratch_dir("mixed");
         std::fs::write(
-            dir.join("airgap.json"),
+            dir.join("egress.json"),
             r#"{"allow":["good.example.com","*","not a host"]}"#,
         )
         .unwrap();
@@ -143,7 +143,7 @@ mod tests {
         let repo_style = dir.join(".tome");
         std::fs::create_dir_all(&repo_style).unwrap();
         std::fs::write(
-            repo_style.join("airgap.json"),
+            repo_style.join("egress.json"),
             r#"{"allow":["evil.example.com"]}"#,
         )
         .unwrap();

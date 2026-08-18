@@ -78,7 +78,7 @@ pub async fn run(flow_path: &Path) -> i32 {
     // refusal rung at all (the seatbelt profile is always available — see
     // `runner_env`'s macOS branch), so there is nothing to precheck there.
     if cfg!(target_os = "linux") {
-        if let tome_flow::airgap::linux::SandboxStrategy::Refuse { reason } =
+        if let tome_flow::egress::linux::SandboxStrategy::Refuse { reason } =
             runner_env::linux_sandbox_strategy()
         {
             eprintln!("tome-runner: {reason}");

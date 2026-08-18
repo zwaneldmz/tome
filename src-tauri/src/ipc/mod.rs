@@ -11,7 +11,6 @@
 //! file that owns it.
 
 pub mod agents;
-pub mod airgap;
 pub mod app;
 pub mod auth;
 pub mod brain;
@@ -19,6 +18,7 @@ pub mod chat;
 pub mod conductor;
 pub mod dialog;
 pub mod doc;
+pub mod egress;
 pub mod events;
 pub mod export;
 pub mod fmt;

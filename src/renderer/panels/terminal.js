@@ -1,11 +1,11 @@
-// Terminal/agent pane: xterm + the air-gap strip for gapped panes.
+// Terminal/agent pane: xterm + the egress strip for gapped panes.
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { tome } from '../util.js'
 import { terms, strips } from '../regs.js'
 import { onTheme, xtermTheme } from '../theme.js'
-import { stripRender, airgapModal, reauthPrompt } from '../airgap-ui.js'
+import { stripRender, egressModal, reauthPrompt } from '../egress-ui.js'
 import { terminalIcon } from '../icons.js'
 
 // Terminal font size is user-adjustable (⌘=/⌘-/⌘0, handled in keys.js) and
@@ -44,10 +44,10 @@ export class TerminalPanel {
     this.kind = params.kind
     this.cwd = params.cwd
     let termHost = this.element
-    if (params.airgap) {
-      this.element.classList.add('airgapped')
+    if (params.egress) {
+      this.element.classList.add('egressped')
       const strip = document.createElement('div')
-      strip.className = 'airgap-strip'
+      strip.className = 'egress-strip'
       const label = document.createElement('span')
       label.className = 'ag-label'
       const flash = document.createElement('span')
@@ -55,7 +55,7 @@ export class TerminalPanel {
       const count = document.createElement('span')
       count.className = 'ag-count'
       strip.append(label, flash, count)
-      strip.addEventListener('click', () => airgapModal(this.ptyId))
+      strip.addEventListener('click', () => egressModal(this.ptyId))
       termHost = document.createElement('div')
       termHost.className = 'termbox'
       this.element.append(strip, termHost)
@@ -89,7 +89,7 @@ export class TerminalPanel {
           id: this.ptyId,
           kind: params.kind,
           cwd: params.cwd,
-          airgap: params.airgap,
+          egress: params.egress,
           ws: params.ws,
           // Undefined for every pane but a flow node that pinned one; main
           // treats absent as "the agent CLI's own default".

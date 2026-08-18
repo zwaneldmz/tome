@@ -1,9 +1,9 @@
 //! macOS seatbelt (`sandbox-exec`) profile builder for gapped agent panes —
-//! port of `src/main/airgap.js`'s `seatbeltProfile(userData)`. Pure string
+//! port of `src/main/egress.js`'s `seatbeltProfile(userData)`. Pure string
 //! construction only: this module never shells out to `sandbox-exec` itself
 //! (that belongs to a future `buildAgentEnv`-equivalent integrator, mirroring
 //! `index.js`'s own `sandbox = process.platform === 'darwin' ? { cmd:
-//! '/usr/bin/sandbox-exec', args: ['-p', airgap.seatbeltProfile(userData)] }
+//! '/usr/bin/sandbox-exec', args: ['-p', egress.seatbeltProfile(userData)] }
 //! : null`) — so the builder itself compiles, and its `#[cfg(test)]` suite
 //! runs, on every OS this crate targets, even though the profile it produces
 //! is only ever handed to `sandbox-exec` on macOS.
@@ -11,11 +11,11 @@
 //! Rule order matters in SBPL — "later rules win" (the JS original's own
 //! comment) — so this is default-allow, then a blanket network-outbound
 //! deny, then a narrow loopback-only re-allow: a gapped pane's ONLY route
-//! out is its own per-pane proxy on `127.0.0.1` (the air gap's whole value
+//! out is its own per-pane proxy on `127.0.0.1` (the egress's whole value
 //! proposition; see TOME-001..021 in git log). Two confinement rules follow:
 //! an agent may read/write project files freely, but never tome's own
 //! config directory (which would let it tamper with the allowlist or repo
-//! consents), and never the auth file specifically (`airgap-auth.json`,
+//! consents), and never the auth file specifically (`egress-auth.json`,
 //! which holds the TOTP secret) even though that file already lives inside
 //! the just-denied config directory — the second, more specific rule guards
 //! against the first ever being narrowed or reordered without this one
@@ -33,7 +33,7 @@ use std::path::Path;
 /// it outside the user's shell `PATH` by design, so this is not a "resolve
 /// from PATH" constant). macOS-only: a Linux/Windows caller has no seatbelt
 /// to invoke at all — the plan's Linux enforcement path is bubblewrap, a
-/// wholly different mechanism (see `src-tauri/src/airgap/mod.rs`'s module
+/// wholly different mechanism (see `src-tauri/src/egress/mod.rs`'s module
 /// doc comment for this crate's Linux story). Exists here purely as a
 /// convenience for the future integrator wiring `-p`/`seatbelt_profile`'s
 /// output into an actual `sandbox-exec` invocation, so that code does not
@@ -41,7 +41,7 @@ use std::path::Path;
 #[cfg(target_os = "macos")]
 pub const SANDBOX_EXEC_PATH: &str = "/usr/bin/sandbox-exec";
 
-/// Builds the exact SBPL profile text `src/main/airgap.js`'s
+/// Builds the exact SBPL profile text `src/main/egress.js`'s
 /// `seatbeltProfile(userData)` produces for the same `app_data_dir` —
 /// verified byte-for-byte against real Node output (see this module's
 /// `#[cfg(test)]`, which pins a fixture captured by actually running the JS
@@ -55,7 +55,7 @@ pub const SANDBOX_EXEC_PATH: &str = "/usr/bin/sandbox-exec";
 /// with no existence check; a caller handing in a relative or nonexistent
 /// path gets a profile that says exactly that back, verbatim.
 pub fn seatbelt_profile(app_data_dir: &Path) -> String {
-    let auth_file = app_data_dir.join("airgap-auth.json");
+    let auth_file = app_data_dir.join("egress-auth.json");
     [
         "(version 1)".to_string(),
         "(allow default)".to_string(),
@@ -76,8 +76,8 @@ mod tests {
     use std::path::PathBuf;
 
     /// Captured by actually running `seatbeltProfile('/Users/test/Library/
-    /// Application Support/Tome')` from `src/main/airgap.js` under real
-    /// Node (`node -e "import('./src/main/airgap.js').then(m =>
+    /// Application Support/Tome')` from `src/main/egress.js` under real
+    /// Node (`node -e "import('./src/main/egress.js').then(m =>
     /// console.log(JSON.stringify(m.seatbeltProfile(...))))"`), not
     /// hand-transcribed — the byte-for-byte cross-language pin this slice's
     /// task brief asks for, applied to the seatbelt profile the same way
@@ -91,7 +91,7 @@ mod tests {
             (deny network-outbound)\n\
             (allow network-outbound (remote ip \"localhost:*\"))\n\
             (deny file-write* (subpath \"/Users/test/Library/Application Support/Tome\"))\n\
-            (deny file-read* (literal \"/Users/test/Library/Application Support/Tome/airgap-auth.json\"))";
+            (deny file-read* (literal \"/Users/test/Library/Application Support/Tome/egress-auth.json\"))";
         assert_eq!(seatbelt_profile(&dir), expected);
     }
 
@@ -130,7 +130,7 @@ mod tests {
         // blanket-denied above; a gapped agent may still read elsewhere in
         // that directory if anything is ever added there.
         let profile = seatbelt_profile(&PathBuf::from("/tmp/tome-test"));
-        assert!(profile.contains("(deny file-read* (literal \"/tmp/tome-test/airgap-auth.json\"))"));
+        assert!(profile.contains("(deny file-read* (literal \"/tmp/tome-test/egress-auth.json\"))"));
     }
 
     #[test]
@@ -141,7 +141,7 @@ mod tests {
         // `SANDBOX_EXEC_PATH` above is behind `cfg(target_os = "macos")`.
         let profile = seatbelt_profile(&PathBuf::from("/any/path"));
         assert!(profile.starts_with("(version 1)\n"));
-        assert!(profile.ends_with("airgap-auth.json\"))"));
+        assert!(profile.ends_with("egress-auth.json\"))"));
     }
 
     #[test]

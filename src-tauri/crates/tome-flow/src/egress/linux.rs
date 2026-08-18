@@ -1,5 +1,5 @@
 //! Linux sandbox wrap assembly + fallback ladder (Phase 4, slice L2) — the
-//! Linux analogue of `airgap::seatbelt`. Where `seatbelt.rs` builds an SBPL
+//! Linux analogue of `egress::seatbelt`. Where `seatbelt.rs` builds an SBPL
 //! *profile string* for `sandbox-exec` to interpret, Linux has no single
 //! interpreter: the enforcement primitive is a **fresh network namespace**
 //! (`unshare(CLONE_NEWNET)`, deny-all egress by construction — see THE
@@ -49,7 +49,7 @@
 //! host is macOS), `cargo check -p tome-shim --target
 //! x86_64-unknown-linux-gnu` (cross-check, but scoped to the **tome-shim**
 //! crate, which never includes this file), and `cargo test --lib
-//! airgap::linux` (native — same macOS host as the first gate). **None of
+//! egress::linux` (native — same macOS host as the first gate). **None of
 //! the three ever type-checks [`probe_bwrap_present`], [`probe_userns_allowed`],
 //! or [`probe_sandbox_strategy`]**: the native gates strip
 //! `#[cfg(target_os = "linux")]` items before type-checking ever runs, and
@@ -128,12 +128,12 @@ pub const CONTAINER_PROXY_SOCK_PATH: &str = "/run/tome/proxy.sock";
 /// [`pane_socket_path`].
 const PANE_SOCKET_DIR_NAME: &str = "tome";
 
-/// Same filename `airgap::seatbelt::seatbelt_profile` denies read of on
+/// Same filename `egress::seatbelt::seatbelt_profile` denies read of on
 /// macOS. Duplicated here as its own named constant rather than imported
 /// from `seatbelt.rs` — a sibling module this slice does not own, and
 /// which itself only ever inlines the literal once with no exported
 /// constant of its own to import. See [`auth_file_path`].
-const AUTH_FILE_NAME: &str = "airgap-auth.json";
+const AUTH_FILE_NAME: &str = "egress-auth.json";
 
 /// Rung 3's refusal message — see [`decide_sandbox_strategy`]. Actionable
 /// (names the real package + both apt/dnf install commands the plan's own
@@ -144,7 +144,7 @@ const AUTH_FILE_NAME: &str = "airgap-auth.json";
 pub const INSTALL_BUBBLEWRAP_HINT: &str =
     "Linux sandbox unavailable: bubblewrap (bwrap) is not installed, and this \
 system does not allow unprivileged user namespaces as a fallback, so Tome \
-cannot enforce the air gap for a gapped pane. Install bubblewrap — e.g. \
+cannot enforce the egress for a gapped pane. Install bubblewrap — e.g. \
 `sudo apt install bubblewrap` (Debian/Ubuntu) or `sudo dnf install bubblewrap` \
 (Fedora) — then try again, or run this pane ungapped (requires re-authentication).";
 
@@ -304,7 +304,7 @@ pub fn build_bwrap_argv(spec: &GappedSpawnSpec) -> Vec<String> {
 
 // ---- rung 2: self-unshare fallback ----
 
-/// `<app_config_dir>/airgap-auth.json` — the same join `seatbelt.rs`'s
+/// `<app_config_dir>/egress-auth.json` — the same join `seatbelt.rs`'s
 /// `seatbelt_profile` computes inline for its `(deny file-read* (literal
 /// ...))` rule, factored out here as a named, independently testable
 /// function since [`build_self_unshare_argv`] needs the identical path for
@@ -656,7 +656,7 @@ pub fn ensure_pane_socket_dir(dir: &Path) -> std::io::Result<()> {
 
 /// Locks a pane's already-bound socket file down to `0600` — THE DESIGN's
 /// "0600 socket" requirement. Not called anywhere in this tree yet: the
-/// actual `UnixListener::bind` call lives in `airgap::proxy` (a sibling
+/// actual `UnixListener::bind` call lives in `egress::proxy` (a sibling
 /// module this slice does not own — see that module's doc comment on
 /// `PaneProxy::spawn`'s Linux seam), so this is a small utility for that
 /// future integrator to call immediately after binding, kept here because
@@ -885,7 +885,7 @@ mod tests {
                 "--deny-write",
                 "/home/tester/.config/tome",
                 "--deny-read",
-                "/home/tester/.config/tome/airgap-auth.json",
+                "/home/tester/.config/tome/egress-auth.json",
                 "--",
                 "zsh",
                 "-l",
@@ -952,7 +952,7 @@ mod tests {
     fn auth_file_path_joins_the_fixed_filename() {
         assert_eq!(
             auth_file_path(&PathBuf::from("/home/tester/.config/tome")),
-            PathBuf::from("/home/tester/.config/tome/airgap-auth.json")
+            PathBuf::from("/home/tester/.config/tome/egress-auth.json")
         );
     }
 
@@ -988,7 +988,7 @@ mod tests {
         // function's doc comment) — `rest` here already skips the shim
         // path for exactly that reason.
         let parsed = tome_shim::args::parse_args(rest.iter().cloned()).expect(
-            "tome-shim's own parser must accept the exact argv airgap::linux builds for it",
+            "tome-shim's own parser must accept the exact argv egress::linux builds for it",
         );
         assert!(parsed.self_unshare);
         assert!(!parsed.new_session); // sample_spec()'s headless is false

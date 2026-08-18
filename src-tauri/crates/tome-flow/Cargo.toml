@@ -2,7 +2,7 @@
 name = "tome-flow"
 version = "0.1.0"
 edition = "2021"
-description = "Tauri-free background flow-run engine: DAG scheduling, the live run registry, realpath confinement, product promotion, agent spawn-policy allowlists, and the air-gap subsystem."
+description = "Tauri-free background flow-run engine: DAG scheduling, the live run registry, realpath confinement, product promotion, agent spawn-policy allowlists, and the egress subsystem."
 
 # The runner's `RunnerEnv` is a dependency-injection seam whose fields are
 # `Arc<dyn Fn(...) + Send + Sync>` callbacks — same deliberate allow, with the
@@ -23,12 +23,12 @@ path = "src/lib.rs"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# airgap/mod.rs: Sha1 (repo-allowlist hashing).
+# egress/mod.rs: Sha1 (repo-allowlist hashing).
 sha1 = "0.11.0"
 # flow/products.rs: Sha256 over each promoted product plus the flow file
 # itself, for manifest.json's integrity fields.
 sha2 = "0.11.0"
-# airgap/proxy.rs: the plain-HTTP leg of the per-pane loopback proxy
+# egress/proxy.rs: the plain-HTTP leg of the per-pane loopback proxy
 # forwards each request through a real `reqwest::Client` (redirect-chasing
 # disabled — see that module's own comment on why: an internally-chased
 # redirect would fetch a Location header host entirely unchecked, which
@@ -40,8 +40,8 @@ sha2 = "0.11.0"
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "http2", "json", "stream", "charset"] }
 #
 # NOT added: `nix`/`libc`. The slice brief that scoped this crate expected
-# `airgap::linux` to need Linux-only `nix`/`libc` features here — verified
-# against the actual file and that is not the case. `airgap/linux.rs`'s own
+# `egress::linux` to need Linux-only `nix`/`libc` features here — verified
+# against the actual file and that is not the case. `egress/linux.rs`'s own
 # module doc comment is explicit and load-bearing on this point ("POLICY vs
 # MECHANISM… Nothing here is MECHANISM. No `unshare()`, no `mount()`… THE
 # DESIGN assigns all of that to `tome-shim`"): every function in that file,
@@ -52,14 +52,14 @@ reqwest = { version = "0.13.4", default-features = false, features = ["rustls", 
 # slice's own report for the full note.
 
 [dev-dependencies]
-# flow/products.rs, flow/runner/tests.rs, flow/confine.rs, airgap/{mod,
+# flow/products.rs, flow/runner/tests.rs, flow/confine.rs, egress/{mod,
 # proxy,linux}.rs's own `#[cfg(test)]` modules all build scratch
 # directories through this — same pin as the root `tome` crate's own
 # `[dev-dependencies]` (not new to the workspace's `Cargo.lock`, just now
 # also a direct dependency of this crate).
 tempfile = "3"
 # Path dependency on the sidecar crate's own argv PARSER, for
-# `airgap::linux`'s real cross-crate contract test (feeds this crate's own
+# `egress::linux`'s real cross-crate contract test (feeds this crate's own
 # `build_bwrap_argv`/`build_self_unshare_argv` output straight into
 # `tome_shim::args::parse_args`) — moved here unchanged from the root
 # `tome` crate's own identically-justified dev-dependency (see that

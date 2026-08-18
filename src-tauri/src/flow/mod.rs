@@ -13,7 +13,7 @@
 //!   the same way any other file in this crate does, through this module's
 //!   own re-exports.
 //! - [`runner::env::RunnerEnv`]'s PRODUCTION wiring (`production_env`,
-//!   `frozen_airgap_default`) is not re-exported at its old
+//!   `frozen_egress_default`) is not re-exported at its old
 //!   `runner::env::*` path — that half of the original `runner/env.rs`
 //!   reaches `tauri::AppHandle`/`AppState` and could never move into
 //!   `tome-flow`, so it lives on in this crate as [`crate::flow_env`]

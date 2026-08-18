@@ -170,7 +170,7 @@ fn read_terminal_surfaces_a_one_time_consent_prompt_not_one_per_call() {
 }
 
 #[test]
-fn read_terminal_never_prompts_for_an_airgapped_pane() {
+fn read_terminal_never_prompts_for_an_egressped_pane() {
     let c = Conductor::new();
     let (env, sent, _logged) = fake_env();
     c.register("p-air", "terminal", "/tmp", true);
@@ -186,20 +186,20 @@ fn read_terminal_never_prompts_for_an_airgapped_pane() {
 }
 
 #[test]
-fn read_terminal_refuses_an_airgapped_pane_even_after_consent_is_granted() {
+fn read_terminal_refuses_an_egressped_pane_even_after_consent_is_granted() {
     let c = Conductor::new();
     let (env, _sent, _logged) = fake_env();
-    c.register("p-airgap", "terminal", "/tmp", true);
-    c.record("p-airgap", "secret output");
-    c.set_read_consent("p-airgap", true);
+    c.register("p-egress", "terminal", "/tmp", true);
+    c.record("p-egress", "secret output");
+    c.set_read_consent("p-egress", true);
     let out = run_tool(
         &c,
         &env,
         "read_terminal",
-        &json!({ "pane_id": "p-airgap" }),
+        &json!({ "pane_id": "p-egress" }),
         "chat-1",
     );
-    assert_eq!(out, "Refused: air-gapped pane output cannot be disclosed.");
+    assert_eq!(out, "Refused: gapped pane output cannot be disclosed.");
 }
 
 #[test]
@@ -549,7 +549,7 @@ fn list_panes_merges_the_renderer_snapshot_with_registered_meta() {
     let rows: Value = serde_json::from_str(&out).unwrap();
     assert_eq!(rows[0]["kind"], json!("claude"));
     assert_eq!(rows[0]["cwd"], json!("/work"));
-    assert_eq!(rows[0]["airgapped"], json!(true));
+    assert_eq!(rows[0]["egressped"], json!(true));
     assert_eq!(rows[0]["alive"], json!(true));
     assert_eq!(rows[1], json!({ "id": "p2", "title": "two" }));
 }

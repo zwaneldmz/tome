@@ -12,18 +12,18 @@
 //! `pty_write`/`pty_resize` are thin wrappers over `crate::pty::Registry`
 //! (`state.pty`) — Phase 2 slice P1's work (see that module's doc comment
 //! for the batcher/reader/kill mechanism). `pty_kill` additionally tears
-//! down the pane's air-gap proxy (`ipc::airgap::close_pane_and_proxy`),
+//! down the pane's egress proxy (`ipc::egress::close_pane_and_proxy`),
 //! matching `index.js`'s `ipcMain.on('pty:kill', ...)` calling
-//! `airgap.closePane(id)` immediately rather than waiting for the killed
+//! `egress.closePane(id)` immediately rather than waiting for the killed
 //! process's own exit event.
 //!
 //! `pty_create` below is this phase's (Phase 3, Task A4) integration:
 //! reconciles Phase 2's PTY mechanism + spawn-policy ports
 //! (`crate::agent_spawn`, `crate::custom_agents`, `crate::pty_authority`,
-//! `crate::agent_env`, `crate::login_env`) with the real air-gap
-//! enforcement — `crate::airgap::proxy::PaneProxy` (the live loopback
+//! `crate::agent_env`, `crate::login_env`) with the real egress
+//! enforcement — `crate::egress::proxy::PaneProxy` (the live loopback
 //! CONNECT/HTTP proxy) and, on macOS, an actual `sandbox-exec` wrap built
-//! from `crate::airgap::seatbelt::seatbelt_profile`. This CLOSES Phase 2's
+//! from `crate::egress::seatbelt::seatbelt_profile`. This CLOSES Phase 2's
 //! interim gap: every resolved agent is no longer refused outright, and a
 //! gapped pane's egress is no longer merely logged-and-ignored — it is
 //! enforced.
@@ -31,7 +31,7 @@
 //! **Phase 4, slice L3 addendum**: the paragraph above described Phase 3's
 //! landing, when a gapped pane on any OS other than macOS was still
 //! refused outright (real Linux enforcement didn't exist yet). This slice
-//! REPLACES that fail-closed stub with the real thing: `airgap::linux`'s
+//! REPLACES that fail-closed stub with the real thing: `egress::linux`'s
 //! fallback ladder (bwrap, then `tome-shim` self-unsharing, then an
 //! actionable refusal — never a silent unenforced spawn) now backs the
 //! Linux branch the exact same way `sandbox-exec` backs macOS's. See "Fail-
@@ -60,7 +60,7 @@
 //!   regardless of what's running inside it. See [`evaluate_reauth`].
 //! - **A gapped pane is only ever spawned behind a REAL enforcement
 //!   mechanism — never silently unenforced.** macOS gets `sandbox-exec` +
-//!   the seatbelt profile (Phase 3). Linux gets `airgap::linux`'s fallback
+//!   the seatbelt profile (Phase 3). Linux gets `egress::linux`'s fallback
 //!   ladder (Phase 4, this slice): bubblewrap when it's on `$PATH`,
 //!   otherwise `tome-shim` self-unsharing a fresh user+network namespace,
 //!   otherwise an actionable refusal — never a silent degrade to open
@@ -74,7 +74,7 @@
 //!   gap real on both shipping targets, not just macOS.
 //! - **A pane's proxy is created BEFORE the process spawns, and torn down
 //!   if the spawn then fails** — mirrors `createPty`'s own
-//!   `catch (err) { airgap.closePane(id); throw err }": a proxy that
+//!   `catch (err) { egress.closePane(id); throw err }": a proxy that
 //!   came up must never outlive a failed spawn as an orphaned, useless
 //!   listener.
 
@@ -88,10 +88,10 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::agent_spawn::{self, AgentEntry};
-use crate::ipc::airgap::{close_pane_and_proxy, create_gapped_pane_proxy};
 use crate::ipc::auth::ceil_seconds;
+use crate::ipc::egress::{close_pane_and_proxy, create_gapped_pane_proxy};
 use crate::{
-    agent_env, airgap, brain, custom_agents, eventlog, events, lock_gate, login_env, pty_authority,
+    agent_env, brain, custom_agents, egress, eventlog, events, lock_gate, login_env, pty_authority,
     state::AppState, store,
 };
 
@@ -99,9 +99,9 @@ use crate::{
 /// `pty.create: (opts) => { const ch = new Channel(); ...; return
 /// call('pty_create', { opts, onData: ch }) }` forwards the renderer's
 /// `opts` object verbatim — see `src/renderer/panels/terminal.js`'s
-/// `tome.pty.create({ id, kind, cwd, airgap, ws, model, auth })` for the
+/// `tome.pty.create({ id, kind, cwd, egress, ws, model, auth })` for the
 /// actual call site — which `src/main/index.js`'s handler destructures as
-/// `{ id, kind, cwd, airgap: gapped, ws, model, auth }` (line 633).
+/// `{ id, kind, cwd, egress: gapped, ws, model, auth }` (line 633).
 ///
 /// `ws`/`model` are accepted here — so a real renderer payload always
 /// deserializes cleanly, and the struct documents the full wire contract.
@@ -118,7 +118,7 @@ pub struct PtyCreateOpts {
     pub id: String,
     pub kind: String,
     pub cwd: Option<String>,
-    pub airgap: Option<bool>,
+    pub egress: Option<bool>,
     pub ws: Option<String>,
     pub model: Option<String>,
     pub auth: Option<Value>,
@@ -137,7 +137,7 @@ enum SandboxWrap {
     /// appended after `args`, and `cmd` becomes the new spawn target.
     Prefix { cmd: String, args: Vec<String> },
     /// Linux: the ENTIRE argv, already fully assembled by
-    /// `airgap::linux::build_bwrap_argv`/`build_self_unshare_argv` (argv[0]
+    /// `egress::linux::build_bwrap_argv`/`build_self_unshare_argv` (argv[0]
     /// is `bwrap` or the resolved `tome-shim` path; the trailing element is
     /// this same pane's [`login_shell_argv`], threaded in as
     /// `GappedSpawnSpec::inner_argv` — see [`build_linux_wrap_argv`]).
@@ -171,7 +171,7 @@ enum HostOs {
 /// neither).
 enum GappedSpawnDecision {
     /// macOS: wrap the spawn in `sandbox-exec -p <profile>`. The literal
-    /// path, not `airgap::seatbelt::SANDBOX_EXEC_PATH` (that const is
+    /// path, not `egress::seatbelt::SANDBOX_EXEC_PATH` (that const is
     /// `#[cfg(target_os = "macos")]`-gated for a good reason of its own —
     /// see that module's doc comment — but this function is deliberately
     /// OS-unconditional so `#[cfg(test)]` can exercise both branches on
@@ -181,12 +181,12 @@ enum GappedSpawnDecision {
         cmd: &'static str,
         args: Vec<String>,
     },
-    /// Linux: `airgap::linux`'s fallback-ladder verdict for THIS host —
+    /// Linux: `egress::linux`'s fallback-ladder verdict for THIS host —
     /// `Bwrap`/`SelfUnshare` (real enforcement, argv still to be built —
     /// see [`build_linux_wrap_argv`]) or `Refuse { reason }` (bwrap absent
     /// AND no usable userns fallback; an actionable message, never a
     /// silent unenforced spawn).
-    Linux(airgap::linux::SandboxStrategy),
+    Linux(egress::linux::SandboxStrategy),
     /// Any OS other than macOS or Linux — refuse rather than spawn a
     /// gapped pane with nothing actually enforcing its proxy env vars (the
     /// exact TOME-001 hole this rewrite exists to close). Distinct from
@@ -209,7 +209,7 @@ enum GappedSpawnDecision {
 /// only ever reached when the app is ACTUALLY running on Linux).
 ///
 /// Linux's own fallback-ladder DECISION (bwrap vs. self-unshare vs.
-/// refuse) is not re-implemented here — `airgap::linux::decide_sandbox_
+/// refuse) is not re-implemented here — `egress::linux::decide_sandbox_
 /// strategy`/`probe_sandbox_strategy` already own that, fully tested in
 /// their own module. This function's job is narrower: given the verdict,
 /// decide what `pty_create` should DO with it, on par with the macOS
@@ -217,7 +217,7 @@ enum GappedSpawnDecision {
 fn resolve_gapped_spawn(
     host_os: HostOs,
     seatbelt_profile: String,
-    linux_strategy: airgap::linux::SandboxStrategy,
+    linux_strategy: egress::linux::SandboxStrategy,
 ) -> GappedSpawnDecision {
     match host_os {
         HostOs::MacOs => GappedSpawnDecision::Sandbox {
@@ -229,7 +229,7 @@ fn resolve_gapped_spawn(
     }
 }
 
-/// The real fallback-ladder verdict for THIS host: `airgap::linux::
+/// The real fallback-ladder verdict for THIS host: `egress::linux::
 /// probe_sandbox_strategy()`'s real `$PATH` scan + `/proc/sys/...` reads on
 /// Linux. See the module doc comment on [`resolve_gapped_spawn`] for why a
 /// tiny wrapper exists here rather than calling `probe_sandbox_strategy()`
@@ -237,14 +237,14 @@ fn resolve_gapped_spawn(
 /// = "linux")]` split to exactly one spot instead of threading a `#[cfg]`
 /// through `pty_create`'s body.
 ///
-/// Verification boundary (same honest caveat `airgap::linux`'s own module
+/// Verification boundary (same honest caveat `egress::linux`'s own module
 /// doc comment states, worth restating at this integration's real call
 /// site): this crate's native `cargo check`/`cargo test` gates run on
 /// macOS and therefore never type-check this `#[cfg(target_os = "linux")]`
 /// arm at all. It compiles cross-checked (`cargo check -p tome-shim
 /// --target x86_64-unknown-linux-gnu` proves the SIBLING crate's Linux ABI
 /// usage; THIS call — a plain, dependency-free function call into
-/// `airgap::linux`, itself already cross-check-covered by that same
+/// `egress::linux`, itself already cross-check-covered by that same
 /// sibling-crate boundary's absence... see note below) but has never
 /// actually run on Linux. Concretely: **this specific line is not
 /// re-verified by any of this slice's own local gates** — the whole `tome`
@@ -257,27 +257,27 @@ fn resolve_gapped_spawn(
 /// time it actually runs. Never claim this "works" from this repo's own
 /// local state — only that it compiles for Linux and is CI-gated.
 #[cfg(target_os = "linux")]
-fn current_linux_sandbox_strategy() -> airgap::linux::SandboxStrategy {
-    airgap::linux::probe_sandbox_strategy()
+fn current_linux_sandbox_strategy() -> egress::linux::SandboxStrategy {
+    egress::linux::probe_sandbox_strategy()
 }
 
 /// Inert placeholder for every host that isn't Linux — [`resolve_gapped_spawn`]
 /// only ever reads this parameter inside its `HostOs::Linux` arm, which
 /// `pty_create`'s one real call site only ever reaches when
 /// `cfg!(target_os = "linux")` is actually true. An empty reason string
-/// (rather than, say, `airgap::linux::INSTALL_BUBBLEWRAP_HINT`) makes that
+/// (rather than, say, `egress::linux::INSTALL_BUBBLEWRAP_HINT`) makes that
 /// "never actually read" property visible at a glance in any debug output,
 /// instead of printing a plausible-looking message that never applies.
 #[cfg(not(target_os = "linux"))]
-fn current_linux_sandbox_strategy() -> airgap::linux::SandboxStrategy {
-    airgap::linux::SandboxStrategy::Refuse {
+fn current_linux_sandbox_strategy() -> egress::linux::SandboxStrategy {
+    egress::linux::SandboxStrategy::Refuse {
         reason: String::new(),
     }
 }
 
 /// Builds the bwrap/self-unshare argv for whichever non-refusing rung
 /// `strategy` names, from an already-fully-populated `spec`. Pure — no
-/// syscalls, no I/O, just delegating to `airgap::linux`'s own already-
+/// syscalls, no I/O, just delegating to `egress::linux`'s own already-
 /// tested pure builders — so this stays `#[cfg(test)]`-able on every host,
 /// same as everything else in this file's gapped-spawn decision layer.
 ///
@@ -288,15 +288,15 @@ fn current_linux_sandbox_strategy() -> airgap::linux::SandboxStrategy {
 /// crashing, so this function can never be made to panic by a future call
 /// site that forgets that precondition.
 fn build_linux_wrap_argv(
-    strategy: &airgap::linux::SandboxStrategy,
-    spec: &airgap::linux::GappedSpawnSpec,
+    strategy: &egress::linux::SandboxStrategy,
+    spec: &egress::linux::GappedSpawnSpec,
 ) -> Result<Vec<String>, String> {
     match strategy {
-        airgap::linux::SandboxStrategy::Bwrap => Ok(airgap::linux::build_bwrap_argv(spec)),
-        airgap::linux::SandboxStrategy::SelfUnshare => {
-            Ok(airgap::linux::build_self_unshare_argv(spec))
+        egress::linux::SandboxStrategy::Bwrap => Ok(egress::linux::build_bwrap_argv(spec)),
+        egress::linux::SandboxStrategy::SelfUnshare => {
+            Ok(egress::linux::build_self_unshare_argv(spec))
         }
-        airgap::linux::SandboxStrategy::Refuse { reason } => Err(reason.clone()),
+        egress::linux::SandboxStrategy::Refuse { reason } => Err(reason.clone()),
     }
 }
 
@@ -306,7 +306,7 @@ fn build_linux_wrap_argv(
 /// [`build_pty_command`] assembles: `SandboxWrap::None`/`Prefix` splice
 /// this in directly, and Linux's `SandboxWrap::Full` (built earlier, in
 /// `pty_create`'s gapped-spawn setup, before the sandbox is even chosen)
-/// uses this SAME vector as `airgap::linux::GappedSpawnSpec::inner_argv` —
+/// uses this SAME vector as `egress::linux::GappedSpawnSpec::inner_argv` —
 /// so a gapped Linux pane's agent line is never a second,
 /// independently-written copy of this "-l"/"-c" shape that could drift
 /// from the ungapped/macOS one.
@@ -526,17 +526,17 @@ pub async fn pty_create(
     // this is a plain allowlist lookup with no cost worth guarding.
     let agent_cmd = agent_spawn::build_agent_spawn_from(&agents, &opts.kind, opts.model.as_deref());
 
-    let airgap_default = {
+    let egress_default = {
         let default_dir = dir.clone();
-        tokio::task::spawn_blocking(move || store::get(&default_dir, "airgap-default", locked))
+        tokio::task::spawn_blocking(move || store::get(&default_dir, "egress-default", locked))
             .await
             .map_err(|e| e.to_string())?
     };
     // `!== false` in the JS original: an absent key (`Value::Null`) and
     // anything else but the literal `false` all mean "gap by default".
-    let policy_default = airgap_default != json!(false);
+    let policy_default = egress_default != json!(false);
     let effective_gapped =
-        pty_authority::resolve_gapping(opts.airgap.unwrap_or(false), policy_default);
+        pty_authority::resolve_gapping(opts.egress.unwrap_or(false), policy_default);
 
     // ---- TOME-001 re-auth ceremony (before resolving cwd — matches
     // createPty's own order) ----
@@ -617,7 +617,7 @@ pub async fn pty_create(
         };
         match resolve_gapped_spawn(
             host_os,
-            airgap::seatbelt::seatbelt_profile(&dir),
+            egress::seatbelt::seatbelt_profile(&dir),
             current_linux_sandbox_strategy(),
         ) {
             GappedSpawnDecision::Sandbox { cmd, args } => {
@@ -634,7 +634,7 @@ pub async fn pty_create(
                 // Rung 3: refuse loudly with an actionable message BEFORE
                 // touching anything — no proxy created, nothing to tear
                 // down. Never a silent unenforced spawn (TOME-001).
-                if let airgap::linux::SandboxStrategy::Refuse { reason } = &strategy {
+                if let egress::linux::SandboxStrategy::Refuse { reason } = &strategy {
                     events::append(
                         &app,
                         eventlog::make_event(
@@ -655,14 +655,14 @@ pub async fn pty_create(
                 // The loopback bridge's unix socket path — bind-mounted
                 // (bwrap) or reached at its real host path (self-unshare;
                 // no mount namespace to remap it into, see
-                // `airgap::linux`'s module doc comment) — must exist and
+                // `egress::linux`'s module doc comment) — must exist and
                 // its parent dir must already be `0700` BEFORE `PaneProxy`
                 // tries to `UnixListener::bind` it.
-                let sock_path = airgap::linux::pane_socket_path_from_env(&opts.id).ok_or_else(|| {
+                let sock_path = egress::linux::pane_socket_path_from_env(&opts.id).ok_or_else(|| {
                     "gapped pane refused: pane id is not a valid loopback-bridge socket path component".to_string()
                 })?;
                 if let Some(parent) = sock_path.parent() {
-                    airgap::linux::ensure_pane_socket_dir(parent).map_err(|e| e.to_string())?;
+                    egress::linux::ensure_pane_socket_dir(parent).map_err(|e| e.to_string())?;
                 }
                 let shim_path = resolve_shim_path()?;
 
@@ -686,7 +686,7 @@ pub async fn pty_create(
                 let login = login_env::login_env().await;
                 let inner_argv = login_shell_argv(&login.shell, agent_cmd.as_deref());
 
-                let spec = airgap::linux::GappedSpawnSpec {
+                let spec = egress::linux::GappedSpawnSpec {
                     pane_id: opts.id.clone(),
                     proxy_port: proxy.port(),
                     host_socket_path: sock_path,
@@ -813,7 +813,7 @@ pub async fn pty_create(
                 let _ = exit_app.emit("pty:exit", json!({"id": exit_id, "exitCode": exit_code}));
                 let exit_state = exit_app.state::<AppState>();
                 // Mirrors index.js's `p.onExit(({ exitCode }) => { ...;
-                // conductor.markExited(id); airgap.closePane(id); ... })` —
+                // conductor.markExited(id); egress.closePane(id); ... })` —
                 // markExited BEFORE closePane, same order.
                 exit_state.conductor.mark_exited(&exit_id);
                 close_pane_and_proxy(&exit_app, &exit_state, &exit_id);
@@ -828,7 +828,7 @@ pub async fn pty_create(
         return Err(err);
     }
     // Mirrors index.js's `ptys.set(id, p); conductor.register(id, { kind,
-    // cwd: spawnCwd, airgap: effectiveGapped })` — registered only once the
+    // cwd: spawnCwd, egress: effectiveGapped })` — registered only once the
     // real spawn has succeeded, so the conductor's tools (list_panes'
     // enrichment, read_terminal's consent gate) can see this pane. `record`
     // (the per-chunk scrollback tap conductor.js's `p.onData` also calls)
@@ -878,9 +878,9 @@ pub async fn pty_resize(
 /// `pty:kill` (`fire('pty_kill', { id })`) — signals and reaps the pane's
 /// child process (see `crate::pty::Registry::kill`'s doc comment for the
 /// full kill/drop/reap sequence and why it doesn't block on the reap
-/// itself), THEN tears down its air-gap proxy immediately — mirrors the JS
+/// itself), THEN tears down its egress proxy immediately — mirrors the JS
 /// original's `ptys.get(id)?.kill(); ptys.delete(id); conductor.forget(id);
-/// airgap.closePane(id)`, which closes the pane's egress the moment a kill
+/// egress.closePane(id)`, which closes the pane's egress the moment a kill
 /// is requested rather than waiting for the killed process's own exit
 /// event. `on_exit` (fired later, once the killed process is actually
 /// reaped — see `crate::pty`'s module doc comment) calls
@@ -897,7 +897,7 @@ pub async fn pty_kill(
     lock_gate::guard(&state, "pty:kill")?;
     state.pty.kill(&id).await;
     // Mirrors index.js's `ptys.get(id)?.kill(); ptys.delete(id);
-    // conductor.forget(id); airgap.closePane(id)` — forget BEFORE
+    // conductor.forget(id); egress.closePane(id)` — forget BEFORE
     // closePane, same order; drops meta/scrollback/read-consent/
     // read-requested together so a reopened pane with the same id starts
     // clean rather than inheriting a stale consent grant.
@@ -997,7 +997,7 @@ mod tests {
             "id": "pane-1",
             "kind": "claude",
             "cwd": "/work/proj",
-            "airgap": true,
+            "egress": true,
             "ws": "/work/proj",
             "model": "haiku",
             "auth": { "passphrase": "x" },
@@ -1006,7 +1006,7 @@ mod tests {
         assert_eq!(opts.id, "pane-1");
         assert_eq!(opts.kind, "claude");
         assert_eq!(opts.cwd.as_deref(), Some("/work/proj"));
-        assert_eq!(opts.airgap, Some(true));
+        assert_eq!(opts.egress, Some(true));
         assert_eq!(opts.ws.as_deref(), Some("/work/proj"));
         assert_eq!(opts.model.as_deref(), Some("haiku"));
         assert!(opts.auth.is_some());
@@ -1014,7 +1014,7 @@ mod tests {
 
     #[test]
     fn pty_create_opts_tolerates_a_bare_terminal_payload() {
-        // panels/terminal.js always spreads every key, but cwd/airgap/ws/
+        // panels/terminal.js always spreads every key, but cwd/egress/ws/
         // model/auth are each `undefined` for the common case (a fresh
         // terminal pane, no pinned model, no workspace open, no prior
         // reauth attempt) — JSON.stringify drops an `undefined` property
@@ -1023,7 +1023,7 @@ mod tests {
         let raw = json!({ "id": "pane-2", "kind": "terminal" });
         let opts: PtyCreateOpts = serde_json::from_value(raw).unwrap();
         assert_eq!(opts.cwd, None);
-        assert_eq!(opts.airgap, None);
+        assert_eq!(opts.egress, None);
         assert_eq!(opts.ws, None);
         assert_eq!(opts.model, None);
         assert!(opts.auth.is_none());
@@ -1202,8 +1202,8 @@ mod tests {
 
     // ================= resolve_gapped_spawn — TOME-001's three-way OS rule ================
 
-    fn refuse_strategy() -> airgap::linux::SandboxStrategy {
-        airgap::linux::SandboxStrategy::Refuse {
+    fn refuse_strategy() -> egress::linux::SandboxStrategy {
+        egress::linux::SandboxStrategy::Refuse {
             reason: "install bubblewrap".to_string(),
         }
     }
@@ -1211,8 +1211,8 @@ mod tests {
     #[test]
     fn resolve_gapped_spawn_wraps_in_sandbox_exec_on_macos_regardless_of_linux_strategy() {
         for linux_strategy in [
-            airgap::linux::SandboxStrategy::Bwrap,
-            airgap::linux::SandboxStrategy::SelfUnshare,
+            egress::linux::SandboxStrategy::Bwrap,
+            egress::linux::SandboxStrategy::SelfUnshare,
             refuse_strategy(),
         ] {
             match resolve_gapped_spawn(HostOs::MacOs, "(version 1)".to_string(), linux_strategy) {
@@ -1231,8 +1231,8 @@ mod tests {
     #[test]
     fn resolve_gapped_spawn_passes_the_linux_strategy_through_unchanged_on_linux() {
         for linux_strategy in [
-            airgap::linux::SandboxStrategy::Bwrap,
-            airgap::linux::SandboxStrategy::SelfUnshare,
+            egress::linux::SandboxStrategy::Bwrap,
+            egress::linux::SandboxStrategy::SelfUnshare,
             refuse_strategy(),
         ] {
             let decision = resolve_gapped_spawn(
@@ -1260,7 +1260,7 @@ mod tests {
             resolve_gapped_spawn(
                 HostOs::Other,
                 "(version 1)".to_string(),
-                airgap::linux::SandboxStrategy::Bwrap
+                egress::linux::SandboxStrategy::Bwrap
             ),
             GappedSpawnDecision::RefuseUnsupportedOs
         ));
@@ -1268,8 +1268,8 @@ mod tests {
 
     // ================= build_linux_wrap_argv =================
 
-    fn sample_linux_spec() -> airgap::linux::GappedSpawnSpec {
-        airgap::linux::GappedSpawnSpec {
+    fn sample_linux_spec() -> egress::linux::GappedSpawnSpec {
+        egress::linux::GappedSpawnSpec {
             pane_id: "pty-1".to_string(),
             proxy_port: 54321,
             host_socket_path: PathBuf::from("/run/user/1000/tome/pane-pty-1.sock"),
@@ -1286,27 +1286,27 @@ mod tests {
     }
 
     #[test]
-    fn build_linux_wrap_argv_bwrap_matches_airgap_linux_build_bwrap_argv() {
+    fn build_linux_wrap_argv_bwrap_matches_egress_linux_build_bwrap_argv() {
         let spec = sample_linux_spec();
         assert_eq!(
-            build_linux_wrap_argv(&airgap::linux::SandboxStrategy::Bwrap, &spec).unwrap(),
-            airgap::linux::build_bwrap_argv(&spec)
+            build_linux_wrap_argv(&egress::linux::SandboxStrategy::Bwrap, &spec).unwrap(),
+            egress::linux::build_bwrap_argv(&spec)
         );
     }
 
     #[test]
-    fn build_linux_wrap_argv_self_unshare_matches_airgap_linux_build_self_unshare_argv() {
+    fn build_linux_wrap_argv_self_unshare_matches_egress_linux_build_self_unshare_argv() {
         let spec = sample_linux_spec();
         assert_eq!(
-            build_linux_wrap_argv(&airgap::linux::SandboxStrategy::SelfUnshare, &spec).unwrap(),
-            airgap::linux::build_self_unshare_argv(&spec)
+            build_linux_wrap_argv(&egress::linux::SandboxStrategy::SelfUnshare, &spec).unwrap(),
+            egress::linux::build_self_unshare_argv(&spec)
         );
     }
 
     #[test]
     fn build_linux_wrap_argv_refuse_returns_the_reason_as_an_error_rather_than_panicking() {
         let spec = sample_linux_spec();
-        let strategy = airgap::linux::SandboxStrategy::Refuse {
+        let strategy = egress::linux::SandboxStrategy::Refuse {
             reason: "install bubblewrap".to_string(),
         };
         assert_eq!(

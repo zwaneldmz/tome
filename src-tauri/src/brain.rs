@@ -1,7 +1,7 @@
 //! Per-workspace note vault ("brain"): Obsidian-compatible markdown with
 //! `[[wikilinks]]` and YAML-ish frontmatter. Ports `src/main/brain.js`
 //! (341 lines) — module shape mirrors that file's own doc comment ("mirrors
-//! airgap.js: pure functions + module state"): the parsing/confinement
+//! egress.js: pure functions + module state"): the parsing/confinement
 //! logic below is pure and unit-tested; the cache/watcher maps are
 //! module-level `static`s rather than `AppState` fields, for the same
 //! reason `fs.rs`'s `WATCHED` static is (see that file's doc comment) —

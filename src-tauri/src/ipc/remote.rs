@@ -109,7 +109,7 @@ pub async fn remote_consent(
 
 /// `remote:revoke` (`{ id }`). Always `{ ok: true }`, even for an id with
 /// nothing to revoke — same idempotent, no-such-id-error shape
-/// `export_revoke`/`airgap::revoke_repo_allowlist` use for the same reason.
+/// `export_revoke`/`egress::revoke_repo_allowlist` use for the same reason.
 #[tauri::command]
 pub async fn remote_revoke(
     app: AppHandle,

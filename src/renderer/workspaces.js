@@ -2,10 +2,10 @@
 // folder the git branch widget follows (activeRoot).
 import { tome } from './util.js'
 import { wsState } from './state.js'
-// The workspaces <-> repo-airgap import cycle is safe for the same reason as
+// The workspaces <-> repo-egress import cycle is safe for the same reason as
 // the menus <-> tree one noted in tree.js: neither side calls the other at
 // module-evaluation time.
-import { checkRepoAirgap } from './repo-airgap.js'
+import { checkRepoEgress } from './repo-egress.js'
 
 export const activeWorkspace = () => wsState.ws.workspaces[wsState.ws.active] || null
 // main confines conductor open_file / doc:read / tome:// to these folders, and
@@ -17,9 +17,9 @@ export const syncFolders = () =>
 export const saveWs = () => {
   tome.store.set('workspaces', wsState.ws)
   syncFolders()
-  // A workspace mutation can add a folder carrying .tome/airgap.json — the
+  // A workspace mutation can add a folder carrying .tome/egress.json — the
   // consent check is fire-and-forget here; it guards against re-entrancy.
-  checkRepoAirgap()
+  checkRepoEgress()
 }
 export const paneCwd = () => wsState.activeRoot || activeWorkspace()?.folders[0] || tome.home
 

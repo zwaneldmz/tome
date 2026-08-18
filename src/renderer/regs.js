@@ -3,4 +3,4 @@
 export const terms = new Map() // ptyId -> xterm Terminal
 export const chats = new Map() // chatId -> ChatPanel
 export const brains = new Map() // ws name -> BrainPanel
-export const strips = new Map() // ptyId -> air-gap strip element
+export const strips = new Map() // ptyId -> egress strip element

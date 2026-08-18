@@ -13,7 +13,7 @@
 //! process-wide singleton the way JS's module system gives it for free
 //! (vitest isolates per file, not per `it()`; Rust's test runner isolates
 //! neither). Each test instead builds its own [`Conductor::new`], exactly
-//! how `pty::Registry`/`airgap::AirgapState`/`flow::Runner` are already
+//! how `pty::Registry`/`egress::EgressState`/`flow::Runner` are already
 //! tested elsewhere in this crate. Production wires exactly one instance
 //! via `AppState.conductor` (see that field's own doc comment).
 //!
@@ -36,7 +36,7 @@
 //! every flushed chunk, alongside the `pty:data` Channel send. That is the
 //! Rust equivalent of `index.js`'s `p.onData((data) => {
 //! conductor.record(id, data); queuePtyData(id, data) })`. Net effect:
-//! `read_terminal`'s consent gate (airgap refusal, the
+//! `read_terminal`'s consent gate (egress refusal, the
 //! `conductor:readRequest` prompt, `allowRead`) is reachable against a real
 //! live pane AND reads back that pane's actual scrollback.
 
@@ -55,7 +55,7 @@ use crate::agent_spawn::AGENTS;
 // module doc comment's "Production wiring note".
 const SCROLL_CAP: usize = 200_000;
 
-/// Mirrors one entry of `conductor.js`'s `meta` Map: `{ kind, cwd, airgap,
+/// Mirrors one entry of `conductor.js`'s `meta` Map: `{ kind, cwd, egress,
 /// exited }`, set once by [`Conductor::register`] and only ever touched
 /// again by [`Conductor::mark_exited`] (flips `exited`) or
 /// [`Conductor::forget`] (removes the entry entirely).
@@ -63,13 +63,13 @@ const SCROLL_CAP: usize = 200_000;
 pub(crate) struct PaneMeta {
     pub kind: String,
     pub cwd: String,
-    pub airgap: bool,
+    pub egress: bool,
     pub exited: bool,
 }
 
 /// The conductor's whole live-session state — see the module doc comment.
 /// Every field owns its own lock (matching `pty::Registry`/
-/// `airgap::AirgapState`'s own "owns its own interior locking" shape, per
+/// `egress::EgressState`'s own "owns its own interior locking" shape, per
 /// `state.rs`'s doc comment on `AppState` fields), so this type is `Sync`
 /// and safe to reach from many concurrent Tauri commands without an extra
 /// wrapping `Mutex` in `AppState`.
@@ -118,10 +118,10 @@ impl Conductor {
     // see the module doc comment on why that wiring isn't in this crate
     // yet).
 
-    /// `register(id, { kind, cwd, airgap })` — `exited` always starts
+    /// `register(id, { kind, cwd, egress })` — `exited` always starts
     /// `false`. Also opens this pane's scrollback ring at `""`, matching
     /// `scrolls.set(id, '')`.
-    pub fn register(&self, id: &str, kind: &str, cwd: &str, airgap: bool) {
+    pub fn register(&self, id: &str, kind: &str, cwd: &str, egress: bool) {
         self.meta
             .lock()
             .expect("Conductor.meta lock poisoned")
@@ -130,7 +130,7 @@ impl Conductor {
                 PaneMeta {
                     kind: kind.to_string(),
                     cwd: cwd.to_string(),
-                    airgap,
+                    egress,
                     exited: false,
                 },
             );

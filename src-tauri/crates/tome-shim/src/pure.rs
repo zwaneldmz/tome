@@ -13,7 +13,7 @@
 //! item) because on a non-Linux `cargo check`/`cargo test`, `linux.rs`
 //! doesn't exist as a compiled module at all, so nothing calls these —
 //! same rationale this workspace already uses in
-//! `src-tauri/src/airgap/mod.rs` and `src-tauri/src/pty_authority.rs` for
+//! `src-tauri/src/egress/mod.rs` and `src-tauri/src/pty_authority.rs` for
 //! code whose only caller is a different slice/target.
 #![allow(dead_code)]
 

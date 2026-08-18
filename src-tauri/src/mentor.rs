@@ -10,7 +10,7 @@
 //!
 //! The gate itself is a [`Mentor`] instance living at `AppState.mentor` — a
 //! plain value field that owns its own interior locking, the same shape as
-//! `conductor::Conductor` / `airgap::AirgapState` (see `state.rs`'s doc
+//! `conductor::Conductor` / `egress::EgressState` (see `state.rs`'s doc
 //! comment on subsystem-owned state).
 
 use std::collections::HashMap;
@@ -21,7 +21,7 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 
 /// Pending comprehension gates (gate id -> answer sender). Owns its own
-/// interior locking, same shape as `conductor::Conductor`/`airgap::AirgapState`.
+/// interior locking, same shape as `conductor::Conductor`/`egress::EgressState`.
 pub struct Mentor {
     pending: Mutex<HashMap<String, oneshot::Sender<Value>>>,
     seq: AtomicU64,

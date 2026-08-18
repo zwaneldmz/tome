@@ -6,8 +6,8 @@
 //! tests`).
 //!
 //! All three used to come straight from the renderer with no main-side
-//! check at all: `airgap: gapped` was passed through verbatim even while
-//! the stored `airgap-default` preference wanted every pane gapped, and
+//! check at all: `egress: gapped` was passed through verbatim even while
+//! the stored `egress-default` preference wanted every pane gapped, and
 //! `cwd` reached the spawn call unchanged, unlike every other
 //! renderer-supplied path in this app (`confine::confined_real_path`,
 //! `confine::confine`). Extracted so all three decisions are unit-testable
@@ -37,7 +37,7 @@ use std::path::{Component, Path, PathBuf};
 /// the time it reaches Rust code, so those extra JS shapes have no
 /// analogue to port; the caller folds an absent renderer value to `false`
 /// before calling in, same as it must already do for `policy_default`
-/// (`index.js` computes that side as `(await readStore('airgap-default'))
+/// (`index.js` computes that side as `(await readStore('egress-default'))
 /// !== false`).
 pub fn resolve_gapping(renderer_gapped: bool, policy_default: bool) -> bool {
     renderer_gapped || policy_default

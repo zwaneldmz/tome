@@ -128,7 +128,7 @@ domains and nothing else**.
 - Need full, normal network access? Spawn an **uncontained pane** from the
   `＋` menu. Because that pane can run anything with your privileges, Tome
   asks for your passphrase or code first — every time.
-- A repo can ship a **team allowlist** at `.tome/airgap.json`. Tome validates
+- A repo can ship a **team allowlist** at `.tome/egress.json`. Tome validates
   it and asks you to approve it before using it; editing it later re-asks.
 - A **security event log** records unlocks, blocked hosts, and assistant
   actions (what happened, never the contents). Open it from the `＋` menu.

@@ -19,10 +19,10 @@
 // otherwise light up eight agent CLIs at once.
 export const CONCURRENCY_CAP = 2
 
-// The air gap is keyed by PANE id, and a background node has no pane — so the
+// The egress is keyed by PANE id, and a background node has no pane — so the
 // runner mints one per node under this prefix (flow-runner.js's launch). The
 // prefix lives here, with the id built by one function, because a second
-// reader depends on it: the status bar counts "N air-gapped panes", and a run
+// reader depends on it: the status bar counts "N gapped panes", and a run
 // proxy is not a pane — it has no strip, no unlock UI, and no window. Counting
 // one there would report panes that do not exist and flicker for the length of
 // a run, so the bar filters on exactly this prefix and the two sides cannot

@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn builds_a_command_line_for_every_alias_the_shared_allowlist_offers() {
-        // The same self-check airgap.test.js runs over DEFAULT_ALLOW:
+        // The same self-check egress.test.js runs over DEFAULT_ALLOW:
         // whatever someone adds to AGENT_MODELS later must still produce
         // a usable command line, or the editor would offer a model that
         // silently spawns the default.

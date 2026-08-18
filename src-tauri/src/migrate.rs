@@ -4,7 +4,7 @@
 //! consents, saved workspaces/theme/preferences, event history, and any
 //! downloaded whisper model. Ports the rewrite plan's "Data migration" line
 //! under §7 Packaging + Migration: "first boot, copy `~/Library/
-//! Application Support/Tome` → Tauri app-data dir (store/, airgap*.json,
+//! Application Support/Tome` → Tauri app-data dir (store/, egress*.json,
 //! events.jsonl, models/), preserving 0600."
 //!
 //! No Electron-side JS original exists for this file to port — Electron
@@ -28,8 +28,8 @@
 //! `<app_data_dir>/<key>.json` file per key, no `store/` subdirectory; see
 //! `store.rs`'s own module doc comment) PLUS every filename
 //! `store_keys::RESERVED_KEYS` carves out of that same key space precisely
-//! because a different file owner already claims it (`airgap.json`,
-//! `airgap-auth.json`, `airgap-repo-consents.json`) — plus the flat
+//! because a different file owner already claims it (`egress.json`,
+//! `egress-auth.json`, `egress-repo-consents.json`) — plus the flat
 //! `events.jsonl` event log, plus the whole `models/` tree (whatever
 //! `stt::model_path`'s downloaded whisper binaries left there). Everything
 //! else a real Electron `userData` directory holds — `Cache/`, `Cookies`,
@@ -41,7 +41,7 @@
 //! targeted, named-allowlist copy, never a directory mirror.
 //!
 //! ## The `enc:v1:` TOTP secret: copied as opaque bytes, never touched
-//! A migrated `airgap-auth.json` may hold a TOTP secret Electron's
+//! A migrated `egress-auth.json` may hold a TOTP secret Electron's
 //! `safeStorage` encrypted (`enc:v1:<base64>` — see `authlock.rs`'s own
 //! module doc comment for the full story). This module copies that string
 //! byte-for-byte like every other field in the file; it never parses,
@@ -99,13 +99,13 @@ fn electron_user_data_dir() -> Option<PathBuf> {
 /// Copies one file's bytes AND its exact permission mode from `src` to
 /// `dst` (Unix only, matching every other permission-setting call site in
 /// this crate — `store.rs::set`, `authlock.rs`'s `AuthLock::save`,
-/// `airgap::AirgapState::save_repo_consents`). `fs::copy` alone does not
+/// `egress::EgressState::save_repo_consents`). `fs::copy` alone does not
 /// guarantee this: the new file's mode is whatever the platform's own copy
 /// syscall defaults to, not necessarily `src`'s — the explicit
 /// `set_permissions` below, reading `src`'s OWN metadata, is what actually
 /// pins it. This is what makes "preserve 0600 on the files that had it"
 /// fall out for free without a hardcoded filename allowlist: every source
-/// file that needs 0600 (`airgap-auth.json`, `airgap-repo-consents.json`,
+/// file that needs 0600 (`egress-auth.json`, `egress-repo-consents.json`,
 /// every store-key file — all written 0600 by the modules named above)
 /// already carries that mode on disk, so a faithful mode-preserving copy
 /// reproduces it for exactly those files and none that don't.
@@ -161,7 +161,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> u64 {
 
 /// True when `dest` shows ANY sign of already being a live, in-use
 /// `app_data_dir` — see [`migrate_dir`]'s doc comment for why "already has
-/// an `airgap-auth.json`" is not a safe enough test on its own. A `dest`
+/// an `egress-auth.json`" is not a safe enough test on its own. A `dest`
 /// that doesn't exist yet, or exists but is completely empty, is the only
 /// thing treated as pristine; a single unrelated entry is enough to trip
 /// this, deliberately erring toward never overwriting real user state over
@@ -179,7 +179,7 @@ fn dest_already_used(dest: &Path) -> bool {
 /// run before" flag:
 ///
 /// - No-ops (returns `0`, touches nothing in `dest`) if [`dest_already_used`]
-///   is true. This is deliberately NOT scoped to "has an `airgap-auth.json`"
+///   is true. This is deliberately NOT scoped to "has an `egress-auth.json`"
 ///   — the app is fully usable, and `store:set` reachable for every
 ///   non-reserved key (theme, workspaces, `chat-log-*`, `custom-agents`,
 ///   ...; see `lock_gate::is_locked`/`store_keys::is_store_key_allowed`),
@@ -235,14 +235,40 @@ fn migrate_dir(source: &Path, dest: &Path) -> u64 {
 }
 
 /// Entry point — called once from `lib.rs::run()`'s `.setup()`, BEFORE
-/// `boot_auth_and_airgap`, so a freshly-migrated `airgap-auth.json`/
-/// `airgap-repo-consents.json` (if this boot's [`migrate_dir`] call copies
+/// `boot_auth_and_egress`, so a freshly-migrated `egress-auth.json`/
+/// `egress-repo-consents.json` (if this boot's [`migrate_dir`] call copies
 /// either) is what that function's own `AuthLock::load`/
-/// `AirgapState::load_repo_consents` calls see on THIS boot, not the next
+/// `EgressState::load_repo_consents` calls see on THIS boot, not the next
 /// one. Not itself fallible in any way that should abort `.setup()`: an
 /// `app_data_dir()` resolution failure here collapses to a silent no-op —
-/// the exact same fallback `boot_auth_and_airgap` itself already tolerates
+/// the exact same fallback `boot_auth_and_egress` itself already tolerates
 /// for the identical call (see that function's own doc comment).
+/// Renames the pre-rename egress files (`airgap*.json`) to their new
+/// `egress*.json` names, in place, only when the new name is absent — so a
+/// user upgrading from an older build keeps their passphrase/TOTP hash,
+/// allowlist override, and repo-consent records without re-prompting.
+/// Removing the source after a successful rename keeps the old credential
+/// bytes from lingering under two names.
+pub fn migrate_egress_filenames(dir: &Path) -> usize {
+    const PAIRS: &[(&str, &str)] = &[
+        ("airgap.json", "egress.json"),
+        ("airgap-auth.json", "egress-auth.json"),
+        ("airgap-repo-consents.json", "egress-repo-consents.json"),
+    ];
+    let mut moved = 0;
+    for (old, new) in PAIRS {
+        let old_path = dir.join(old);
+        let new_path = dir.join(new);
+        if old_path.exists()
+            && !new_path.exists()
+            && std::fs::rename(&old_path, &new_path).is_ok()
+        {
+            moved += 1;
+        }
+    }
+    moved
+}
+
 pub fn run(app: &AppHandle) {
     let Ok(dest) = app.path().app_data_dir() else {
         return;
@@ -251,6 +277,10 @@ pub fn run(app: &AppHandle) {
         return;
     };
     let copied = migrate_dir(&source, &dest);
+    // Must run AFTER `migrate_dir`: the Electron snapshot still carries the
+    // old `airgap*.json` names, so re-home them here on the same boot they
+    // are copied in.
+    let _ = migrate_egress_filenames(&dest);
     if copied > 0 {
         log_event(
             app,
@@ -333,17 +363,17 @@ mod tests {
     }
 
     #[test]
-    fn migrate_dir_copies_the_reserved_airgap_files() {
+    fn migrate_dir_copies_the_reserved_egress_files() {
         let src = tempdir();
         let dst = tempdir();
-        write(src.path(), "airgap.json", r#"{"allow":[]}"#);
-        write(src.path(), "airgap-auth.json", r#"{"salt":"s","hash":"h"}"#);
-        write(src.path(), "airgap-repo-consents.json", r#"{}"#);
+        write(src.path(), "egress.json", r#"{"allow":[]}"#);
+        write(src.path(), "egress-auth.json", r#"{"salt":"s","hash":"h"}"#);
+        write(src.path(), "egress-repo-consents.json", r#"{}"#);
         let copied = migrate_dir(src.path(), dst.path());
         assert_eq!(copied, 3);
-        assert!(dst.path().join("airgap.json").exists());
-        assert!(dst.path().join("airgap-auth.json").exists());
-        assert!(dst.path().join("airgap-repo-consents.json").exists());
+        assert!(dst.path().join("egress.json").exists());
+        assert!(dst.path().join("egress-auth.json").exists());
+        assert!(dst.path().join("egress-repo-consents.json").exists());
     }
 
     #[test]
@@ -400,10 +430,10 @@ mod tests {
     fn migrate_dir_preserves_0600_on_the_auth_file() {
         let src = tempdir();
         let dst = tempdir();
-        let auth = write(src.path(), "airgap-auth.json", "{}");
+        let auth = write(src.path(), "egress-auth.json", "{}");
         chmod(&auth, 0o600);
         migrate_dir(src.path(), dst.path());
-        assert_eq!(mode_of(&dst.path().join("airgap-auth.json")), 0o600);
+        assert_eq!(mode_of(&dst.path().join("egress-auth.json")), 0o600);
     }
 
     #[cfg(unix)]
@@ -437,7 +467,7 @@ mod tests {
         let src = tempdir();
         let dst = tempdir();
         write(src.path(), "workspaces.json", "{\"new\":true}");
-        let original_auth = write(dst.path(), "airgap-auth.json", "{\"already\":\"used\"}");
+        let original_auth = write(dst.path(), "egress-auth.json", "{\"already\":\"used\"}");
         let copied = migrate_dir(src.path(), dst.path());
         assert_eq!(copied, 0);
         assert_eq!(
@@ -452,7 +482,7 @@ mod tests {
         // Regression test for the data-loss bug this module used to have:
         // the app is fully usable — and `store:set` writes real files like
         // theme.json — before a passphrase is ever configured, so a `dest`
-        // with genuine interim user data and no `airgap-auth.json` must
+        // with genuine interim user data and no `egress-auth.json` must
         // still be treated as "already used", not re-migrated over. Without
         // this, `migrate_dir` re-ran on every boot and clobbered `dest`'s
         // theme.json back to the stale Electron snapshot on every launch
@@ -543,5 +573,40 @@ mod tests {
         let copied = migrate_dir(src.path(), dst.path());
         assert_eq!(copied, 0);
         assert!(!dst.path().join("models").exists());
+    }
+
+    // ---- migrate_egress_filenames ----
+
+    #[test]
+    fn migrate_egress_filenames_renames_old_to_new_only_when_new_absent() {
+        let dir = tempdir();
+        write(dir.path(), "airgap-auth.json", r#"{"salt":"s","hash":"h"}"#);
+        write(dir.path(), "airgap.json", r#"{"allow":[]}"#);
+        let moved = migrate_egress_filenames(dir.path());
+        assert_eq!(moved, 2);
+        assert!(dir.path().join("egress-auth.json").exists());
+        assert!(dir.path().join("egress.json").exists());
+        assert!(!dir.path().join("airgap-auth.json").exists());
+        assert!(!dir.path().join("airgap.json").exists());
+    }
+
+    #[test]
+    fn migrate_egress_filenames_leaves_new_files_untouched() {
+        let dir = tempdir();
+        write(dir.path(), "egress-auth.json", r#"{"salt":"n","hash":"n"}"#);
+        write(dir.path(), "airgap-auth.json", r#"{"salt":"o","hash":"o"}"#);
+        let moved = migrate_egress_filenames(dir.path());
+        assert_eq!(moved, 0);
+        assert_eq!(
+            fs::read_to_string(dir.path().join("egress-auth.json")).unwrap(),
+            r#"{"salt":"n","hash":"n"}"#
+        );
+        assert!(dir.path().join("airgap-auth.json").exists());
+    }
+
+    #[test]
+    fn migrate_egress_filenames_returns_zero_for_a_missing_dir() {
+        let dir = tempdir().path().join("does-not-exist");
+        assert_eq!(migrate_egress_filenames(&dir), 0);
     }
 }

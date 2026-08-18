@@ -8,7 +8,7 @@
 //!   rings, read consent, the renderer's pane snapshot, `allowRun`, the
 //!   chat-abort registry). One instance lives at `AppState.conductor`;
 //!   `Conductor::new()` in tests, matching `pty::Registry`/
-//!   `airgap::AirgapState`/`flow::Runner`'s own testing shape — see that
+//!   `egress::EgressState`/`flow::Runner`'s own testing shape — see that
 //!   module's doc comment for why this can't be a process-wide `static`
 //!   the way `conductor.js`'s module-level `let`s are.
 //! - [`env::ConductorEnv`] — the injected side-effect seam (`send`,

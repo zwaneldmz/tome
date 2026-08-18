@@ -218,7 +218,7 @@ fn new_run_id(inner: &RunnerInner) -> String {
 /// in `inner.runs`/`inner.reserved_ids` at the INSTANT it is called —
 /// `start_run` mints `id` under a lock it releases immediately, then
 /// crosses several real `.await` points (confining and creating the run
-/// dir and artifacts dir, reading the airgap-default preference) before
+/// dir and artifacts dir, reading the egress-default preference) before
 /// the matching `inner.runs.insert` far below. No caller serializes
 /// concurrent `start_run` invocations (an ordinary click on Run in the UI
 /// and the 30s schedule ticker are two independent async tasks on the same
@@ -306,7 +306,7 @@ fn run_snapshot(r: &RunState) -> Value {
         "dir": r.dir.to_string_lossy(),
         "status": r.status,
         "canceling": r.canceling,
-        "airgap": r.gapped,
+        "egress": r.gapped,
         "started": r.started,
         "ended": r.ended,
         "layers": r.plan.layers,
@@ -538,7 +538,7 @@ pub async fn start_run(runs: Arc<Runner>, env: RunnerEnv, flow_path: String) -> 
         return json!({"error": format!("could not create the run folder: {e}")});
     }
 
-    let gapped = (env.airgap_default)().await;
+    let gapped = (env.egress_default)().await;
     let started = now_iso8601();
     let nodes: Vec<NodeState> = plan
         .order
@@ -1152,7 +1152,7 @@ fn settle_if_done(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str) {
                 run_id: run_id.to_string(),
                 started: r.started.clone(),
                 ended: r.ended.clone().expect("just set above"),
-                airgap: r.gapped,
+                egress: r.gapped,
                 artifacts_dir: r.artifacts_dir.clone(),
                 nodes: r
                     .nodes

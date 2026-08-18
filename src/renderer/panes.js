@@ -517,7 +517,7 @@ tome.conductor.onReadRequest(async ({ paneId }) => {
 //
 // Terminals/agents are the exception: a pty is a live process and cannot be
 // resumed. On restore we recreate each terminal/agent pane as a FRESH SHELL
-// in its saved position (same kind/cwd/airgap), rather than skipping it — the
+// in its saved position (same kind/cwd/egress), rather than skipping it — the
 // grid shape survives even though scrollback and running processes don't.
 let restoring = false
 let layoutLoaded = false
@@ -651,7 +651,7 @@ export async function restoreLayout() {
           // command line in main, which vets it against the same allowlist and
           // falls back to the CLI default on a miss (lib/agent-spawn.js).
           // Screening it here too would fork that rule into two copies.
-          spawnTerminal({ kind, cwd: params.cwd, airgap: params.airgap, wsName: params.ws, model: params.model, saved: p })
+          spawnTerminal({ kind, cwd: params.cwd, egress: params.egress, wsName: params.ws, model: params.model, saved: p })
           removePanel(p) // the fromJSON shell already spawned a doomed pty — drop it; the fresh panel above replaces it in the same group
         } else if (component === 'chat') {
           spawnChat(p)
@@ -726,12 +726,12 @@ export function addTerminal(kind, target) {
 // the returned panel to read back .group so subsequent nodes in the same run
 // stack as tabs alongside the first). `saved` carries the persisted id/title
 // when recreating a pane from a stored layout.
-export function spawnTerminal({ kind, cwd, airgap, wsName, saved, target, model }) {
+export function spawnTerminal({ kind, cwd, egress, wsName, saved, target, model }) {
   const id = `pty-${++counters.seq}`
   cwd = cwd || paneCwd()
   const name = cwd.split('/').pop() || cwd
   const isAgent = kind !== 'terminal'
-  const gapped = airgap !== undefined ? !!airgap : isAgent && prefs.airgapDefault
+  const gapped = egress !== undefined ? !!egress : isAgent && prefs.egressDefault
   return dock.addPanel({
     id,
     component: 'terminal',
@@ -743,7 +743,7 @@ export function spawnTerminal({ kind, cwd, airgap, wsName, saved, target, model 
     // otherwise silently restore an agent on the wrong model. Written only
     // when set, so a persisted layout carries no key for the default case —
     // absent is the schema's spelling of "the CLI's own default".
-    params: { ptyId: id, kind, cwd, airgap: gapped, ws: wsName ?? activeWorkspace()?.name, ...(model ? { model } : {}) },
+    params: { ptyId: id, kind, cwd, egress: gapped, ws: wsName ?? activeWorkspace()?.name, ...(model ? { model } : {}) },
   })
 }
 
@@ -760,7 +760,7 @@ export function spawnTerminal({ kind, cwd, airgap, wsName, saved, target, model 
 // through here at all — it hands the flow to main's runner, which submits the
 // composed brief and nothing else, on an explicit Run click and nothing else,
 // headless (`-p`, a process that answers and exits, leaving no session to
-// type into), inside the same air gap a pane gets, with every transition in
+// type into), inside the same egress a pane gets, with every transition in
 // the event log. This path is what stayed: an interactive agent, driven by
 // the user, with the brief pre-typed and unsubmitted.
 //

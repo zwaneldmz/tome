@@ -22,7 +22,7 @@
 
 1. **F1** Rewrite `SECURITY.md`, `THREATMODEL.md`, `docs/perf.md` against `src-tauri/*`
    (PTYs in `pty.rs`, lock gate `lock_gate.rs`, auth `authlock.rs`, sandbox
-   `airgap/seatbelt.rs` + `airgap/linux.rs`, proxy `airgap/proxy.rs`, conductor
+   `egress/seatbelt.rs` + `egress/linux.rs`, proxy `egress/proxy.rs`, conductor
    `conductor/`, confinement `confine.rs`). Remove every `node-pty` / `electron-vite` /
    `electron-rebuild` / `src/main/` / `sandbox: true` reference.
 2. **F4** Add a macOS Rust gate to `.github/workflows/build.yml` (`cargo test --lib`,

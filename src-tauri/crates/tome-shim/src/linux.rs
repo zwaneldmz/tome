@@ -66,7 +66,7 @@
 //! Landlock targets) are accepted by `args::parse_args` and threaded all
 //! the way here — see that module's own doc comment for the cross-crate
 //! wire-contract drift this closes: the argv builder that emits them
-//! (`airgap::linux::build_self_unshare_argv`, a sibling crate) landed
+//! (`egress::linux::build_self_unshare_argv`, a sibling crate) landed
 //! before this parser had any arm for them, which made every rung-2 spawn
 //! crash with `UnknownFlag` before this function ever ran at all. Now that
 //! rung 2 can actually reach [`run`]/[`self_unshare`], the gap described in

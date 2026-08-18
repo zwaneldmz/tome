@@ -1,7 +1,7 @@
 // Inline SVG icon set — small, stroke-based, inherits currentColor so every
 // icon tracks the design tokens across light/dark. Replaces the raw Unicode
 // glyphs that rendered inconsistently across fonts/platforms. The ▚ sigil and
-// ⛨/⛉ air-gap shields stay as text (brand), but chrome actions live here.
+// ⛨/⛉ egress shields stay as text (brand), but chrome actions live here.
 //
 // Each icon is a function returning an <svg> element (16×16 viewBox, 1.6px
 // stroke, round caps — the Apple-ish line weight at these sizes).

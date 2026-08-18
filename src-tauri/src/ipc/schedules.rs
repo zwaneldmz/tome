@@ -2,7 +2,7 @@
 //! `schedules:delete`) plus [`run_tick`], the 30-second driver
 //! `lib.rs::spawn_schedule_ticker` calls into — see `crate::schedule`'s
 //! module doc comment for the security rationale (consent-now/
-//! re-verify-forever hashing, the always-air-gapped override, no catch-up
+//! re-verify-forever hashing, the always-gapped override, no catch-up
 //! for missed slots) this file only threads through. Mirrors
 //! `ipc::export`'s split exactly: the pure model/persistence/decision core
 //! lives in the sibling root module (`crate::schedule`), this file is the
@@ -39,7 +39,7 @@ pub async fn schedules_list(app: AppHandle, state: State<'_, AppState>) -> Resul
 /// reads `flowPath` right now, sha1-hashes the exact text, and records that
 /// hash as the new `flowSha1` baseline — never a caller-supplied hash, the
 /// same "this call defines truth" shape `export::canonicalize` uses, unlike
-/// `airgap::consent_repo_allowlist`'s re-check against a presented hash
+/// `egress::consent_repo_allowlist`'s re-check against a presented hash
 /// (there is nothing to re-check against yet; that re-check is
 /// [`run_tick`]'s job on every later tick, against the hash THIS call just
 /// wrote). Always clears `suspended` and always re-hashes, whether creating
@@ -72,7 +72,7 @@ pub async fn schedules_set(
     let text = tokio::fs::read_to_string(&flow_path)
         .await
         .map_err(|e| format!("could not read flow: {e}"))?;
-    let flow_sha1 = crate::airgap::sha1_hex(&text);
+    let flow_sha1 = crate::egress::sha1_hex(&text);
     let dir = app_data_dir(&app)?;
     let sched_id = tokio::task::spawn_blocking(move || -> Result<String, String> {
         let mut store = schedule::load(&dir);
@@ -205,7 +205,7 @@ pub(crate) async fn run_tick(app: &AppHandle) {
         // can never equal a real 40-hex-char sha1) — see
         // schedule::decide_due_schedule's own doc comment.
         let fresh_hash = match tokio::fs::read_to_string(&flow_path).await {
-            Ok(text) => crate::airgap::sha1_hex(&text),
+            Ok(text) => crate::egress::sha1_hex(&text),
             Err(_) => String::new(),
         };
         let already_running = schedule::flow_path_has_a_running_run(&snapshot, &flow_path)
@@ -226,11 +226,11 @@ pub(crate) async fn run_tick(app: &AppHandle) {
                 let mut env = flow_env::production_env(app.clone());
                 // The override that makes an ungapped scheduled run
                 // structurally impossible — see
-                // schedule::SCHEDULED_RUN_AIRGAP's doc comment. Never the
-                // `airgap-default` store preference: there is no
+                // schedule::SCHEDULED_RUN_EGRESS's doc comment. Never the
+                // `egress-default` store preference: there is no
                 // interactive user to ask at 3am, so this path never tries.
-                env.airgap_default =
-                    flow_env::frozen_airgap_default(schedule::SCHEDULED_RUN_AIRGAP);
+                env.egress_default =
+                    flow_env::frozen_egress_default(schedule::SCHEDULED_RUN_EGRESS);
                 let runs = state.inner().flow.clone();
                 let res = flow::runner::start_run(runs, env, flow_path.clone()).await;
                 if res.get("id").and_then(Value::as_str).is_some() {

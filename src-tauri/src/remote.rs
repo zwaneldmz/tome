@@ -35,8 +35,8 @@
 //! named directly — only a `sourceId`, resolved against a record
 //! `remote_consent` already hashed and the caller just
 //! [`verify`](RemoteSource::verify)'d fresh. See `export.rs`'s module doc
-//! comment for why this is safe under the air gap (main's own outbound
-//! calls have never been confined by it — the air gap wraps spawned PANES,
+//! comment for why this is safe under the egress (main's own outbound
+//! calls have never been confined by it — the egress wraps spawned PANES,
 //! not main, via `agent_env::compose_agent_env`'s proxy vars) and gated the
 //! same way every other main-initiated network call in this crate is: by
 //! what the user already consented to, never by what a flow file or an
@@ -64,12 +64,12 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::airgap::sha1_hex;
+use crate::egress::sha1_hex;
 use crate::flow::model::safe_segment;
 
 /// `<app_data_dir>/remote-sources.json` — same directory
 /// `export-destinations.json`/`flow-schedules.json` resolve against
-/// (`lib.rs`'s `boot_auth_and_airgap`).
+/// (`lib.rs`'s `boot_auth_and_egress`).
 pub const FILE_NAME: &str = "remote-sources.json";
 
 const REMOTE_RUNS_TIMEOUT: Duration = Duration::from_secs(15);
@@ -172,7 +172,7 @@ fn file_path(dir: &Path) -> PathBuf {
 /// [`RemoteSources`] all collapse to a fresh, empty v1 store — matching
 /// every other main-owned file's "unreadable = start fresh" discipline in
 /// this crate (`export::load`, `schedule::load`,
-/// `airgap::AirgapState::load_repo_consents`).
+/// `egress::EgressState::load_repo_consents`).
 pub fn load(dir: &Path) -> RemoteSources {
     let Ok(text) = std::fs::read_to_string(file_path(dir)) else {
         return RemoteSources::default();
@@ -491,7 +491,7 @@ fn remote_child_env(process_env: &HashMap<String, String>) -> HashMap<String, St
 /// to actually kill the child rather than orphan it, matching `git.rs`'s
 /// own `git()` helper and `export.rs`'s `upload_sftp` exactly.
 ///
-/// MAIN-PROCESS NETWORK ACCESS IS UNRESTRICTED BY DESIGN — the air gap only
+/// MAIN-PROCESS NETWORK ACCESS IS UNRESTRICTED BY DESIGN — the egress only
 /// ever wraps SPAWNED PANES (`agent_env::compose_agent_env`'s proxy vars),
 /// never main's own outbound calls (see the module doc comment). This is
 /// acceptable here ONLY because `host`/`repo_path` (baked into `argv` by
@@ -915,7 +915,7 @@ mod tests {
     fn run_json(id: &str) -> String {
         serde_json::to_string(&json!({
             "id": id, "flow": "demo", "status": "done", "started": "2026-01-01T00:00:00.000Z",
-            "ended": "2026-01-01T00:00:02.000Z", "nodes": [], "layers": [], "airgap": true,
+            "ended": "2026-01-01T00:00:02.000Z", "nodes": [], "layers": [], "egress": true,
             "canceling": false, "dir": "/x", "flowPath": "/x.flow.json", "root": "/x",
         }))
         .unwrap()
@@ -924,7 +924,7 @@ mod tests {
     fn manifest_json() -> String {
         serde_json::to_string(&json!({
             "version": 1, "flow": {"name": "demo", "path": "x", "sha256": "abc"},
-            "run": {"id": "r1", "started": "s", "ended": "e", "airgap": true},
+            "run": {"id": "r1", "started": "s", "ended": "e", "egress": true},
             "git": {"head": null, "dirty": false}, "nodes": [], "products": [],
         }))
         .unwrap()

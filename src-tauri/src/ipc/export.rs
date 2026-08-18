@@ -107,7 +107,7 @@ pub async fn export_consent(
 
 /// `export:revoke` (`{ id }`). Always `{ ok: true }`, even for an id with
 /// nothing to revoke — same idempotent, no-such-id-error shape
-/// `airgap::revoke_repo_allowlist` uses for the same reason (a revoke that
+/// `egress::revoke_repo_allowlist` uses for the same reason (a revoke that
 /// races a second revoke, or a client that already knows the id is gone,
 /// should not have to special-case it).
 #[tauri::command]

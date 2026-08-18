@@ -12,7 +12,7 @@ use crate::state::AppState;
 /// unpackaged (see the JS doc comment this ports — a regression that reads
 /// the env var in here would risk it leaking into a packaged build).
 ///
-/// Called from `lib.rs::run()`'s `boot_auth_and_airgap` (Task A4's
+/// Called from `lib.rs::run()`'s `boot_auth_and_egress` (Task A4's
 /// integration) once, at boot, after `authlock::AuthLock::load` resolves
 /// `configured` — see that function's doc comment for why a one-time
 /// computation there is equivalent to this predicate being re-derived
@@ -20,7 +20,7 @@ use crate::state::AppState;
 /// does (the three inputs can only ever move the result in one direction
 /// after boot: `unlocked` is one-way false->true and forces the result to
 /// `false` outright the moment it flips, so nothing downstream of boot
-/// ever needs to call this a second time — `ipc::auth`/`ipc::airgap`'s own
+/// ever needs to call this a second time — `ipc::auth`/`ipc::egress`'s own
 /// login-success paths just write `AppState.locked = false` directly
 /// instead).
 pub(crate) fn is_locked(configured: bool, unlocked: bool, shot_mode: bool) -> bool {
@@ -64,8 +64,8 @@ fn should_block_ipc_on(channel: &str, locked: bool) -> bool {
 /// `OPEN_ON`'s one entry that still maps to a real Tauri command
 /// (`theme:set` — `app:home` does not, see `OPEN_ON`'s doc comment).
 ///
-/// `airgap:setup`/`store:get`/`store:set` are listed even though this
-/// slice does not implement their real bodies (`airgap_setup` is still a
+/// `egress:setup`/`store:get`/`store:set` are listed even though this
+/// slice does not implement their real bodies (`egress_setup` is still a
 /// stub; `store_get`/`store_set` are a different slice's file) — the open
 /// set is a property of the CHANNEL, independent of whether a body has
 /// landed yet, and a stub command still calls `guard` first (see
@@ -75,8 +75,8 @@ pub const OPEN_CHANNELS: &[&str] = &[
     "auth:status",
     "auth:login",
     "auth:touchid",
-    "airgap:setup",
-    "airgap:state",
+    "egress:setup",
+    "egress:state",
     "store:get",
     "store:set",
     "popout:close",
@@ -107,7 +107,7 @@ fn blocked(channel: &str, locked: bool) -> bool {
 /// `Error`), so the mapping from JS throw to Rust `Err` is direct and the
 /// message is carried over verbatim.
 ///
-/// `state.locked` reads `false` until the Phase 3 airgap+auth slice ports
+/// `state.locked` reads `false` until the Phase 3 egress+auth slice ports
 /// `authlock.js`'s real `initAuth`/login flow and starts flipping it (via
 /// `is_locked` above, once `AppState` grows the `configured`/`shotMode`
 /// inputs that predicate needs) — every command is reachable in the
@@ -175,18 +175,18 @@ pub const CHANNEL_OF_COMMAND: &[(&str, &str)] = &[
     ("doc_read_bytes", "doc:readBytes"),
     ("theme_set", "theme:set"),
     ("shell_open_path", "shell:openPath"),
-    ("airgap_state", "airgap:state"),
-    ("airgap_unlock", "airgap:unlock"),
-    ("airgap_relock", "airgap:relock"),
-    ("airgap_setup", "airgap:setup"),
-    ("airgap_enroll_totp", "airgap:enrollTotp"),
-    ("airgap_confirm_totp", "airgap:confirmTotp"),
-    ("airgap_read_repo_allowlist", "airgap:readRepoAllowlist"),
+    ("egress_state", "egress:state"),
+    ("egress_unlock", "egress:unlock"),
+    ("egress_relock", "egress:relock"),
+    ("egress_setup", "egress:setup"),
+    ("egress_enroll_totp", "egress:enrollTotp"),
+    ("egress_confirm_totp", "egress:confirmTotp"),
+    ("egress_read_repo_allowlist", "egress:readRepoAllowlist"),
     (
-        "airgap_consent_repo_allowlist",
-        "airgap:consentRepoAllowlist",
+        "egress_consent_repo_allowlist",
+        "egress:consentRepoAllowlist",
     ),
-    ("airgap_revoke_repo_allowlist", "airgap:revokeRepoAllowlist"),
+    ("egress_revoke_repo_allowlist", "egress:revokeRepoAllowlist"),
     ("agents_list", "agents:list"),
     ("agents_customs", "agents:customs"),
     ("agents_changed", "agents:changed"),

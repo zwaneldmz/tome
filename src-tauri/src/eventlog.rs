@@ -6,7 +6,7 @@
 //! `src/main/events.js`) is the `#[cfg(test)]` module at the bottom of this
 //! file. `events.rs` owns the actual file and is the caller.
 //!
-//! The log records security-relevant ACTIONS (conductor tool calls, air-gap
+//! The log records security-relevant ACTIONS (conductor tool calls, egress
 //! unlocks/relocks, blocked egress) — kinds + identifiers only, never tool
 //! inputs/outputs or typed text, which may carry secrets.
 
@@ -25,7 +25,7 @@ pub const TAIL: usize = 200;
 /// scope — see this slice's task notes), so a `serde_json::Map` iterates
 /// key-sorted, not insertion-ordered. Several vitest assertions pin the
 /// exact on-disk JSON text (`ts` first, then `kind`, then the caller's field
-/// order — e.g. `{"ts":"t1","kind":"airgap:blocked","paneId":"pty-2","host":"evil.com"}`),
+/// order — e.g. `{"ts":"t1","kind":"egress:blocked","paneId":"pty-2","host":"evil.com"}`),
 /// so this type carries that order explicitly and serializes it by hand
 /// (see the `Serialize` impl below) instead of going through
 /// `Value::Object`.
@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn make_event_spreads_fields_over_ts_kind() {
         let rec = make_event(
-            "airgap:unlock",
+            "egress:unlock",
             vec![("paneId", json!("pty-3")), ("minutes", json!(15))],
             Some("2026-08-09T10:00:00.000Z".to_string()),
         );
@@ -204,7 +204,7 @@ mod tests {
             rec,
             EventRecord {
                 ts: "2026-08-09T10:00:00.000Z".to_string(),
-                kind: "airgap:unlock".to_string(),
+                kind: "egress:unlock".to_string(),
                 fields: vec![
                     ("paneId".to_string(), json!("pty-3")),
                     ("minutes".to_string(), json!(15))
@@ -215,8 +215,8 @@ mod tests {
 
     #[test]
     fn make_event_defaults_ts_to_an_iso_string_when_not_injected() {
-        let rec = make_event("airgap:relock", vec![("paneId", json!("pty-1"))], None);
-        assert_eq!(rec.kind, "airgap:relock");
+        let rec = make_event("egress:relock", vec![("paneId", json!("pty-1"))], None);
+        assert_eq!(rec.kind, "egress:relock");
         assert!(
             looks_like_iso8601(&rec.ts),
             "ts {:?} is not ISO8601-shaped",
@@ -273,7 +273,7 @@ mod tests {
     fn append_event_appends_one_json_line_and_returns_a_new_vec() {
         let before: Vec<String> = vec![];
         let record = make_event(
-            "airgap:blocked",
+            "egress:blocked",
             vec![("paneId", json!("pty-2")), ("host", json!("evil.com"))],
             Some("t1".to_string()),
         );
@@ -281,7 +281,7 @@ mod tests {
         assert_ne!(after, before);
         assert_eq!(
             after,
-            vec!["{\"ts\":\"t1\",\"kind\":\"airgap:blocked\",\"paneId\":\"pty-2\",\"host\":\"evil.com\"}".to_string()]
+            vec!["{\"ts\":\"t1\",\"kind\":\"egress:blocked\",\"paneId\":\"pty-2\",\"host\":\"evil.com\"}".to_string()]
         );
     }
 
@@ -331,7 +331,7 @@ mod tests {
         lines = append_event(
             &lines,
             &make_event(
-                "airgap:relock",
+                "egress:relock",
                 vec![("paneId", json!("pty-1"))],
                 Some("t2".to_string()),
             ),
@@ -341,17 +341,17 @@ mod tests {
             parse_events(&text),
             vec![
                 json!({"ts":"t1","kind":"conductor:tool","tool":"open_pane","chatId":"chat-1","ok":true,"hint":"terminal"}),
-                json!({"ts":"t2","kind":"airgap:relock","paneId":"pty-1"}),
+                json!({"ts":"t2","kind":"egress:relock","paneId":"pty-1"}),
             ]
         );
     }
 
     #[test]
     fn parse_events_skips_a_truncated_final_line() {
-        let text = "{\"ts\":\"t1\",\"kind\":\"airgap:unlock\",\"paneId\":\"pty-3\"}\n{\"ts\":\"t2\",\"kind\":\"airgap:unl";
+        let text = "{\"ts\":\"t1\",\"kind\":\"egress:unlock\",\"paneId\":\"pty-3\"}\n{\"ts\":\"t2\",\"kind\":\"egress:unl";
         assert_eq!(
             parse_events(text),
-            vec![json!({"ts":"t1","kind":"airgap:unlock","paneId":"pty-3"})]
+            vec![json!({"ts":"t1","kind":"egress:unlock","paneId":"pty-3"})]
         );
     }
 
@@ -367,13 +367,13 @@ mod tests {
 
     #[test]
     fn parse_events_tolerates_crlf_line_endings() {
-        let rec = "{\"ts\":\"t1\",\"kind\":\"airgap:relock\",\"paneId\":\"pty-1\"}";
+        let rec = "{\"ts\":\"t1\",\"kind\":\"egress:relock\",\"paneId\":\"pty-1\"}";
         let text = format!("{rec}\r\n{rec}");
         let out = parse_events(&text);
         assert_eq!(out.len(), 2);
         assert_eq!(
             out[0],
-            json!({"ts":"t1","kind":"airgap:relock","paneId":"pty-1"})
+            json!({"ts":"t1","kind":"egress:relock","paneId":"pty-1"})
         );
         for v in out[0].as_object().unwrap().values() {
             assert!(!v.as_str().unwrap_or_default().contains('\r'));

@@ -33,7 +33,7 @@ use std::collections::{HashMap, HashSet};
 /// background.
 pub const CONCURRENCY_CAP: usize = 2;
 
-/// The air gap is keyed by PANE id, and a background node has no pane — the
+/// The egress is keyed by PANE id, and a background node has no pane — the
 /// runner mints one per node under this prefix.
 pub const RUN_PANE_PREFIX: &str = "run:";
 

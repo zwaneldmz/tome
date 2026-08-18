@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use tauri::State;
 
-use crate::{confine, ipc::airgap::recompile_all_proxies, lock_gate, state::AppState};
+use crate::{confine, ipc::egress::recompile_all_proxies, lock_gate, state::AppState};
 
 /// Mirrors `src/main/conductor.js`'s module-level `let panes = []` — the
 /// renderer's pane snapshot (`[{id, title}, ...]`), synced fire-and-forget
@@ -49,10 +49,10 @@ pub async fn panes_sync(
 /// doesn't normalize here either (only `isConfinedPath` calls `resolve()`,
 /// at check time).
 ///
-/// Also ports the JS handler's trailing `airgap.reapplyRepoConsents()`
-/// call, PLUS the extra step this port's split between `airgap::AirgapState`
-/// (pure bookkeeping) and the live `airgap::proxy::PaneProxy` per pane makes
-/// necessary: `AirgapState::reapply_repo_consents` re-validates every
+/// Also ports the JS handler's trailing `egress.reapplyRepoConsents()`
+/// call, PLUS the extra step this port's split between `egress::EgressState`
+/// (pure bookkeeping) and the live `egress::proxy::PaneProxy` per pane makes
+/// necessary: `EgressState::reapply_repo_consents` re-validates every
 /// STORED consent (loaded at boot by `load_repo_consents`, before any
 /// folder was known — confined resolution refuses until `folders_synced`
 /// is true, which is exactly why this can only run for real once the FIRST
@@ -61,11 +61,11 @@ pub async fn panes_sync(
 /// still match. In the JS original that's the WHOLE story: `recompile()`
 /// mutates the one shared `allowMatchers` every pane's `hostAllowed` reads
 /// directly. Here, each `PaneProxy` holds its own independently-compiled
-/// allow set (see `airgap::proxy`'s doc comment), so
+/// allow set (see `egress::proxy`'s doc comment), so
 /// [`recompile_all_proxies`] is the separate, additional step that pushes
 /// the reapplied bookkeeping into every LIVE pane's actual enforcement.
-/// Skipping it would leave `airgap:readRepoAllowlist` reporting
-/// `consented: true` (from `AirgapState.repo_consents` alone, so the
+/// Skipping it would leave `egress:readRepoAllowlist` reporting
+/// `consented: true` (from `EgressState.repo_consents` alone, so the
 /// renderer never re-prompts) while every gapped pane's proxy kept
 /// blocking that host regardless — silently, on every single restart.
 #[tauri::command]
@@ -94,7 +94,7 @@ pub async fn ws_sync(
         .expect("ws_sync: AppState.folders_synced lock poisoned") = true;
 
     state
-        .airgap
+        .egress
         .reapply_repo_consents(|p| confine::confined_real_path(&state, p).ok());
     recompile_all_proxies(&state);
 
@@ -104,16 +104,16 @@ pub async fn ws_sync(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::airgap::effective_allow_patterns;
+    use crate::ipc::egress::effective_allow_patterns;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::{TcpListener, TcpStream};
 
     /// Regression test for the missing `ws_sync` -> `reapply_repo_consents`
     /// (+ `recompile_all_proxies`) wiring: a repo consent saved in one
     /// session must, after a fresh session's boot-time
-    /// `AirgapState::load_repo_consents` followed by the SAME two calls
+    /// `EgressState::load_repo_consents` followed by the SAME two calls
     /// `ws_sync` now makes, actually take effect on a LIVE `PaneProxy` —
-    /// not just in `AirgapState`'s own bookkeeping. Exercises those two
+    /// not just in `EgressState`'s own bookkeeping. Exercises those two
     /// calls directly rather than through the `#[tauri::command]` wrapper
     /// itself, which needs a live `tauri::State` (see `events.rs`'s doc
     /// comment on this crate's established testing boundary for
@@ -125,32 +125,32 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let tome_dir = dir.path().join(".tome");
         std::fs::create_dir_all(&tome_dir).unwrap();
-        let allowlist_file = tome_dir.join("airgap.json");
+        let allowlist_file = tome_dir.join("egress.json");
         std::fs::write(&allowlist_file, r#"{"allow":["127.0.0.1"]}"#).unwrap();
         let root = dir.path().to_str().unwrap().to_string();
         let resolve = {
             let allowlist_file = allowlist_file.clone();
             move |_p: &std::path::Path| Some(allowlist_file.clone())
         };
-        let consents_path = dir.path().join("airgap-repo-consents.json");
+        let consents_path = dir.path().join("egress-repo-consents.json");
 
         // Session 1: user consents; persisted to disk.
         {
             let state = AppState::new();
-            state.airgap.load_repo_consents(&consents_path);
-            let report = state.airgap.read_repo_allowlist(&root, &resolve);
-            let crate::airgap::RepoAllowlistReport::Present { hash, .. } = report else {
+            state.egress.load_repo_consents(&consents_path);
+            let report = state.egress.read_repo_allowlist(&root, &resolve);
+            let crate::egress::RepoAllowlistReport::Present { hash, .. } = report else {
                 panic!("expected Present")
             };
-            let outcome = state.airgap.consent_repo_allowlist(&root, &hash, &resolve);
-            assert!(matches!(outcome, crate::airgap::ConsentOutcome::Ok { .. }));
+            let outcome = state.egress.consent_repo_allowlist(&root, &hash, &resolve);
+            assert!(matches!(outcome, crate::egress::ConsentOutcome::Ok { .. }));
         }
 
         // Session 2 ("restart"): boot only ever calls load_repo_consents
-        // (mirrors lib.rs's boot_auth_and_airgap) — applied_repos starts
+        // (mirrors lib.rs's boot_auth_and_egress) — applied_repos starts
         // empty even though repo_consents is loaded from disk.
         let state = AppState::new();
-        state.airgap.load_repo_consents(&consents_path);
+        state.egress.load_repo_consents(&consents_path);
         assert!(
             !effective_allow_patterns(&state).contains(&"127.0.0.1".to_string()),
             "must not be applied yet — only reapply_repo_consents does that"
@@ -158,7 +158,7 @@ mod tests {
 
         let (echo_port, _echo) = spawn_test_echo_server().await;
         let proxy = std::sync::Arc::new(
-            crate::airgap::proxy::PaneProxy::spawn(effective_allow_patterns(&state), None, |_| {})
+            crate::egress::proxy::PaneProxy::spawn(effective_allow_patterns(&state), None, |_| {})
                 .await
                 .unwrap(),
         );
@@ -175,7 +175,7 @@ mod tests {
         );
 
         // What this file's `ws_sync` now does, once folders_synced flips true.
-        state.airgap.reapply_repo_consents(|p| resolve(p));
+        state.egress.reapply_repo_consents(|p| resolve(p));
         recompile_all_proxies(&state);
 
         assert!(effective_allow_patterns(&state).contains(&"127.0.0.1".to_string()));

@@ -1,4 +1,4 @@
-//! `tome-shim`: the in-sandbox helper that makes the Linux air gap real
+//! `tome-shim`: the in-sandbox helper that makes the Linux egress real
 //! (Phase 4 — see this repo's rewrite plan, "Linux sandbox" section, and
 //! `src-tauri/src/ipc/pty.rs`'s `resolve_gapped_spawn`, which this crate
 //! replaces the fail-closed refusal for on Linux). macOS enforcement
@@ -13,7 +13,7 @@
 //! the host's real per-pane proxy at `127.0.0.1:<port>` — namespaces
 //! isolate network stacks from each other, that's the whole point. The
 //! ONE thing that legitimately crosses the boundary is a bind-mounted unix
-//! domain socket (`airgap::proxy::PaneProxy::spawn`'s `unix_socket_path`
+//! domain socket (`egress::proxy::PaneProxy::spawn`'s `unix_socket_path`
 //! seam, already landed in Phase 3 — see that module's "Linux seam" doc
 //! section). `tome-shim` is what turns that one crossable socket back into
 //! a normal-looking TCP proxy INSIDE the namespace, on the SAME port
@@ -33,7 +33,7 @@
 //!   including this one. Also importable from the MAIN `tome` package's own
 //!   test suite (this crate's `[lib]` target exists for exactly that — see
 //!   `lib.rs`'s doc comment), for the cross-crate contract test that feeds
-//!   `airgap::linux`'s real argv builders through this crate's real parser.
+//!   `egress::linux`'s real argv builders through this crate's real parser.
 //! - `tome_shim::pure`: small OS-agnostic helpers pulled out of the Linux
 //!   mechanism specifically so THEY can be unit-tested here too, even
 //!   though their only real caller (`linux.rs`) cannot run here.

@@ -153,8 +153,8 @@ mod tests {
 
     #[test]
     fn build_line_with_no_fields_is_just_ts_and_kind() {
-        let line = build_line("t1", "airgap:blocked", &[]);
-        assert_eq!(line, r#"{"ts":"t1","kind":"airgap:blocked"}"#);
+        let line = build_line("t1", "egress:blocked", &[]);
+        assert_eq!(line, r#"{"ts":"t1","kind":"egress:blocked"}"#);
     }
 
     // ---- append ----

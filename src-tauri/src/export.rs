@@ -13,9 +13,9 @@
 //!
 //! ## Hash-pinning: a self-check, not a TOCTOU race against external content
 //!
-//! `airgap::mod.rs`'s repo-allowlist consent (`consent_repo_allowlist`) pins
+//! `egress::mod.rs`'s repo-allowlist consent (`consent_repo_allowlist`) pins
 //! a hash against content SOMEONE ELSE authored (a repo's committed
-//! `.tome/airgap.json`), so a post-consent edit re-prompts — see that
+//! `.tome/egress.json`), so a post-consent edit re-prompts — see that
 //! function's own doc comment. There is no external author here: a
 //! [`Destination`] record IS the content, freshly typed into the Add
 //! destination form (`preferences.js`'s `buildExportSection`) and hashed the
@@ -29,7 +29,7 @@
 //! unauthenticated renderer write to this exact file impossible via
 //! `store:set`; this is the belt to that suspenders, the same
 //! layered-defense shape `store_keys.rs`'s own doc comment describes for
-//! `airgap-repo-consents`.
+//! `egress-repo-consents`.
 //!
 //! ## Network access: unrestricted by design, fenced by consent instead
 //!
@@ -37,10 +37,10 @@
 //! the renderer never named directly — only a `destinationId` (resolved
 //! against a record `export_consent` already vetted and hashed) or a
 //! `localPath` (a native-picker-driven folder, never a bare string the
-//! renderer typed). This is safe under the air gap because the air gap only
+//! renderer typed). This is safe under the egress because the egress only
 //! ever wraps SPAWNED PANES (`agent_env::compose_agent_env`'s proxy vars) —
 //! main's own outbound calls have never been confined by it (see
-//! `airgap::proxy`'s module doc comment: the loopback proxy exists FOR
+//! `egress::proxy`'s module doc comment: the loopback proxy exists FOR
 //! panes) — so exporting is exactly as privileged as any other
 //! main-initiated network call (`chat_send`, `git_push`) and is gated the
 //! same way: by what the user already consented to, never by what a flow
@@ -54,11 +54,11 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::airgap::sha1_hex;
+use crate::egress::sha1_hex;
 
 /// `<app_data_dir>/export-destinations.json` — same directory
-/// `airgap-repo-consents.json` resolves against (`lib.rs`'s
-/// `boot_auth_and_airgap`).
+/// `egress-repo-consents.json` resolves against (`lib.rs`'s
+/// `boot_auth_and_egress`).
 pub const FILE_NAME: &str = "export-destinations.json";
 
 /// One consented copy target. `#[serde(tag = "kind")]` matches the wire
@@ -165,7 +165,7 @@ fn file_path(dir: &Path) -> PathBuf {
 /// Missing file, corrupt JSON, or a shape that doesn't parse as
 /// [`Destinations`] all collapse to a fresh, empty v1 store — matching every
 /// other main-owned file's "unreadable = start fresh" discipline in this
-/// crate (`airgap::AirgapState::load_repo_consents`, `store::get`).
+/// crate (`egress::EgressState::load_repo_consents`, `store::get`).
 pub fn load(dir: &Path) -> Destinations {
     let Ok(text) = std::fs::read_to_string(file_path(dir)) else {
         return Destinations::default();
@@ -174,7 +174,7 @@ pub fn load(dir: &Path) -> Destinations {
 }
 
 /// Writes the whole store back, 0600 — same discipline
-/// `airgap::AirgapState::save_repo_consents` uses for its own persisted
+/// `egress::EgressState::save_repo_consents` uses for its own persisted
 /// consent map (see that function's doc comment).
 pub fn save(dir: &Path, data: &Destinations) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -213,7 +213,7 @@ pub fn new_destination_id(existing: &HashMap<String, Destination>) -> String {
 /// Validates and canonicalizes one `export_consent` payload into a hashed,
 /// ready-to-persist [`Destination`] — this function is the type's only
 /// constructor. `export_consent` never accepts a caller-supplied hash
-/// (unlike `airgap::consent_repo_allowlist`'s `presented_hash` — see the
+/// (unlike `egress::consent_repo_allowlist`'s `presented_hash` — see the
 /// module doc comment for why: there is no external content to pin here,
 /// only fresh input this function itself just validated).
 pub fn canonicalize(
@@ -370,7 +370,7 @@ fn copy_dir_recursive(source_dir: &Path, dest_dir: &Path) -> std::io::Result<()>
 
 // ---- HTTP transport ----
 
-/// Hardened once per process — the same three settings `airgap::proxy`'s
+/// Hardened once per process — the same three settings `egress::proxy`'s
 /// `ProxyState::new` builds its own client with (`.no_proxy()`/`.redirect(
 /// Policy::none())`/`.connect_timeout`), plus an overall request timeout.
 /// Unlike that client — which exists to fence what a GAPPED PANE can reach

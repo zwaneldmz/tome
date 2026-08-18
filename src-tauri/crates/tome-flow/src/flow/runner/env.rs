@@ -1,7 +1,7 @@
 //! The injected environment seam `flow::runner`'s scheduling core is driven
 //! through — direct translation of `flow-runner.js`'s `init(opts)` module-
 //! level closures (`canOpenFile`, `buildAgentEnv`, `closeAgentEnv`,
-//! `airgapDefault`, `logEvent`, `spawn`) plus one Rust-only addition
+//! `egressDefault`, `logEvent`, `spawn`) plus one Rust-only addition
 //! (`push`, standing in for the `win` parameter `startRun(flowPath, win)`
 //! closes over in JS) into a plain `Clone` struct of `Arc<dyn Fn>`s. Rust
 //! has no module-level `let` to reassign the way `flow-runner.js` does, so
@@ -15,7 +15,7 @@
 //! [`SandboxWrap`], [`BuiltEnv`], [`BoxFuture`] — with no knowledge of how
 //! a real `RunnerEnv` gets built. Before plan step 2.1's `tome-flow`
 //! extraction, this file also carried that production wiring
-//! (`production_env`, `frozen_airgap_default`, and every private helper
+//! (`production_env`, `frozen_egress_default`, and every private helper
 //! `production_env` calls: `can_open_flow`, `lexical_resolve`,
 //! `resolve_shim_path`, `shim_path_in`, `current_linux_sandbox_strategy`,
 //! `build_production_agent_env`) — all of it reaching `tauri::AppHandle`
@@ -23,7 +23,7 @@
 //! this crate cannot depend on. That half now lives in the `tome` crate
 //! itself, as `flow_env.rs` (`tome_lib::flow_env`) — see that module's own
 //! doc comment for the reuse-vs-reimplement rationale that used to live
-//! here, and for `frozen_airgap_default`'s TOCTOU-closing contract.
+//! here, and for `frozen_egress_default`'s TOCTOU-closing contract.
 
 use std::future::Future;
 use std::path::Path;
@@ -75,10 +75,10 @@ pub struct RunnerEnv {
     /// `{cmd,args}` prefix shape.
     pub build_agent_env:
         Arc<dyn Fn(String, bool, Vec<String>) -> BoxFuture<Result<BuiltEnv, String>> + Send + Sync>,
-    /// Tears a node's pane-scoped proxy down — mirrors `airgap.closePane`.
+    /// Tears a node's pane-scoped proxy down — mirrors `egress.closePane`.
     pub close_agent_env: Arc<dyn Fn(&str) + Send + Sync>,
-    /// The same air-gap default a freshly spawned pane would read.
-    pub airgap_default: Arc<dyn Fn() -> BoxFuture<bool> + Send + Sync>,
+    /// The same egress default a freshly spawned pane would read.
+    pub egress_default: Arc<dyn Fn() -> BoxFuture<bool> + Send + Sync>,
     /// Persistent event log — mirrors `events.logEvent`.
     pub log_event: Arc<dyn Fn(&str, Vec<(String, Value)>) + Send + Sync>,
     /// The `runs:changed` push — mirrors `win?.webContents.send('runs:changed', snapshotAll())`.

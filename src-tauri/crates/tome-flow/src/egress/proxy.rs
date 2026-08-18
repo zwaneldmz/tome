@@ -1,12 +1,12 @@
-//! Per-pane loopback CONNECT/HTTP proxy — the airgap's only route out.
-//! Ports the proxy half of `src/main/airgap.js` (`createPaneProxy`,
+//! Per-pane loopback CONNECT/HTTP proxy — the egress's only route out.
+//! Ports the proxy half of `src/main/egress.js` (`createPaneProxy`,
 //! `unlockPane`/`relockPane`'s tunnel-teardown mechanics, `closePane`/
 //! `closeAll`, the blocked-event coalescer) into a Tauri-free,
 //! unit-testable primitive.
 //!
-//! ## Ownership split with the airgap orchestration layer
+//! ## Ownership split with the egress orchestration layer
 //!
-//! `airgap.js` interleaves TWO concerns in one module: the socket-level
+//! `egress.js` interleaves TWO concerns in one module: the socket-level
 //! proxy mechanics (this file's job), and MULTI-pane orchestration policy
 //! — the `panes`/`appliedRepos` maps, `ALLOWED_UNLOCK_MINUTES` validation,
 //! the unlock auto-relock timer, repo consent, and the seatbelt profile.
@@ -67,7 +67,7 @@
 //! same per-connection handler works over `UnixStream` as well as
 //! `TcpStream` (see [`handle_connection`]'s generic bound). The real
 //! caller supplying a `Some(unix_socket_path)` is
-//! `ipc::airgap::create_gapped_pane_proxy`, itself called from
+//! `ipc::egress::create_gapped_pane_proxy`, itself called from
 //! `ipc::pty::pty_create`'s Linux gapped branch — see that function's own
 //! doc comment for the fallback-ladder decision this socket only ever
 //! gets bound for.
@@ -84,7 +84,7 @@
 //! exactly, including "a lone attempt in a window logs only once"). This
 //! module never touches Tauri or the persistent event log directly — the
 //! integrator's callback is expected to fan `Coalesced` out to
-//! `events::append` (kind `"airgap:blocked"`) and, if it wants the
+//! `events::append` (kind `"egress:blocked"`) and, if it wants the
 //! uncoalesced live signal too, `Attempt` out to its own emit.
 
 use std::collections::HashMap;
@@ -148,7 +148,7 @@ struct ProxyState {
     next_tunnel_id: AtomicU64,
     next_block_generation: AtomicU64,
     /// Flips true on `shutdown()` — the Rust analogue of `!panes.get(id)`
-    /// in `airgap.js`'s TOME-002 recheck (see the module doc comment):
+    /// in `egress.js`'s TOME-002 recheck (see the module doc comment):
     /// `PaneProxy` doesn't disappear from a shared map the way a JS pane
     /// entry does, but this flag is the same "has this pane already been
     /// torn down" fact the recheck needs.
@@ -194,7 +194,7 @@ impl ProxyState {
             // host, before ever handing the request to this client — a
             // redirect chased internally by reqwest would fetch (and
             // return to the gapped pane) whatever host a `Location` header
-            // names, entirely unchecked. This is the airgap's whole
+            // names, entirely unchecked. This is the egress's whole
             // purpose, so disabling redirect-chasing here is as
             // security-critical as `.no_proxy()` above. With it disabled,
             // a 3xx response comes back from `req.send()` as an ordinary
@@ -296,7 +296,7 @@ impl PaneProxy {
         *self.state.mode.read().unwrap()
     }
 
-    /// Replaces the pane's compiled allow set — mirrors airgap.js's
+    /// Replaces the pane's compiled allow set — mirrors egress.js's
     /// `recompile()`. Takes effect for every connection accepted from now
     /// on (including the TOME-002 recheck of tunnels already mid-connect).
     pub fn set_allowed(&self, patterns: Vec<String>) {
@@ -570,7 +570,7 @@ fn schedule_coalesced_log(state: &Arc<ProxyState>, host: &str) {
 // ---- CONNECT leg ----
 
 /// Parses a CONNECT request-target ("host:port" authority form). Mirrors
-/// airgap.js's `req.url.lastIndexOf(':')` split — the LAST colon (not the
+/// egress.js's `req.url.lastIndexOf(':')` split — the LAST colon (not the
 /// first) is what keeps a multi-colon target from being misread; NOTE this
 /// deliberately matches the JS original's actual wire contract, which is
 /// only unambiguous for UNBRACKETED hosts (an IPv6 literal must arrive
@@ -634,7 +634,7 @@ async fn handle_connect<S>(
         note_blocked(&state, &host);
         let _ = client
             .write_all(
-                format!("HTTP/1.1 403 Forbidden\r\n\r\nairgap: {host} is blocked\r\n").as_bytes(),
+                format!("HTTP/1.1 403 Forbidden\r\n\r\negress: {host} is blocked\r\n").as_bytes(),
             )
             .await;
         let _ = client.shutdown().await;
@@ -643,7 +643,7 @@ async fn handle_connect<S>(
 
     // No reply on either failure branch below — a connect error and a
     // failed TOME-002 recheck both look, from the client's perspective,
-    // like the connection simply dropped (matches airgap.js: neither
+    // like the connection simply dropped (matches egress.js: neither
     // `up.on('error', ...)` nor the post-connect recheck failure writes
     // anything before destroying the sockets).
     let Some(upstream) = connect_upstream_rechecked(&state, &host, port, || {}).await else {
@@ -683,7 +683,7 @@ async fn handle_connect<S>(
 /// honestly.
 ///
 /// Returns whether the tunnel was actually registered (`false` on a
-/// failed recheck) — production ignores it (mirrors `airgap.js`'s
+/// failed recheck) — production ignores it (mirrors `egress.js`'s
 /// recheck-failure branch, which replies with nothing either); tests use
 /// it to assert the recheck's own pass/fail behavior directly.
 async fn register_connect_tunnel<S>(
@@ -753,7 +753,7 @@ fn is_hop_by_hop(name: &str) -> bool {
 
 /// Forwards a plain (non-CONNECT) proxy request — request-target must be
 /// an absolute URI, e.g. `GET http://host/path HTTP/1.1` — via `reqwest`.
-/// Scoped deviations from a literal `airgap.js` port, both because this
+/// Scoped deviations from a literal `egress.js` port, both because this
 /// leg is the rare path (every shipped allowlist host is HTTPS-only, which
 /// always arrives via the CONNECT leg above; this leg exists mainly for
 /// completeness and plain-HTTP test upstreams) and because hand-rolling a
@@ -768,7 +768,7 @@ fn is_hop_by_hop(name: &str) -> bool {
 ///   responses are a non-issue in practice (they arrive over the CONNECT
 ///   leg, which streams via raw `copy_bidirectional` with no buffering at
 ///   all), so this only affects the rare plain-HTTP request.
-/// - Hop-by-hop headers are stripped on BOTH directions (`airgap.js` only
+/// - Hop-by-hop headers are stripped on BOTH directions (`egress.js` only
 ///   strips them request-bound; since this port already reconstructs the
 ///   response head by hand rather than reusing Node's `res.writeHead`, and
 ///   already computes its own Content-Length, stripping them symmetrically
@@ -795,7 +795,7 @@ async fn handle_plain<S>(
 
     if !host_allowed(&state, &host) {
         note_blocked(&state, &host);
-        let body = format!("airgap: {host} is blocked (providers-only mode)\n");
+        let body = format!("egress: {host} is blocked (providers-only mode)\n");
         let resp = format!(
             "HTTP/1.1 403 Forbidden\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
@@ -879,7 +879,7 @@ mod tests {
 
     /// A bare TCP echo server on `addr` — bytes in, bytes out — so a live
     /// tunnel can be proven live (and a dead one proven dead) by
-    /// round-tripping a payload. Mirrors `airgap-proxy-lifecycle.test.js`'s
+    /// round-tripping a payload. Mirrors `egress-proxy-lifecycle.test.js`'s
     /// `echoServer` helper.
     async fn spawn_echo_server(addr: &str) -> (u16, AbortHandle) {
         let listener = TcpListener::bind((addr, 0))
@@ -933,7 +933,7 @@ mod tests {
     /// Sends a raw CONNECT request through the proxy and reads back just
     /// the status line + headers (up to the blank line), returning the
     /// still-open stream (for tunnels expected to succeed) and the parsed
-    /// status code. Mirrors `airgap-proxy-lifecycle.test.js`'s
+    /// status code. Mirrors `egress-proxy-lifecycle.test.js`'s
     /// `openTunnel` helper, generalized to also observe the status of a
     /// refused CONNECT.
     async fn connect_via_proxy(proxy_port: u16, target: &str) -> (TcpStream, u16) {

@@ -12,9 +12,9 @@
 //!
 //! ## Consent now, re-verification forever — not a TOCTOU re-check at set time
 //!
-//! Unlike `airgap::consent_repo_allowlist` (which re-checks a caller-
+//! Unlike `egress::consent_repo_allowlist` (which re-checks a caller-
 //! PRESENTED hash against fresh content, because the content is authored by
-//! someone else — a repo's committed `.tome/airgap.json`), [`Schedule::flow_sha1`]
+//! someone else — a repo's committed `.tome/egress.json`), [`Schedule::flow_sha1`]
 //! is never compared against anything at the moment it is written:
 //! `schedules_set` reads `flowPath` right now, hashes exactly that, and
 //! records the result as the new baseline — the same "this call defines
@@ -27,11 +27,11 @@
 //! since it changed — the scheduler's own analogue of the repo allowlist's
 //! re-prompt-on-change.
 //!
-//! ## Always air-gapped — an override, not a preference read
+//! ## Always gapped — an override, not a preference read
 //!
-//! [`SCHEDULED_RUN_AIRGAP`] is the one value `ipc::schedules::run_tick`
-//! freezes every scheduled run's `RunnerEnv::airgap_default` to
-//! (`flow_env::frozen_airgap_default`) — never the `airgap-default`
+//! [`SCHEDULED_RUN_EGRESS`] is the one value `ipc::schedules::run_tick`
+//! freezes every scheduled run's `RunnerEnv::egress_default` to
+//! (`flow_env::frozen_egress_default`) — never the `egress-default`
 //! store preference an interactive `runs:start` call resolves. There is no
 //! user at the keyboard for a run that fires at 3am to ask, so this path
 //! never gets to ask: an ungapped scheduled run is not a state this crate can
@@ -68,17 +68,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// `<app_data_dir>/flow-schedules.json` — same directory
-/// `export-destinations.json`/`airgap-repo-consents.json` resolve against
-/// (`lib.rs`'s `boot_auth_and_airgap`).
+/// `export-destinations.json`/`egress-repo-consents.json` resolve against
+/// (`lib.rs`'s `boot_auth_and_egress`).
 pub const FILE_NAME: &str = "flow-schedules.json";
 
 /// A scheduled run is always gapped — see the module doc comment. Named and
 /// tested on its own (rather than an inline `true` at
 /// `ipc::schedules::run_tick`'s one call site) so the property "a scheduled
-/// run's air gap is a constant, never a variable read from anywhere" is one
+/// run's egress is a constant, never a variable read from anywhere" is one
 /// grep away and independently asserted, not resting on a reviewer noticing
 /// a bare literal.
-pub const SCHEDULED_RUN_AIRGAP: bool = true;
+pub const SCHEDULED_RUN_EGRESS: bool = true;
 
 /// `{"kind":"interval","minutes":N}` / `{"kind":"daily","hour":H,"minute":M}`
 /// — the two repeat shapes the flow.js "Schedule…" form offers. Times are
@@ -138,7 +138,7 @@ fn file_path(dir: &Path) -> PathBuf {
 
 /// Missing file, corrupt JSON, or a shape that doesn't parse as [`Schedules`]
 /// all collapse to a fresh, empty v1 store — the same "unreadable = start
-/// fresh" discipline `export::load`/`airgap::AirgapState::load_repo_consents`
+/// fresh" discipline `export::load`/`egress::EgressState::load_repo_consents`
 /// already apply to their own main-owned files.
 pub fn load(dir: &Path) -> Schedules {
     let Ok(text) = std::fs::read_to_string(file_path(dir)) else {
@@ -211,7 +211,7 @@ pub fn new_schedule_id(existing: &[Schedule]) -> String {
 /// throughout ([`next_due`]'s arithmetic, `lastRun`'s persisted string).
 /// Thin wrapper over `totp::now_ms` (already `pub`, already this crate's one
 /// clock read for a security-relevant deadline — see
-/// `ipc::airgap::schedule_unlock`'s identical `as i64` cast) rather than an
+/// `ipc::egress::schedule_unlock`'s identical `as i64` cast) rather than an
 /// independent `SystemTime::now()` call: one clock source, read the same
 /// way, everywhere a "now" matters in this crate.
 pub fn now_ms() -> i64 {
@@ -719,14 +719,14 @@ mod tests {
     // ---- the gapped-frozen assertion ----
 
     #[tokio::test]
-    async fn scheduled_run_airgap_is_unconditionally_frozen_true() {
+    async fn scheduled_run_egress_is_unconditionally_frozen_true() {
         // Compile-time, not runtime: flipping the constant can never even
         // build, let alone pass CI.
-        const { assert!(SCHEDULED_RUN_AIRGAP) };
-        let frozen = crate::flow_env::frozen_airgap_default(SCHEDULED_RUN_AIRGAP);
+        const { assert!(SCHEDULED_RUN_EGRESS) };
+        let frozen = crate::flow_env::frozen_egress_default(SCHEDULED_RUN_EGRESS);
         assert!(
             (frozen)().await,
-            "a scheduled run's air gap must never resolve false"
+            "a scheduled run's egress must never resolve false"
         );
     }
 

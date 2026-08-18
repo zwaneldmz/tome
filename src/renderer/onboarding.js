@@ -11,7 +11,7 @@
 import { tome, el, toast } from './util.js'
 import { prefs } from './state.js'
 import { modalShell } from './modals.js'
-import { totpModal } from './airgap-ui.js'
+import { totpModal } from './egress-ui.js'
 import { encodeWav } from '../shared/wav.js'
 
 const ONBOARDED_KEY = 'onboarded-v1'
@@ -208,7 +208,7 @@ export async function showOnboarding() {
 
   function stepWelcome() {
     note(
-      'Tome runs your coding agents behind an air gap, in one workspace — every pane sandboxed, every network request yours to allow.'
+      'Tome runs your coding agents behind an egress, in one workspace — every pane sandboxed, every network request yours to allow.'
     )
     note('This takes about 30 seconds, and you can skip any step.')
   }
@@ -453,12 +453,12 @@ export async function showOnboarding() {
 
   function stepSecurity() {
     toggle(
-      'Spawn agents air-gapped',
+      'Spawn agents contained',
       'new agent panes start with no network until you allow it',
-      () => prefs.airgapDefault,
+      () => prefs.egressDefault,
       (v) => {
-        prefs.airgapDefault = v
-        tome.store.set('airgap-default', v)
+        prefs.egressDefault = v
+        tome.store.set('egress-default', v)
       }
     )
     toggle(
@@ -490,7 +490,7 @@ export async function showOnboarding() {
     }
     item('Assistant provider', state.provider || 'shell default')
     item('Microphone', state.mic === 'ok' ? 'works ✓' : state.mic === 'fail' ? 'needs setup' : 'not tested')
-    item('Air-gapped agents', prefs.airgapDefault ? 'on' : 'off')
+    item('Contained agents', prefs.egressDefault ? 'on' : 'off')
     item('Assistant commands', prefs.conductorRun ? 'on' : 'off')
     m.body.appendChild(summary)
     note('Change any of this anytime in Settings (⌘,).')

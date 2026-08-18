@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "name": "airgap-demo",
+  "name": "egress-demo",
   "nodes": [
     {
       "id": "n1",
       "kind": "claude",
       "name": "scout",
-      "instructions": "You are running in an air-gapped Tome pane: all egress goes through a local proxy with a hostname allowlist.\nAttempt to fetch https://example.com (curl -sS -m 10 https://example.com). The proxy will refuse it — note the blocked-egress toast and the exact refusal message, then continue working offline.\nWrite a short report: what you tried, what the proxy said, and which hosts WOULD have worked (the allowlist is visible in the air-gap panel). Do not retry the fetch in a loop.",
+      "instructions": "You are running in an gapped Tome pane: all egress goes through a local proxy with a hostname allowlist.\nAttempt to fetch https://example.com (curl -sS -m 10 https://example.com). The proxy will refuse it — note the blocked-egress toast and the exact refusal message, then continue working offline.\nWrite a short report: what you tried, what the proxy said, and which hosts WOULD have worked (the allowlist is visible in the egress panel). Do not retry the fetch in a loop.",
       "expects": "nothing — this is the first node",
       "produces": "a blocked-egress report: attempted URL, proxy refusal text, and the effective allowlist",
       "inputs": [],
@@ -18,7 +18,7 @@
       "id": "n2",
       "kind": "claude",
       "name": "builder",
-      "instructions": "Read the scout's egress report (handoff file below) so you know exactly which network calls will fail — then do the coding task fully air-gapped: implement a small CLI utility in this repo that converts a JSON flow file into a numbered step list printed to stdout.\nNo package installs, no fetches: use only what is already in the repo and the standard library. If you are tempted to reach for a network resource, stop and note it in your output instead.",
+      "instructions": "Read the scout's egress report (handoff file below) so you know exactly which network calls will fail — then do the coding task fully gapped: implement a small CLI utility in this repo that converts a JSON flow file into a numbered step list printed to stdout.\nNo package installs, no fetches: use only what is already in the repo and the standard library. If you are tempted to reach for a network resource, stop and note it in your output instead.",
       "expects": "scout's egress-report: which hosts are reachable and what a refusal looks like",
       "produces": "a working utility file plus usage notes",
       "inputs": [{ "name": "egress-report" }],

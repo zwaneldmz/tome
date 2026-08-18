@@ -7,7 +7,7 @@ description = "Linux in-sandbox helper: netns loopback bridge + confined exec fo
 # `[lib]` exists ONLY so the main `tome` crate's own test suite can depend
 # on this package (as a `[dev-dependencies]` path dependency — see its own
 # Cargo.toml) and call the REAL `tome_shim::args::parse_args` against the
-# REAL argv `airgap::linux::build_bwrap_argv`/`build_self_unshare_argv`
+# REAL argv `egress::linux::build_bwrap_argv`/`build_self_unshare_argv`
 # build — a genuine cross-crate contract test, rather than two independently
 # green unit-test suites that each only ever construct/consume their own
 # half of the wire contract (see `args.rs`'s own top doc comment for the

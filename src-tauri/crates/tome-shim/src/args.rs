@@ -27,7 +27,7 @@
 //! namespace already prepared (bwrap) or asks this binary to prepare one
 //! itself (`--self-unshare`). `--new-session`/`--deny-write`/`--deny-read`
 //! are the OTHER rung-2 flags a real invocation carries (see
-//! `airgap::linux::build_self_unshare_argv`, the sibling-crate builder that
+//! `egress::linux::build_self_unshare_argv`, the sibling-crate builder that
 //! emits them) — all three are optional and independent of `--self-unshare`
 //! itself (this parser does not require any particular combination), though
 //! in practice the only real caller only ever emits them alongside
@@ -37,7 +37,7 @@
 //! comment).
 //!
 //! **Cross-crate contract**: this wire shape is produced by a DIFFERENT
-//! crate (`airgap::linux::build_bwrap_argv`/`build_self_unshare_argv`, in
+//! crate (`egress::linux::build_bwrap_argv`/`build_self_unshare_argv`, in
 //! the main `tome` package) than the one that parses it (this file). The
 //! two were once allowed to drift — `build_self_unshare_argv` emitted
 //! `--deny-write`/`--deny-read` for a long stretch before this parser had
@@ -45,7 +45,7 @@
 //! `UnknownFlag` before `linux::run` ever ran. See the
 //! `tome_shim_args_parses_the_real_build_self_unshare_argv_output*` and
 //! `tome_shim_args_parses_the_embedded_shim_invocation_inside_build_bwrap_argv`
-//! tests in `airgap::linux`'s own test suite (main crate, a
+//! tests in `egress::linux`'s own test suite (main crate, a
 //! `[dev-dependencies]` path dependency on this package's `[lib]` target —
 //! see this crate's `Cargo.toml`) — they feed THIS module's real
 //! [`parse_args`] the REAL output of both argv builders, specifically so
@@ -55,7 +55,7 @@
 //! `#[cfg(target_os = "linux")]` branch, so on a native macOS build
 //! nothing outside this file's own `#[cfg(test)]` module ever calls it —
 //! `#![allow(dead_code)]` below for that reason, same rationale (and same
-//! pattern) as `src-tauri/src/airgap/mod.rs`'s and
+//! pattern) as `src-tauri/src/egress/mod.rs`'s and
 //! `src-tauri/src/pty_authority.rs`'s own module-level allows for code
 //! whose only real caller is a different slice/target.
 #![allow(dead_code)]
@@ -85,7 +85,7 @@ pub struct ShimArgs {
     /// Run the exec'd child in its own new session (`setsid(2)`) before it
     /// execs — `linux::run`'s pre_exec closure calls this when set. Mirrors
     /// bwrap's own `--new-session` (see that flag's doc comment in
-    /// `airgap::linux::build_bwrap_argv`, the sibling crate that builds
+    /// `egress::linux::build_bwrap_argv`, the sibling crate that builds
     /// this argv): on rung 1, bwrap itself interprets `--new-session`; on
     /// rung 2 there is no bwrap, so `build_self_unshare_argv` passes the
     /// SAME flag name to `tome-shim` directly, and this binary has to be
@@ -310,7 +310,7 @@ mod tests {
             "--deny-write",
             "/home/tester/.config/tome",
             "--deny-read",
-            "/home/tester/.config/tome/airgap-auth.json",
+            "/home/tester/.config/tome/egress-auth.json",
             "--",
             "true",
         ]))
@@ -321,7 +321,7 @@ mod tests {
         );
         assert_eq!(
             parsed.deny_read,
-            Some(PathBuf::from("/home/tester/.config/tome/airgap-auth.json"))
+            Some(PathBuf::from("/home/tester/.config/tome/egress-auth.json"))
         );
     }
 
@@ -370,7 +370,7 @@ mod tests {
 
     #[test]
     fn parses_the_exact_argv_shape_build_self_unshare_argv_emits_new_session_variant() {
-        // Pinned literally against airgap::linux::build_self_unshare_argv's
+        // Pinned literally against egress::linux::build_self_unshare_argv's
         // own headless-true output shape (main crate, cross-crate contract
         // — see this file's own top doc comment) so a change to either
         // side's flag vocabulary is caught here too, not only by the
@@ -385,7 +385,7 @@ mod tests {
             "--deny-write",
             "/home/tester/.config/tome",
             "--deny-read",
-            "/home/tester/.config/tome/airgap-auth.json",
+            "/home/tester/.config/tome/egress-auth.json",
             "--",
             "claude",
             "--flow-node",
@@ -404,7 +404,7 @@ mod tests {
         );
         assert_eq!(
             parsed.deny_read,
-            Some(PathBuf::from("/home/tester/.config/tome/airgap-auth.json"))
+            Some(PathBuf::from("/home/tester/.config/tome/egress-auth.json"))
         );
         assert_eq!(parsed.argv, v(&["claude", "--flow-node"]));
     }

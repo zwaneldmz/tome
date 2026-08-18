@@ -173,7 +173,7 @@ footer a { color:var(--text); }
   <div class="box">
     <h3>What's strong</h3>
     <ul class="plus">
-      <li><strong>Fail-closed lock gate.</strong> Every IPC handler refuses while locked except an explicit pre-login allowlist, with slug-shaped key vetting and reserved keys (<code>airgap</code>, <code>airgap-auth</code>) unreachable.</li>
+      <li><strong>Fail-closed lock gate.</strong> Every IPC handler refuses while locked except an explicit pre-login allowlist, with slug-shaped key vetting and reserved keys (<code>egress</code>, <code>egress-auth</code>) unreachable.</li>
       <li><strong>Widen the proxy, never the sandbox.</strong> The seatbelt profile is fixed at spawn; unlocking only widens the loopback proxy. This is the right primitive and it's stated precisely.</li>
       <li><strong>Second-factor pane unlock.</strong> Freeing a pane re-proves something (TOTP or passphrase) even though login already authenticated — correct for an egress-widening action.</li>
       <li><strong>Confused-deputy caps.</strong> The conductor loop is bounded (8 turns), scrollback is ANSI/control-stripped, <code>type_in_terminal</code> only submits on explicit consent, and file opens are confined to workspaces/vaults.</li>
@@ -204,7 +204,7 @@ footer a { color:var(--text); }
       product, a threat model that points at the wrong code is worse than no doc at all — reviewers
       will chase ghosts and may skip the real code.</p>
     <p class="action">Action: re-verify every invariant against <code>lock_gate.rs</code>,
-      <code>authlock.rs</code>, <code>airgap/</code>, <code>confine.rs</code>, <code>conductor/</code>
+      <code>authlock.rs</code>, <code>egress/</code>, <code>confine.rs</code>, <code>conductor/</code>
       and rewrite the three docs with correct paths.</p>
   </div>
 
@@ -230,7 +230,7 @@ footer a { color:var(--text); }
   <div class="box">
     <h3>What's strong</h3>
     <ul class="plus">
-      <li>Authority is in Rust (<code>pty.rs</code>, <code>airgap/</code>, <code>authlock.rs</code>, <code>fs.rs</code>, <code>lock_gate.rs</code>); the renderer is a view + validated requests.</li>
+      <li>Authority is in Rust (<code>pty.rs</code>, <code>egress/</code>, <code>authlock.rs</code>, <code>fs.rs</code>, <code>lock_gate.rs</code>); the renderer is a view + validated requests.</li>
       <li><code>shared/</code> carries the validators (pane kinds, flow model, terminal text) so both sides agree without trusting each other.</li>
       <li>Single-renderer pane grid (dockview + xterm) keeps the process model flat — a 6-pane workspace is not 6 browsers.</li>
       <li>The flow subsystem (<code>flow/</code>) is self-contained and the runner keeps handoff files as plain markdown — debuggable and diffable.</li>

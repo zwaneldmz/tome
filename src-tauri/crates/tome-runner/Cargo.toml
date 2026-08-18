@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 # The same tauri-free background flow-run engine (DAG scheduling, the live
 # run registry, realpath confinement, product promotion, agent spawn-policy
-# allowlists, and the air-gap subsystem) the desktop app's own `runs:*`
+# allowlists, and the egress subsystem) the desktop app's own `runs:*`
 # commands are built on — see that crate's own `lib.rs` doc comment for its
 # full membership. This binary supplies its own `RunnerEnv` wiring
 # (`runner_env.rs`) in place of the main crate's `flow_env.rs`, which reaches

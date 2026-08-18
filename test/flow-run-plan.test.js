@@ -269,10 +269,10 @@ describe('runningCount', () => {
 describe('runPaneId', () => {
   it('carries the prefix the status bar filters on', () => {
     // Two readers, one definition. The runner mints these so each background
-    // node gets an air-gap proxy of its own; the status bar counts "N
-    // air-gapped panes" and must exclude them, because a run has no pane — no
+    // node gets an egress proxy of its own; the status bar counts "N
+    // gapped panes" and must exclude them, because a run has no pane — no
     // strip, no unlock UI, no window to go and look at. If the prefix here and
-    // the prefix there ever drift, pressing Run lights the air-gap chip up for
+    // the prefix there ever drift, pressing Run lights the egress chip up for
     // panes that do not exist.
     expect(runPaneId('m1h2k3', 'n1')).toBe('run:m1h2k3:n1')
     expect(runPaneId('m1h2k3', 'n1').startsWith(RUN_PANE_PREFIX)).toBe(true)

@@ -5,21 +5,21 @@ use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::Notify;
 use tokio::task::AbortHandle;
 
-use crate::{airgap, authlock, conductor, flow};
+use crate::{authlock, conductor, egress, flow};
 
 /// Shared app state, installed once via `.manage(AppState::new())` in
 /// `lib.rs::run()` and reached from commands as `State<'_, AppState>`.
 ///
 /// Kept to exactly the fields Phase 1 (this slice's quit handshake, plus the
 /// domains later slices land in) needs. Later slices extend THEIR OWN
-/// modules — `confine.rs`, `store.rs`, `airgap::AirgapState` (Phase 3),
+/// modules — `confine.rs`, `store.rs`, `egress::EgressState` (Phase 3),
 /// etc. — rather than adding fields here, so this file stays a rare
 /// merge-conflict site across parallel agents. Two deliberate exceptions
-/// land in Phase 3 alongside `airgap` itself: `proxies` and `auth` below are
+/// land in Phase 3 alongside `egress` itself: `proxies` and `auth` below are
 /// flat fields rather than folded into a subsystem struct, because neither
 /// has one to fold into by construction — `proxies` holds live per-pane
 /// runtime handles a Tauri command spawns and owns directly (no
-/// module-level singleton the way `airgap::AirgapState`'s pure state
+/// module-level singleton the way `egress::EgressState`'s pure state
 /// machine is one), and `auth` is plain data (`authlock.rs`'s future `Auth`
 /// shape) the same way `theme` below already is, not a subsystem with its
 /// own API surface.
@@ -29,7 +29,7 @@ pub struct AppState {
     /// shot_mode)`), computed once at boot (`lib.rs::run()`'s `.setup()`,
     /// once `authlock::AuthLock::load` resolves `configured`) and collapsed
     /// to `false` at every one-way login success point (`auth_login`,
-    /// `auth_touchid`, `airgap_setup` — mirroring `authlock.markUnlocked()`;
+    /// `auth_touchid`, `egress_setup` — mirroring `authlock.markUnlocked()`;
     /// setting `unlocked = true` always forces `is_locked(...) = false`
     /// regardless of `configured`/`shot_mode`, so a direct `false` write is
     /// equivalent to recomputing the full formula at each of those three
@@ -82,45 +82,45 @@ pub struct AppState {
     /// popoutApproved.delete(child.id))`.
     pub popout_approved: Mutex<std::collections::HashSet<String>>,
 
-    /// Airgap pane-gapping state machine, repo-allowlist consent
+    /// Egress pane-gapping state machine, repo-allowlist consent
     /// bookkeeping, and unlock/relock deadline tracking —
-    /// `airgap::AirgapState` (Phase 3, Task A3; see that module's doc
-    /// comment for the exact scope split with `airgap::proxy`/
-    /// `airgap::allowlist`, still empty files as of this field landing).
+    /// `egress::EgressState` (Phase 3, Task A3; see that module's doc
+    /// comment for the exact scope split with `egress::proxy`/
+    /// `egress::allowlist`, still empty files as of this field landing).
     /// Owns its own interior locking (the same shape `pty` above already
     /// uses), so it is a plain value field here, not wrapped in another
     /// `Mutex`.
-    pub airgap: airgap::AirgapState,
+    pub egress: egress::EgressState,
 
     /// Live per-pane proxy handles, keyed by pane id — Task A4's real wiring
-    /// of `airgap::proxy::PaneProxy` (a listening loopback CONNECT/HTTP
-    /// server plus its live-tunnel registry, mirroring `src/main/airgap.js`'s
+    /// of `egress::proxy::PaneProxy` (a listening loopback CONNECT/HTTP
+    /// server plus its live-tunnel registry, mirroring `src/main/egress.js`'s
     /// `st.server`/`st.tunnels`), replacing the placeholder `()` value this
     /// field started with. `Arc`-wrapped (not a bare owned value) so
-    /// `ipc::airgap::airgap_unlock`'s auto-relock timer (a `tokio::spawn`
+    /// `ipc::egress::egress_unlock`'s auto-relock timer (a `tokio::spawn`
     /// task that must outlive the command invocation that scheduled it) can
     /// hold its own handle without keeping this map's mutex locked for the
-    /// whole unlock window. Deliberately NOT folded into `airgap:
-    /// AirgapState` above — see that module's top doc comment on why the
+    /// whole unlock window. Deliberately NOT folded into `egress:
+    /// EgressState` above — see that module's top doc comment on why the
     /// live proxy/tunnel objects stay out of the pure pane-gapping state
-    /// machine. A pane's `AirgapState` record (mode/expiry, for the
-    /// `airgap:state` UI snapshot) and its entry here (the actual live
+    /// machine. A pane's `EgressState` record (mode/expiry, for the
+    /// `egress:state` UI snapshot) and its entry here (the actual live
     /// enforcement — `PaneProxy` has its own independent mode) are TWO
     /// representations the integrator keeps in sync at exactly two
-    /// mutation points (`airgap_unlock`, `airgap_relock`/pane close) —
+    /// mutation points (`egress_unlock`, `egress_relock`/pane close) —
     /// documented as a judgment call in this slice's task report.
-    pub proxies: Mutex<HashMap<String, Arc<airgap::proxy::PaneProxy>>>,
+    pub proxies: Mutex<HashMap<String, Arc<egress::proxy::PaneProxy>>>,
 
     /// One scheduled auto-relock task per currently-`Open` pane, keyed by
-    /// pane id — the Rust analogue of `airgap.js`'s per-pane `st.timer`
+    /// pane id — the Rust analogue of `egress.js`'s per-pane `st.timer`
     /// (`setTimeout(() => relockPane(paneId), minutes * 60_000)`), which
     /// `unlockPane` `clearTimeout`s and replaces on every fresh unlock.
-    /// Neither `airgap::AirgapState` (framework-free, no timers of its own
-    /// — see that module's doc comment) nor `airgap::proxy::PaneProxy`
+    /// Neither `egress::EgressState` (framework-free, no timers of its own
+    /// — see that module's doc comment) nor `egress::proxy::PaneProxy`
     /// (deliberately policy-free — see that module's doc comment) owns a
-    /// timer handle, so the integrator holds it here: `airgap_unlock`
+    /// timer handle, so the integrator holds it here: `egress_unlock`
     /// aborts any existing entry for the pane before inserting the new
-    /// task's `AbortHandle`; `airgap_relock` and pane-close both abort and
+    /// task's `AbortHandle`; `egress_relock` and pane-close both abort and
     /// remove it directly (an immediate relock must not let a
     /// since-superseded timer fire later and relock a pane that has since
     /// been closed and possibly reused).
@@ -135,12 +135,12 @@ pub struct AppState {
     /// `.abort()` call lands keeps going regardless. Every scheduled
     /// timer's continuation re-checks, immediately before calling
     /// `relock_now`, that ITS OWN captured generation is still the one
-    /// stored here for its pane — see `ipc::airgap::schedule_unlock`'s doc
+    /// stored here for its pane — see `ipc::egress::schedule_unlock`'s doc
     /// comment for the exact race this closes.
     pub relock_timers: Mutex<HashMap<String, (u64, AbortHandle)>>,
 
     /// Monotonic counter minting the generation token above — bumped once
-    /// per `ipc::airgap::schedule_unlock` call, regardless of pane, so
+    /// per `ipc::egress::schedule_unlock` call, regardless of pane, so
     /// every scheduled timer gets a value strictly greater than any prior
     /// timer's (for ANY pane — a single shared counter is simpler than a
     /// per-pane one and is just as correct, since each timer only ever
@@ -183,7 +183,7 @@ pub struct AppState {
     /// invocation — the tool loop runs inline inside `chat_send`'s own
     /// async fn (see `conductor::chat::run_chat`'s doc comment) — so a bare
     /// value reachable through the ordinary `State<'_, AppState>` borrow
-    /// each command already gets is enough, the same shape `pty`/`airgap`
+    /// each command already gets is enough, the same shape `pty`/`egress`
     /// above already use for the identical reason.
     /// `Arc` (not a bare field like the others) so the pty output batcher's
     /// `'static` data-tap closure can hold its own strong reference to feed
@@ -193,7 +193,7 @@ pub struct AppState {
     /// Mentor-mode comprehension-gate registry — `mentor::Mentor`
     /// (backend half of the `gate_question`/`mentor_answer` loop; see that
     /// module's doc comment). A plain value field that owns its own interior
-    /// locking, the same shape `pty`/`airgap` above already use — the gate is
+    /// locking, the same shape `pty`/`egress` above already use — the gate is
     /// only ever touched from within a command's own `State<'_, AppState>`
     /// borrow, never from a `tokio::spawn`'d background task outliving that
     /// borrow, so no `Arc` wrapper is needed.
@@ -222,7 +222,7 @@ impl AppState {
             quit_ready: Notify::new(),
             pty: crate::pty::Registry::new(),
             popout_approved: Mutex::new(std::collections::HashSet::new()),
-            airgap: airgap::AirgapState::new(),
+            egress: egress::EgressState::new(),
             proxies: Mutex::new(HashMap::new()),
             relock_timers: Mutex::new(HashMap::new()),
             relock_timer_generation: std::sync::atomic::AtomicU64::new(0),

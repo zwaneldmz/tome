@@ -244,16 +244,16 @@ export class RunsPanel {
     const canceling = run.canceling && run.status === 'running'
     row.badge.className = `runs-badge runs-st-${canceling ? 'canceling' : run.status}`
     row.badge.textContent = canceling ? 'canceling…' : RUN_TEXT[run.status] || run.status
-    row.gap.className = `runs-gap${run.airgap ? '' : ' open'}`
-    row.gap.textContent = run.airgap ? '⛨' : '⛉ open internet'
-    row.gap.title = run.airgap
-      ? 'Air-gapped — the same sandbox and model-APIs-only proxy a fresh agent pane gets'
-      : 'Ran on the open internet — the ＋ menu’s air-gap default was off when Run was pressed'
+    row.gap.className = `runs-gap${run.egress ? '' : ' open'}`
+    row.gap.textContent = run.egress ? '⛨' : '⛉ open internet'
+    row.gap.title = run.egress
+      ? 'Contained — the same sandbox and model-APIs-only proxy a fresh agent pane gets'
+      : 'Ran on the open internet — the ＋ menu’s egress default was off when Run was pressed'
     // The gated state is a bare shield, which is the right amount of visual
     // noise and the wrong amount of spoken one — the row is a button, so its
     // name is built from its contents and a lone glyph would read as nothing
     // useful in the middle of it.
-    row.gap.setAttribute('aria-label', run.airgap ? 'air-gapped' : 'on the open internet')
+    row.gap.setAttribute('aria-label', run.egress ? 'gapped' : 'on the open internet')
     row.when.textContent = this.whenText(run)
     // Disabled rather than hidden: the control stays where the user last
     // clicked it, saying what it is now doing.

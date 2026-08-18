@@ -15,12 +15,12 @@ number from our hardware.
 shell or agent CLI — its memory is whatever the agent itself uses, owned by
 the Rust backend via `src-tauri/src/pty.rs`, not node-pty), one xterm.js
 instance in the single webview renderer, and one loopback CONNECT-proxy
-socket when the pane is air-gapped. Spawning a pane adds a process, not a
+socket when the pane is gapped. Spawning a pane adds a process, not a
 webview.
 
 **The backend is one Rust process.** It holds the pty handles
-(`src-tauri/src/pty.rs`), the air-gap proxies
-(`src-tauri/src/airgap/proxy.rs`), and the event log
+(`src-tauri/src/pty.rs`), the egress proxies
+(`src-tauri/src/egress/proxy.rs`), and the event log
 (`src-tauri/src/events.rs`). It does not grow a new window, webview, or
 BrowserView per pane.
 
@@ -66,13 +66,13 @@ memory.
 Boot is ordered so first paint waits on the minimum set of work:
 
 - **Rust backend, before the window:** `lib.rs::run()`'s `.setup()` runs the
-  best-effort Electron→Tauri data migration, then `boot_auth_and_airgap`
+  best-effort Electron→Tauri data migration, then `boot_auth_and_egress`
   (auth load, repo-consent load, initial lock state). `mammoth`/`xlsx` no
   longer live in the backend at all — see the renderer item below.
 - **Renderer, paint-critical path:** `bootTheme` → `bootAuth` → `bootChrome`
   → persisted-state reads → `restoreLayout` (`src/renderer/renderer.js`).
   Nothing else is awaited before the layout is on screen.
-- **Renderer, post-paint tail:** git polling/menu, repo air-gap consent
+- **Renderer, post-paint tail:** git polling/menu, repo egress consent
   check, an idle-callback warm-up of the editor's CodeMirror language table
   and the brain pane's markdown mode, and `stt:warmup` (whisper model
   pre-load, gated on the `voice-warmup` store key, default off).

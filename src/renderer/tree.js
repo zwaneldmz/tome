@@ -14,7 +14,7 @@ import { confirmModal, promptModal } from './modals.js'
 import { renderStatusbar } from './statusbar.js'
 import { folderIcon, fileIcon, newFileIcon, newFolderIcon } from './icons.js'
 import { validateRelPath } from './tree-create.js'
-import { checkRepoAirgap } from './repo-airgap.js'
+import { checkRepoEgress } from './repo-egress.js'
 
 // Rows render into #tree-body; #tree itself keeps the header row (minimizer)
 // pinned above the scroll.
@@ -89,9 +89,9 @@ function setActiveRoot(rootPath) {
   refreshGit()
   renderStatusbar()
   updateHeaderButtons()
-  // A root the user clicks into may carry .tome/airgap.json — re-check
+  // A root the user clicks into may carry .tome/egress.json — re-check
   // (fire-and-forget; the consent store dedupes already-seen files).
-  checkRepoAirgap()
+  checkRepoEgress()
 }
 
 // Shared by the header buttons above (root = activeRoot), each root head's

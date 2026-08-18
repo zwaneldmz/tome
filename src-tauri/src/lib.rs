@@ -1,12 +1,12 @@
 mod agent_env;
 mod agent_spawn;
-pub mod airgap;
 mod authlock;
 mod brain;
 mod chat;
 mod conductor;
 mod confine;
 mod custom_agents;
+pub mod egress;
 mod eventlog;
 mod events;
 mod export;
@@ -168,10 +168,10 @@ fn boot_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 }
 
 /// Boot-time load: `authlock::AuthLock::load` (the passphrase/TOTP store)
-/// and `airgap::AirgapState::load_repo_consents` (persisted repo-allowlist
+/// and `egress::EgressState::load_repo_consents` (persisted repo-allowlist
 /// consents), both off `app_data_dir` — Tauri's per-OS analogue of
 /// Electron's `app.getPath('userData')`, which is what both
-/// `authlock.initAuth(userData)` and `airgap.loadRepoConsents(userData)`
+/// `authlock.initAuth(userData)` and `egress.loadRepoConsents(userData)`
 /// receive at their one real call site in `index.js` (~548-552). Also
 /// computes this process's initial lock-gate state (`index.js`'s
 /// `isLockedNow()`) once — see `lock_gate::is_locked`'s doc comment for why
@@ -191,7 +191,7 @@ fn boot_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
 /// leaves `AppState.auth` at its starting `None` and the app boots
 /// unlocked (`AppState.locked` stays `false`, its `AppState::new()`
 /// default) rather than crashing.
-fn boot_auth_and_airgap<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+fn boot_auth_and_egress<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Ok(dir) = app.path().app_data_dir() else {
         return;
     };
@@ -209,17 +209,17 @@ fn boot_auth_and_airgap<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     *state.locked.write().expect("AppState.locked lock poisoned") = locked;
     *state.auth.lock().expect("AppState.auth lock poisoned") = Some(auth);
     state
-        .airgap
-        .load_repo_consents(&dir.join("airgap-repo-consents.json"));
+        .egress
+        .load_repo_consents(&dir.join("egress-repo-consents.json"));
 }
 
 /// Spawns the in-app scheduler's 30-second tick loop (plan §Flow products
 /// pipeline step 1.7) and stores its `AbortHandle` on `AppState.
 /// schedule_ticker` so the quit handshake below (`abort_schedule_ticker`)
-/// can cancel it. Called once from `.setup()`, after `boot_auth_and_airgap`
+/// can cancel it. Called once from `.setup()`, after `boot_auth_and_egress`
 /// — order does not matter functionally (the ticker only ever reads
 /// `AppState.locked`/`app_data_dir` per tick, never anything
-/// `boot_auth_and_airgap` seeds once at startup), but keeping every
+/// `boot_auth_and_egress` seeds once at startup), but keeping every
 /// boot-time background task's spawn call in one place, right after the
 /// other one, is easier to audit than scattering them through `.setup()`.
 ///
@@ -269,13 +269,13 @@ fn abort_schedule_ticker(state: &AppState) {
 
 /// Shuts down every live pane proxy (loopback listener + any established
 /// tunnels) and cancels every pending auto-relock timer — the quit-time
-/// half of `closeAll()` (`airgap.js`'s own doc comment: "proxies are
+/// half of `closeAll()` (`egress.js`'s own doc comment: "proxies are
 /// children of no window", so nothing else tears them down when the app
 /// exits). Idempotent, like the JS original (`will-quit` and
 /// `window-all-closed` both call `closeAll()` there; this crate's own quit
 /// path only calls this once, from the `CloseRequested` handler below, but
 /// it would be harmless to call twice — draining a map a second time finds
-/// nothing left). No `airgap:state` push here, matching `closeAll`'s own
+/// nothing left). No `egress:state` push here, matching `closeAll`'s own
 /// comment: the window is on its way down, and a locked/closing app has
 /// nowhere left to deliver the event.
 fn shutdown_all_proxies(state: &AppState) {
@@ -295,7 +295,7 @@ fn shutdown_all_proxies(state: &AppState) {
     {
         proxy.shutdown();
     }
-    state.airgap.close_all();
+    state.egress.close_all();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -342,13 +342,13 @@ pub fn run() {
             menu::setup(app)?;
             // Best-effort first-boot copy of a legacy Electron userData
             // profile into this build's own app_data_dir. MUST run before
-            // boot_auth_and_airgap below, so a freshly-migrated
-            // airgap-auth.json/airgap-repo-consents.json (if any) is what
+            // boot_auth_and_egress below, so a freshly-migrated
+            // egress-auth.json/egress-repo-consents.json (if any) is what
             // that call's own AuthLock::load/load_repo_consents sees on
             // this same boot rather than the next one. See migrate.rs's
             // module doc comment.
             migrate::run(app.handle());
-            boot_auth_and_airgap(app.handle());
+            boot_auth_and_egress(app.handle());
             spawn_schedule_ticker(app.handle());
             Ok(())
         })
@@ -398,16 +398,16 @@ pub fn run() {
             ipc::theme::theme_set,
             // shell
             ipc::shell::shell_open_path,
-            // airgap (Phase 3/4)
-            ipc::airgap::airgap_state,
-            ipc::airgap::airgap_unlock,
-            ipc::airgap::airgap_relock,
-            ipc::airgap::airgap_setup,
-            ipc::airgap::airgap_enroll_totp,
-            ipc::airgap::airgap_confirm_totp,
-            ipc::airgap::airgap_read_repo_allowlist,
-            ipc::airgap::airgap_consent_repo_allowlist,
-            ipc::airgap::airgap_revoke_repo_allowlist,
+            // egress (Phase 3/4)
+            ipc::egress::egress_state,
+            ipc::egress::egress_unlock,
+            ipc::egress::egress_relock,
+            ipc::egress::egress_setup,
+            ipc::egress::egress_enroll_totp,
+            ipc::egress::egress_confirm_totp,
+            ipc::egress::egress_read_repo_allowlist,
+            ipc::egress::egress_consent_repo_allowlist,
+            ipc::egress::egress_revoke_repo_allowlist,
             // agents
             ipc::agents::agents_list,
             ipc::agents::agents_customs,

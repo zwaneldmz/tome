@@ -37,7 +37,7 @@ pub fn home_dir() -> Option<PathBuf> {
 }
 
 /// `~/.config/tome-runner` — server-owner-writable configuration: the
-/// egress allowlist ([`crate::airgap_config`]) and the `env` file the
+/// egress allowlist ([`crate::egress_config`]) and the `env` file the
 /// systemd `EnvironmentFile=` directive reads provider credentials from
 /// (see `docs/remote-runner.md`). This binary only ever reads under this
 /// directory, never writes to it.

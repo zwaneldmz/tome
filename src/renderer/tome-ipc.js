@@ -301,18 +301,18 @@
 
     openPath: (p) => call('shell_open_path', { path: p }),
 
-    airgap: {
-      state: () => call('airgap_state'),
-      unlock: (opts) => call('airgap_unlock', opts),
-      relock: (paneId) => call('airgap_relock', { paneId }),
-      setup: (passphrase) => call('airgap_setup', { passphrase }),
-      enrollTotp: () => call('airgap_enroll_totp'),
-      confirmTotp: (code) => call('airgap_confirm_totp', { code }),
-      readRepo: (root) => call('airgap_read_repo_allowlist', { root }),
-      consentRepo: (root, hash) => call('airgap_consent_repo_allowlist', { root, hash }),
-      revokeRepo: (root) => call('airgap_revoke_repo_allowlist', { root }),
-      onBlocked: (cb) => on('airgap:blocked', cb),
-      onState: (cb) => on('airgap:state', cb),
+    egress: {
+      state: () => call('egress_state'),
+      unlock: (opts) => call('egress_unlock', opts),
+      relock: (paneId) => call('egress_relock', { paneId }),
+      setup: (passphrase) => call('egress_setup', { passphrase }),
+      enrollTotp: () => call('egress_enroll_totp'),
+      confirmTotp: (code) => call('egress_confirm_totp', { code }),
+      readRepo: (root) => call('egress_read_repo_allowlist', { root }),
+      consentRepo: (root, hash) => call('egress_consent_repo_allowlist', { root, hash }),
+      revokeRepo: (root) => call('egress_revoke_repo_allowlist', { root }),
+      onBlocked: (cb) => on('egress:blocked', cb),
+      onState: (cb) => on('egress:state', cb),
     },
 
     agents: {
@@ -357,7 +357,7 @@
 
     // In-app flow scheduler (schedule.rs): main owns flow-schedules.json
     // (0600) and the 30s tick loop that starts a due schedule's run — always
-    // air-gapped, re-verified against the flow file's current hash on every
+    // gapped, re-verified against the flow file's current hash on every
     // tick. schedules_set is the only way to (re)consent — creating a
     // schedule, editing one, flipping enabled, or clearing a hash-mismatch
     // suspension all round-trip through it (see ipc/schedules.rs's own doc
