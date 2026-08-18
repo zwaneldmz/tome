@@ -6,6 +6,7 @@ build/icon.iconset/
 .env
 .claude/
 .worktrees/
+.tome/
 index.js
 tome-council-report.pdf
 reviews/*
