@@ -354,7 +354,7 @@ export async function showOnboarding() {
           sttDot.className = 'ob-dot-avail off'
           sttDot.textContent = '○'
           sttHint.textContent = apple
-            ? 'on-device dictation unavailable'
+            ? s.why
             : !s.bin
               ? 'whisper-cli not installed'
               : 'speech model not downloaded'

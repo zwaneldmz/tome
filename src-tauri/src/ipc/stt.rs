@@ -18,6 +18,8 @@
 //! reports the resolved Apple/whisper engine from the `stt-engine`
 //! preference.
 
+use std::path::PathBuf;
+
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
 
@@ -152,6 +154,60 @@ pub async fn stt_warmup(app: AppHandle, state: State<'_, AppState>) -> Result<Va
     })
 }
 
+/// The resolved STT engine plus everything `stt:status`/`stt:engine` need to
+/// report readiness without re-resolving. `whisper_why` is the same
+/// [`stt::stt_unavailable`] reason `stt:status`'s `why` field surfaces, so
+/// `whisper_ready` is simply `whisper_why.is_none()` — the store read, the
+/// bin/model path resolution, the availability probe, and the engine choice
+/// all happen exactly once, shared by both commands (and probed once when
+/// Task 2 makes [`stt::apple_available`] a real objc2 probe).
+struct EngineResolution {
+    preference: String,
+    engine: stt::Engine,
+    apple_available: bool,
+    whisper_ready: bool,
+    whisper_why: Option<String>,
+    bin: String,
+    model: PathBuf,
+}
+
+/// The one shared resolution path behind both `stt:status` and `stt:engine`:
+/// read the `stt-engine` preference (through `store::get` inside
+/// `spawn_blocking` — it is a file read, so it must not block the async
+/// runtime, the same rule `stt_warmup` follows), resolve `whisper_bin` +
+/// `model_path`, and fold those into a resolved [`stt::Engine`] plus both
+/// sides' availability.
+async fn resolve_engine(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<EngineResolution, String> {
+    let bin = stt::whisper_bin(whisper_bin_override().as_deref()).unwrap_or_default();
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let model = stt::model_path(&dir);
+
+    let locked = *state.locked.read().unwrap();
+    let dir_for_store = dir.clone();
+    let pref = tokio::task::spawn_blocking(move || store::get(&dir_for_store, "stt-engine", locked))
+        .await
+        .unwrap_or(Value::Null);
+    let preference = engine_preference(&pref);
+
+    let whisper_why = stt::stt_unavailable(Some(&bin), &model);
+    let whisper_ready = whisper_why.is_none();
+    let apple_available = stt::apple_available();
+    let engine = stt::engine_kind(&preference, apple_available);
+
+    Ok(EngineResolution {
+        preference,
+        engine,
+        apple_available,
+        whisper_ready,
+        whisper_why,
+        bin,
+        model,
+    })
+}
+
 /// `stt:status`. No spawn — the onboarding Voice step's status row reads
 /// this to show whether speech is ready before the user presses Test, and
 /// which of the two installs (binary, model) is missing for whisper. The
@@ -162,79 +218,54 @@ pub async fn stt_warmup(app: AppHandle, state: State<'_, AppState>) -> Result<Va
 #[tauri::command]
 pub async fn stt_status(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
     lock_gate::guard(&state, "stt:status")?;
+    let r = resolve_engine(app, state).await?;
 
-    let bin = stt::whisper_bin(whisper_bin_override().as_deref());
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let model = stt::model_path(&dir);
-
-    // Same store read shape as `stt_warmup`: the `stt-engine` key gate goes
-    // through `store::get` inside `spawn_blocking` (it is a file read, so it
-    // must not block the async runtime).
-    let locked = *state.locked.read().unwrap();
-    let dir_for_store = dir.clone();
-    let pref = tokio::task::spawn_blocking(move || store::get(&dir_for_store, "stt-engine", locked))
-        .await
-        .unwrap_or(Value::Null);
-    let preference = engine_preference(&pref);
-
-    let whisper_why = stt::stt_unavailable(bin.as_deref(), &model);
-    let whisper_ready = whisper_why.is_none();
-    let bin_ok = bin.as_deref().map(stt::bin_exists).unwrap_or(false);
-    let model_ok = stt::model_exists(&model);
-
-    let apple_available = stt::apple_available();
-    let engine = stt::engine_kind(&preference, apple_available, whisper_ready);
-
-    let ready = match engine {
-        stt::Engine::Apple => apple_available,
-        stt::Engine::Whisper => whisper_ready,
-    };
-    let why = match engine {
-        stt::Engine::Apple if !apple_available => {
-            Some("On-device speech recognition is unavailable on this Mac.".to_string())
+    let bin_ok = stt::bin_exists(&r.bin);
+    let model_ok = stt::model_exists(&r.model);
+    let apple = r.engine == stt::Engine::Apple;
+    let ready = if apple { r.apple_available } else { r.whisper_ready };
+    let why = if apple {
+        if r.apple_available {
+            None
+        } else {
+            Some(stt::APPLE_UNAVAILABLE.to_string())
         }
-        stt::Engine::Whisper => whisper_why,
-        stt::Engine::Apple => None,
+    } else {
+        r.whisper_why.clone()
     };
 
     Ok(json!({
         "ready": ready,
         "bin": bin_ok,
         "model": model_ok,
-        "engine": engine.as_str(),
-        "preference": preference,
-        "apple": { "available": apple_available },
-        "whisper": { "ready": whisper_ready, "bin": bin_ok, "model": model_ok },
+        "engine": r.engine.as_str(),
+        "preference": r.preference,
+        "apple": { "available": r.apple_available },
+        "whisper": { "ready": r.whisper_ready, "bin": bin_ok, "model": model_ok },
         "why": why,
     }))
 }
 
 /// `stt:engine`. Reports the stored preference and the resolved engine (plus
-/// whether it is available) without spawning anything — a synchronous,
-/// read-only companion to `stt:status` for the Settings surface's
-/// engine-select row, which needs the resolution but not the full
-/// availability shape. Gated like every other command.
+/// whether it is available). The Settings surface's speech-engine select
+/// reads this to restore its initial selection — `preference` is the
+/// normalized stored value (`"auto"` when the key is unset), so the select
+/// never has to interpret a missing key itself. Shares [`resolve_engine`]
+/// with `stt:status`, so the two surfaces can never disagree on the resolved
+/// engine. Gated like every other command.
 #[tauri::command]
-pub fn stt_engine(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
+pub async fn stt_engine(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
     lock_gate::guard(&state, "stt:engine")?;
-
-    let bin = stt::whisper_bin(whisper_bin_override().as_deref());
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let model = stt::model_path(&dir);
-    let locked = *state.locked.read().unwrap();
-    let preference = engine_preference(&store::get(&dir, "stt-engine", locked));
-
-    let whisper_ready = stt::stt_unavailable(bin.as_deref(), &model).is_none();
-    let apple_available = stt::apple_available();
-    let engine = stt::engine_kind(&preference, apple_available, whisper_ready);
-    let available = match engine {
-        stt::Engine::Apple => apple_available,
-        stt::Engine::Whisper => whisper_ready,
+    let r = resolve_engine(app, state).await?;
+    let available = if r.engine == stt::Engine::Apple {
+        r.apple_available
+    } else {
+        r.whisper_ready
     };
 
     Ok(json!({
-        "preference": preference,
-        "engine": engine.as_str(),
+        "preference": r.preference,
+        "engine": r.engine.as_str(),
         "available": available,
     }))
 }

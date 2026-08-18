@@ -54,6 +54,13 @@ const CANDIDATES: &[&str] = &[
 pub const NO_BIN: &str =
     "whisper-cli not found. Install it (brew install whisper-cpp) or point TOME_WHISPER_BIN at the binary.";
 
+/// The one message `stt:status`'s `why` field reports when the Apple engine
+/// is selected but unavailable. Kept as a single shared string so the Rust
+/// status shape and every renderer surface that shows the reason (Settings,
+/// onboarding) can never drift apart — the renderer reads this via `why`,
+/// it never hard-codes its own wording.
+pub const APPLE_UNAVAILABLE: &str = "On-device speech recognition is unavailable on this Mac.";
+
 /// `transcribe`'s default hard timeout — ports `timeoutMs = 60_000`.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 /// `stt:warmup`'s override — ports its call site's explicit `timeoutMs: 30_000`.
@@ -301,7 +308,7 @@ pub fn warmup_silence() -> Vec<u8> {
 
 /// Which speech-to-text engine a resolved preference selects. The Apple
 /// variant is not wired to a real recognizer yet — see [`apple_available`].
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum Engine {
     Apple,
     Whisper,
@@ -320,13 +327,8 @@ impl Engine {
 /// Resolves the `stt-engine` preference to a concrete engine. An explicit
 /// `"apple"`/`"whisper"` wins outright regardless of availability; anything
 /// else (including `"auto"` and the default `""`) prefers Apple when
-/// available and falls back to whisper otherwise. `whisper_ready` is
-/// accepted for call-site symmetry with [`engine_kind`]'s one caller in
-/// `ipc::stt` (which already computes it for its own `ready`/`why` shape)
-/// but is not consulted here: `auto` only asks "can Apple run?", since a
-/// not-ready whisper is still the correct fallback target — its own
-/// unavailability is reported separately, not silently reselected around.
-pub fn engine_kind(preference: &str, apple_available: bool, _whisper_ready: bool) -> Engine {
+/// available and falls back to whisper otherwise.
+pub fn engine_kind(preference: &str, apple_available: bool) -> Engine {
     match preference {
         "apple" => Engine::Apple,
         "whisper" => Engine::Whisper,
@@ -601,28 +603,26 @@ mod tests {
 
     #[test]
     fn engine_kind_auto_prefers_apple_when_available() {
-        assert_eq!(engine_kind("auto", true, true), Engine::Apple);
-        assert_eq!(engine_kind("auto", true, false), Engine::Apple);
+        assert_eq!(engine_kind("auto", true), Engine::Apple);
     }
 
     #[test]
     fn engine_kind_auto_falls_back_to_whisper_when_apple_is_not_available() {
-        assert_eq!(engine_kind("auto", false, true), Engine::Whisper);
-        assert_eq!(engine_kind("auto", false, false), Engine::Whisper);
+        assert_eq!(engine_kind("auto", false), Engine::Whisper);
     }
 
     #[test]
     fn engine_kind_explicit_preference_wins_regardless_of_availability() {
-        assert_eq!(engine_kind("apple", false, false), Engine::Apple);
-        assert_eq!(engine_kind("whisper", true, true), Engine::Whisper);
+        assert_eq!(engine_kind("apple", false), Engine::Apple);
+        assert_eq!(engine_kind("whisper", true), Engine::Whisper);
     }
 
     #[test]
     fn engine_kind_treats_unknown_or_empty_preference_as_auto() {
-        assert_eq!(engine_kind("", true, true), Engine::Apple);
-        assert_eq!(engine_kind("", false, true), Engine::Whisper);
-        assert_eq!(engine_kind("bogus", true, true), Engine::Apple);
-        assert_eq!(engine_kind("bogus", false, true), Engine::Whisper);
+        assert_eq!(engine_kind("", true), Engine::Apple);
+        assert_eq!(engine_kind("", false), Engine::Whisper);
+        assert_eq!(engine_kind("bogus", true), Engine::Apple);
+        assert_eq!(engine_kind("bogus", false), Engine::Whisper);
     }
 
     #[test]

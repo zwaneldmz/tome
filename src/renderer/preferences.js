@@ -923,9 +923,7 @@ export async function preferencesModal() {
   voice.appendChild(sttStatus)
   const paintStatus = (s) => {
     if (s.engine === 'apple') {
-      sttStatus.textContent = s.ready
-        ? 'Apple on-device dictation — ready.'
-        : 'On-device speech recognition is unavailable on this Mac.'
+      sttStatus.textContent = s.ready ? 'Apple on-device dictation — ready.' : s.why
     } else if (s.ready) {
       sttStatus.textContent = 'Local whisper transcription is ready.'
     } else if (!s.bin) {
@@ -949,7 +947,11 @@ export async function preferencesModal() {
     opt.value = value
     engineSelect.appendChild(opt)
   }
-  engineSelect.value = (await tome.store.get('stt-engine')) || 'auto'
+  // Restore the select from stt:engine's normalized `preference` field, not
+  // the raw store key — a never-set/cleared key normalizes to "auto" on both
+  // sides, so this never has to guess what a missing key means.
+  const engineInfo = await tome.stt.engine().catch(() => null)
+  engineSelect.value = engineInfo?.preference || 'auto'
   engineSelect.addEventListener('change', () => {
     tome.store.set('stt-engine', engineSelect.value)
     tome.stt
