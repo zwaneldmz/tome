@@ -36,8 +36,9 @@
   </g>
 
   <!-- wordmark -->
-  <text x="280" y="196" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace" font-size="88" font-weight="600" letter-spacing="-1" fill="#eef4fb">tome</text>
-  <text x="282" y="242" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace" font-size="22" fill="#737e96">one workspace for your coding agents</text>
+  <text x="280" y="188" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace" font-size="88" font-weight="600" letter-spacing="-1" fill="#eef4fb">tome</text>
+  <text x="282" y="228" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace" font-size="20" fill="#737e96">one workspace for</text>
+  <text x="282" y="254" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace" font-size="20" fill="#737e96">your coding agents</text>
 
   <!-- the containment cell, illustrated: a framed terminal pane -->
   <g transform="translate(600 60)">
