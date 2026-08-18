@@ -387,6 +387,10 @@
       warmup: () => call('stt_warmup'),
       status: () => call('stt_status'),
       engine: () => call('stt_engine'),
+      // One-click whisper.cpp model download (voice-0.4 Task 5) — explicit
+      // user action from Settings/onboarding, never automatic. Resolves to
+      // { ok, bytes, path } / { ok, already, path } / { error } (never throws).
+      downloadModel: () => call('stt_download_model'),
       // Live streaming (voice-0.4 Task 3): begin/append/finish/cancel drive
       // the Apple on-device recognizer's streaming session; append passes the
       // Uint8Array straight through — Tauri's IPC serializer converts a

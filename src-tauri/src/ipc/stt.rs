@@ -285,6 +285,30 @@ pub async fn stt_engine(app: AppHandle, state: State<'_, AppState>) -> Result<Va
     }))
 }
 
+/// `stt:downloadModel` (voice-0.4 Task 5). One-click download of the
+/// whisper.cpp model: resolves the URL + destination path, then delegates to
+/// [`stt::download_model`]. Explicit user action only — nothing ever calls
+/// this on its own, so there is no silent egress at boot. Never throws:
+/// a missing model already present returns `{ already: true }`; a failure
+/// returns `{ error }` (the same value-shaped convention `stt:transcribe`
+/// uses), so the renderer's button can show the message inline.
+#[tauri::command]
+pub async fn stt_download_model(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    lock_gate::guard(&state, "stt:downloadModel")?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let model = stt::model_path(&dir);
+    if stt::model_exists(&model) {
+        return Ok(json!({ "ok": true, "already": true, "path": model }));
+    }
+    match stt::download_model(crate::ipc::chat::http_client(), &stt::model_url(), &model).await {
+        Ok(bytes) => Ok(json!({ "ok": true, "bytes": bytes, "path": model })),
+        Err(e) => Ok(json!({ "error": e })),
+    }
+}
+
 // ---- streaming Apple recognition (voice-0.4 Task 3) ----
 //
 // `stt_begin`/`stt_append`/`stt_finish`/`stt_cancel` are the four commands

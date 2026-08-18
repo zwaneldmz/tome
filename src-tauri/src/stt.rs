@@ -39,6 +39,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 const MODEL: &str = "ggml-base.en.bin";
 const MODEL_URL_BASE: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
 
+/// The full HTTPS URL for the one model this build supports — the single
+/// string both `stt:downloadModel` (Task 5) and [`stt_unavailable`]'s curl
+/// hint need, so the two can never drift apart.
+pub fn model_url() -> String {
+    format!("{MODEL_URL_BASE}{MODEL}")
+}
+
 /// Ports `CANDIDATES`: two absolute homebrew homes, then a bare name as
 /// the final, always-accepted fallback. GUI apps on macOS launch with a
 /// PATH that lacks the homebrew prefixes, so a bare `whisper-cli` alone
@@ -156,12 +163,117 @@ pub fn stt_unavailable(bin: Option<&str>, model: &Path) -> Option<String> {
     if !model.exists() {
         let dir = model.parent().unwrap_or_else(|| Path::new(""));
         return Some(format!(
-            "Speech model missing. Download it once:\n  mkdir -p \"{}\" && curl -L -o \"{}\" {MODEL_URL_BASE}{MODEL}",
+            "Speech model missing. Download it once:\n  mkdir -p \"{}\" && curl -L -o \"{}\" {}",
             dir.display(),
             model.display(),
+            model_url(),
         ));
     }
     None
+}
+
+// ---- one-click model download (voice-0.4 Task 5) ----
+//
+// Until Task 5 the only way to obtain the model was the curl command
+// `stt_unavailable` prints. Task 5 adds an explicit-user-action download:
+// `ipc::stt::stt_download_model` resolves the URL + destination path, then
+// calls [`download_model`] here. The download is never automatic — only the
+// Settings/onboarding button triggers it — so there is no silent egress at
+// boot; the URL is a fixed, allowlisted host (Hugging Face's whisper.cpp
+// repo, the same one the curl hint already names).
+
+/// The first four bytes of any whisper.cpp ggml model — `"ggml"`. Checked
+/// before a download is accepted so a proxy error page or redirect-to-HTML
+/// can never be mistaken for the real model.
+const GGML_MAGIC: [u8; 4] = [0x67, 0x67, 0x6d, 0x6c];
+
+/// Minimum sane size for the ggml base.en model (~140 MB). Anything at or
+/// below this is an error page or a truncated download, not a model.
+const MIN_MODEL_BYTES: u64 = 1_000_000;
+
+/// Pure validation of a fully-buffered model download: the ggml magic header
+/// plus a minimum size. Unit-tested directly; [`download_model`] is the only
+/// caller. This is the v1 guard — a SHA-256 pin should replace it once the
+/// exact model build's hash is captured (see THREATMODEL §7); until then the
+/// magic + size check is the best integrity signal available without
+/// hardcoding a guessed hash.
+fn validate_model_bytes(data: &[u8]) -> Result<(), &'static str> {
+    if data.len() as u64 <= MIN_MODEL_BYTES {
+        return Err("model is smaller than the expected ~140 MB ggml file");
+    }
+    if data.len() < GGML_MAGIC.len() || data[..GGML_MAGIC.len()] != GGML_MAGIC {
+        return Err("missing ggml magic header");
+    }
+    Ok(())
+}
+
+/// `<dest>` with a `.part` suffix — the write target [`write_model_atomic`]
+/// streams into before the final rename, so a crash mid-download can never
+/// leave a half-written file at the real model path.
+fn part_path(dest: &Path) -> PathBuf {
+    let mut os = dest.as_os_str().to_os_string();
+    os.push(".part");
+    PathBuf::from(os)
+}
+
+/// Writes `bytes` to `<dest>.part` then renames it onto `dest` — atomic-ish
+/// (a half-written model is never visible at `dest`, and `ggml-base.en.bin`
+/// either exists complete or not at all). The `.part` is removed on either
+/// failure, matching the "clean up the `.part`" guarantee `download_model`
+/// documents for every error path.
+async fn write_model_atomic(bytes: &[u8], dest: &Path) -> Result<u64, String> {
+    if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| format!("Could not create the model folder: {e}"))?;
+    }
+    let part = part_path(dest);
+    if let Err(e) = tokio::fs::write(&part, bytes).await {
+        let _ = tokio::fs::remove_file(&part).await;
+        return Err(format!("Could not save the model: {e}"));
+    }
+    if let Err(e) = tokio::fs::rename(&part, dest).await {
+        let _ = tokio::fs::remove_file(&part).await;
+        return Err(format!("Could not finalize the model download: {e}"));
+    }
+    Ok(bytes.len() as u64)
+}
+
+/// One-shot model download: streams the response body, validates it, then
+/// commits it to `dest` atomically. Takes the resolved URL + destination
+/// path (no `AppHandle`); `client` is the shared `reqwest::Client` handed in
+/// by the caller (`ipc::stt` passes `ipc::chat::http_client()`), so this
+/// stays a pure, directly-testable function — a cycle into `ipc` is avoided
+/// by threading the client in rather than reaching across module boundaries.
+///
+/// Returns the byte count on success; on any failure returns a friendly
+/// `Err(String)` and leaves no `.part` (and no `dest`) behind.
+pub async fn download_model(
+    client: &reqwest::Client,
+    model_url: &str,
+    dest: &Path,
+) -> Result<u64, String> {
+    let resp =
+        client.get(model_url).send().await.map_err(|e| {
+            format!("Model download failed — could not reach the model server ({e}).")
+        })?;
+    if !resp.status().is_success() {
+        return Err(format!("Model download failed (HTTP {}).", resp.status()));
+    }
+
+    let mut buf = Vec::new();
+    let mut stream = resp.bytes_stream();
+    use futures_util::StreamExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| {
+            format!("Model download failed — the connection was interrupted ({e}).")
+        })?;
+        buf.extend_from_slice(&chunk);
+    }
+    validate_model_bytes(&buf)
+        .map_err(|_| "Downloaded file is not a valid speech model.".to_string())?;
+
+    write_model_atomic(&buf, dest).await
 }
 
 /// One `transcribe()` call's inputs — ports the JS original's
@@ -482,6 +594,106 @@ mod tests {
     fn model_exists_checks_the_real_path() {
         assert!(model_exists(Path::new("/bin/ls")));
         assert!(!model_exists(Path::new("/nope/model.bin")));
+    }
+
+    // ---- model download (Task 5) — validate_model_bytes is pure; the
+    // download/atomic-write helpers are exercised without any network by
+    // driving their failure paths directly.
+
+    fn fake_model() -> Vec<u8> {
+        let mut buf = Vec::with_capacity(MIN_MODEL_BYTES as usize + 1);
+        buf.extend_from_slice(&GGML_MAGIC);
+        buf.resize(MIN_MODEL_BYTES as usize + 1, 0);
+        buf
+    }
+
+    #[test]
+    fn validate_model_bytes_accepts_a_ggml_model_over_the_min_size() {
+        assert_eq!(validate_model_bytes(&fake_model()), Ok(()));
+    }
+
+    #[test]
+    fn validate_model_bytes_rejects_a_file_at_or_below_the_min_size() {
+        let mut too_small = vec![0u8; MIN_MODEL_BYTES as usize];
+        too_small[..4].copy_from_slice(&GGML_MAGIC);
+        assert_eq!(
+            validate_model_bytes(&too_small),
+            Err("model is smaller than the expected ~140 MB ggml file")
+        );
+    }
+
+    #[test]
+    fn validate_model_bytes_rejects_a_wrong_magic_header() {
+        let mut wrong = fake_model();
+        wrong[0] = 0x00;
+        assert_eq!(
+            validate_model_bytes(&wrong),
+            Err("missing ggml magic header")
+        );
+    }
+
+    #[test]
+    fn validate_model_bytes_rejects_an_empty_buffer() {
+        assert_eq!(
+            validate_model_bytes(&[]),
+            Err("model is smaller than the expected ~140 MB ggml file")
+        );
+    }
+
+    #[test]
+    fn part_path_appends_the_part_suffix() {
+        assert_eq!(
+            part_path(Path::new("/ud/models/ggml-base.en.bin")),
+            PathBuf::from("/ud/models/ggml-base.en.bin.part")
+        );
+    }
+
+    #[tokio::test]
+    async fn write_model_atomic_removes_the_part_on_a_failed_rename() {
+        let tmp = tempfile::tempdir().unwrap();
+        // `dest` is an existing directory, so the rename of a file onto it
+        // fails (EISDIR/ENOTEMPTY on Unix) — a deterministic, non-network
+        // way to drive the failure path and its `.part` cleanup.
+        let dest = tmp.path().join("models");
+        std::fs::create_dir(&dest).unwrap();
+        let part = part_path(&dest);
+
+        let err = write_model_atomic(&fake_model(), &dest).await.unwrap_err();
+        assert!(err.starts_with("Could not finalize"), "{err}");
+        assert!(!part.exists(), "the .part file must be cleaned up");
+    }
+
+    #[tokio::test]
+    async fn write_model_atomic_writes_and_renames_into_place() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("models").join("ggml-base.en.bin");
+        let bytes = fake_model();
+
+        let n = write_model_atomic(&bytes, &dest).await.unwrap();
+        assert_eq!(n, bytes.len() as u64);
+        assert_eq!(std::fs::read(&dest).unwrap(), bytes);
+        assert!(
+            !part_path(&dest).exists(),
+            "no .part should remain on success"
+        );
+    }
+
+    #[tokio::test]
+    async fn download_model_rejects_a_bad_url_and_leaves_no_part() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("models").join("ggml-base.en.bin");
+        let client = reqwest::Client::new();
+        // "not a URL" fails URL parsing before any socket is touched — a
+        // non-network error path that must still leave no `.part` behind.
+        let err = download_model(&client, "not a url", &dest)
+            .await
+            .unwrap_err();
+        assert!(err.starts_with("Model download failed"), "{err}");
+        assert!(
+            !part_path(&dest).exists(),
+            "no .part should remain on error"
+        );
+        assert!(!dest.exists(), "no model should exist on error");
     }
 
     // ---- transcribe() — arg order, stdout collapsing, temp-file cleanup ----

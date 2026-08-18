@@ -920,18 +920,50 @@ export async function preferencesModal() {
   const voice = el('section', 'prefs-section')
   voice.append(el('h4', '', 'Voice'))
   const sttStatus = el('div', 'prefs-hint', 'Checking local speech…')
-  voice.appendChild(sttStatus)
+  // Task 5: one-click model download, shown only when whisper is the resolved
+  // engine and the model (not the binary) is what's missing — the binary
+  // still needs `brew install whisper-cpp` first, which no in-app button can
+  // do for the user.
+  const downloadBtn = el('button', 'ag-btn ghost', 'Download speech model')
+  downloadBtn.type = 'button'
+  downloadBtn.hidden = true
+  const statusRow = el('div', 'prefs-inline')
+  statusRow.append(sttStatus, downloadBtn)
+  voice.appendChild(statusRow)
   const paintStatus = (s) => {
     if (s.engine === 'apple') {
       sttStatus.textContent = s.ready ? 'Apple on-device dictation — ready.' : s.why
+      downloadBtn.hidden = true
     } else if (s.ready) {
       sttStatus.textContent = 'Local whisper transcription is ready.'
+      downloadBtn.hidden = true
     } else if (!s.bin) {
       sttStatus.textContent = 'whisper-cli not found — install it (brew install whisper-cpp) and restart.'
+      downloadBtn.hidden = true
     } else {
-      sttStatus.textContent = 'Speech model missing — the push-to-talk error message carries the one-time download command.'
+      sttStatus.textContent = 'Speech model not downloaded.'
+      downloadBtn.hidden = false
     }
   }
+  downloadBtn.addEventListener('click', async () => {
+    downloadBtn.disabled = true
+    downloadBtn.textContent = 'Downloading…'
+    try {
+      const res = await tome.stt.downloadModel()
+      if (res?.error) {
+        sttStatus.textContent = res.error
+      } else {
+        sttStatus.textContent = 'Speech model downloaded.'
+        const s = await tome.stt.status().catch(() => null)
+        if (s) paintStatus(s)
+      }
+    } catch (err) {
+      sttStatus.textContent = err?.message || 'Download failed.'
+    } finally {
+      downloadBtn.disabled = false
+      downloadBtn.textContent = 'Download speech model'
+    }
+  })
   tome.stt
     .status()
     .then(paintStatus)

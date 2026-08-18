@@ -323,7 +323,7 @@ export async function showOnboarding() {
   }
 
   function stepVoice() {
-    note('One second of audio goes to the local whisper model — nothing leaves the machine.')
+    note('One second of audio is transcribed on-device — nothing leaves the machine.')
     const btn = el('button', 'ag-btn ghost', 'Test microphone')
     btn.type = 'button'
     const out = el('p', 'ag-note')
@@ -339,30 +339,66 @@ export async function showOnboarding() {
     const sttHint = el('span', 'ob-agent-hint', 'checking…')
     sttRow.append(sttDot, sttName, sttHint)
     m.body.appendChild(sttRow)
+    // Task 5: one-click model download, shown only when whisper is the engine
+    // and the model (not the binary) is the missing half — the binary still
+    // needs `brew install whisper-cpp`, which no in-app button can do.
+    const downloadBtn = el('button', 'ag-btn ghost', 'Download model')
+    downloadBtn.type = 'button'
+    downloadBtn.hidden = true
+    m.body.appendChild(downloadBtn)
     const myStep = state.step
+    const paintStt = (s) => {
+      if (state.step !== myStep) return // navigated away — body belongs to another step
+      const apple = s.engine === 'apple'
+      sttName.textContent = apple ? 'Apple on-device dictation' : 'local whisper transcription'
+      downloadBtn.hidden = true
+      if (apple) {
+        sttDot.className = 'ob-dot-avail ' + (s.ready ? 'ok' : 'off')
+        sttDot.textContent = s.ready ? '●' : '○'
+        sttHint.textContent = s.ready
+          ? 'Voice is ready — Apple on-device dictation, no setup needed.'
+          : s.why
+      } else if (s.ready) {
+        sttDot.className = 'ob-dot-avail ok'
+        sttDot.textContent = '●'
+        sttHint.textContent = 'Local whisper transcription is ready.'
+      } else if (!s.bin) {
+        sttDot.className = 'ob-dot-avail off'
+        sttDot.textContent = '○'
+        sttHint.textContent = 'Install whisper-cli (`brew install whisper-cpp`) and restart.'
+      } else {
+        sttDot.className = 'ob-dot-avail off'
+        sttDot.textContent = '○'
+        sttHint.textContent = 'speech model not downloaded'
+        downloadBtn.hidden = false
+      }
+    }
     tome.stt
       .status()
-      .then((s) => {
-        if (state.step !== myStep) return // navigated away — body belongs to another step
-        const apple = s.engine === 'apple'
-        sttName.textContent = apple ? 'Apple on-device dictation' : 'local whisper transcription'
-        if (s.ready) {
-          sttDot.className = 'ob-dot-avail ok'
-          sttDot.textContent = '●'
-          sttHint.textContent = 'ready'
-        } else {
-          sttDot.className = 'ob-dot-avail off'
-          sttDot.textContent = '○'
-          sttHint.textContent = apple
-            ? s.why
-            : !s.bin
-              ? 'whisper-cli not installed'
-              : 'speech model not downloaded'
-        }
-      })
+      .then(paintStt)
       .catch(() => {
         if (state.step === myStep) sttHint.textContent = 'status unavailable'
       })
+    downloadBtn.addEventListener('click', async () => {
+      if (downloadBtn.disabled) return
+      downloadBtn.disabled = true
+      downloadBtn.textContent = 'Downloading…'
+      try {
+        const res = await tome.stt.downloadModel()
+        if (res?.error) {
+          sttHint.textContent = res.error
+        } else {
+          sttHint.textContent = 'Speech model downloaded.'
+          const s = await tome.stt.status().catch(() => null)
+          if (s) paintStt(s)
+        }
+      } catch (err) {
+        sttHint.textContent = err?.message || 'Download failed.'
+      } finally {
+        downloadBtn.disabled = false
+        downloadBtn.textContent = 'Download model'
+      }
+    })
     let ctx = null
     let stream = null
     const release = () => {

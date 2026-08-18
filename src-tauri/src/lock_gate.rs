@@ -210,6 +210,7 @@ pub const CHANNEL_OF_COMMAND: &[(&str, &str)] = &[
     ("stt_transcribe", "stt:transcribe"),
     ("stt_warmup", "stt:warmup"),
     ("stt_status", "stt:status"),
+    ("stt_download_model", "stt:downloadModel"),
     ("stt_begin", "stt:begin"),
     ("stt_append", "stt:append"),
     ("stt_finish", "stt:finish"),

@@ -439,6 +439,7 @@ pub fn run() {
             ipc::stt::stt_transcribe,
             ipc::stt::stt_warmup,
             ipc::stt::stt_status,
+            ipc::stt::stt_download_model,
             ipc::stt::stt_begin,
             ipc::stt::stt_append,
             ipc::stt::stt_finish,
