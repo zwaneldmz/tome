@@ -117,6 +117,20 @@ pub(crate) fn mentor_prompt_text(agent_ids: &[String], gate: bool) -> String {
     }
 }
 
+/// `voiceSystemPrompt()`, the persona chosen when `chat_send` is called with
+/// `voice: true`. The user is hands-free and the reply is read aloud, so the
+/// prompt drives short conversational answers (one to three brief sentences,
+/// no lists/code/markdown) while keeping the same tools as the assistant
+/// pane — the model still lists panes, reads terminals, types into them, and
+/// opens panes/files, saying aloud what it did. Interpolates the same
+/// agent-kinds parenthetical as [`system_prompt_text`].
+pub(crate) fn voice_prompt_text(agent_ids: &[String]) -> String {
+    format!(
+        "You are the voice assistant in Tome, a desktop coding harness whose grid holds terminal panes, agent CLI panes ({}), editors, documents, and note vaults. The user is talking to you hands-free and your reply is read aloud, so keep it short and conversational: one to three brief sentences, plain speech only — no lists, no code, no markdown. Acknowledge briefly, then answer. You have the same tools as the assistant pane: list panes, read a terminal's recent output, type into a terminal, open panes or files — use them when the user refers to other panes ('what is claude doing', 'run the tests over there', 'open a terminal') and say aloud what you did. type_in_terminal only submits when the user has enabled auto-run; otherwise say the text was left for them to press Enter.",
+        agent_kinds_text(agent_ids)
+    )
+}
+
 /// `TOOLS`, rebuilt fresh from `agent_ids` — see [`Conductor::tools`].
 pub(crate) fn tool_schemas(agent_ids: &[String]) -> Vec<Value> {
     vec![

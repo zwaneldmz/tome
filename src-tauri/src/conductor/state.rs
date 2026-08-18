@@ -369,6 +369,13 @@ impl Conductor {
     pub fn mentor_system_prompt(&self, gate: bool) -> String {
         super::tools::mentor_prompt_text(&self.agent_ids(), gate)
     }
+
+    /// `VOICE_SYSTEM`, the voice-session persona chosen when a `chat:send`
+    /// arrives with `voice: true` — same freshness rationale as
+    /// [`Self::system_prompt`].
+    pub fn voice_system_prompt(&self) -> String {
+        super::tools::voice_prompt_text(&self.agent_ids())
+    }
 }
 
 impl Default for Conductor {

@@ -401,7 +401,7 @@
     },
 
     chat: {
-      send: (id, messages, brainWs, verbose, gate) => call('chat_send', { id, messages, brainWs, verbose, gate }),
+      send: (id, messages, brainWs, verbose, gate, voice) => call('chat_send', { id, messages, brainWs, verbose, gate, voice }),
       abort: (id) => fire('chat_abort', { id }),
       providers: () => call('chat_providers'),
       complete: (messages, system) => call('chat_complete', { messages, system }),

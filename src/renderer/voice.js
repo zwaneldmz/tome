@@ -22,6 +22,7 @@ import { micIcon } from './icons.js'
 import { loadHistory, persistHistory, flushHistory } from './chat-history.js'
 import { encodeWav, floatToPcm16 } from '../shared/wav.js'
 import { makeVad } from '../shared/vad.js'
+import { nextSpeakChunk } from '../shared/tts.js'
 import { VOICE_CHAT_ID } from './chat-lifecycle.js'
 
 // Canonical id, per the WS-A contract: the voice session and a chat pane
@@ -185,16 +186,13 @@ function speak(text) {
   speechSynthesis.speak(u)
 }
 
-// Complete sentences in the not-yet-spoken tail of the reply. Short
-// sentences ride along with the next one — a lone "Yes." is exactly the
-// fragment that makes streamed TTS sound choppy.
-const MIN_SPEAK_CHARS = 24
+// Complete sentences in the not-yet-spoken tail of the reply, sized by
+// nextSpeakChunk (shared/tts.js) so a lone "Yes." never ships alone.
 function takeSentences() {
-  const tail = reply.slice(spokenUpTo)
-  const m = tail.match(/^[\s\S]*[.!?](?=\s|$)/)
-  if (!m || m[0].length < MIN_SPEAK_CHARS) return ''
-  spokenUpTo += m[0].length
-  return m[0]
+  const chunk = nextSpeakChunk(reply.slice(spokenUpTo))
+  if (!chunk) return ''
+  spokenUpTo += chunk.length
+  return chunk
 }
 
 function stopSpeaking() {
@@ -268,6 +266,13 @@ async function startListening() {
         stopSpeaking()
         setState('listening')
       }
+      // Interrupt-while-thinking: talking while the assistant is still
+      // composing cancels the in-flight turn and returns to the mic. The
+      // abort surfaces through onDone (aborted: true) — see below.
+      if (state === 'thinking') {
+        tome.chat.abort(VOICE_CHAT_ID)
+        setState('listening')
+      }
     },
     onSpeechEnd: () => {
       if (state === 'listening') endUtterance()
@@ -293,6 +298,8 @@ async function startListening() {
       }
     } else if (state === 'speaking' && bargeIn) {
       vad.push(c) // only listening for the barge-in onset
+    } else if (state === 'thinking' && bargeIn) {
+      vad.push(c) // also listening for the barge-in onset while composing
     }
   }
   ctx.createMediaStreamSource(stream).connect(proc)
@@ -413,7 +420,7 @@ function sendTurn(text) {
   setState('thinking')
   // Brain injection is OFF for voice (no brainWs): an ambient session has no
   // workspace context picked, and surprise vault reads are worse than none.
-  tome.chat.send(VOICE_CHAT_ID, history).catch((err) => {
+  tome.chat.send(VOICE_CHAT_ID, history, undefined, false, undefined, true).catch((err) => {
     onDone({ id: VOICE_CHAT_ID, error: err?.message || String(err) })
   })
 }
@@ -455,7 +462,9 @@ function onDone({ id, error, aborted }) {
     } else if (!aborted) {
       toast('voice turn failed — it is back in the transcript composer')
     }
-    toast(String(error))
+    // An abort during a thinking interrupt surfaces as error "Stopped." —
+    // that is a normal return to the mic, not a failure worth a toast.
+    if (!aborted) toast(String(error))
     setState('listening')
     return
   }
