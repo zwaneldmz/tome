@@ -85,7 +85,7 @@ footer a { color:var(--text); }
 </style>
 </head>
 <body>
-<header class="mast"><span class="name">tome · technical council</span><span class="tag">5 experts · 2026-08-15 · commit c12256f (+2 local)</span></header>
+<header class="mast"><a href="index.html" style="display:flex;align-items:center;gap:10px;text-decoration:none;"><img src="icon.png" width="256" height="256" alt="" style="width:22px;height:22px;border-radius:5px;"><span class="name" style="color:var(--bright);">tome · technical council</span></a><span class="tag">5 experts · 2026-08-15 · commit c12256f (+2 local)</span></header>
 
 <div class="wrap">
   <div class="hero">
@@ -188,7 +188,7 @@ footer a { color:var(--text); }
     <div class="meta">src-tauri/crates/tome-shim/src/linux.rs — <code>TODO(landlock)</code></div>
     <p>On macOS the seatbelt profile denies agent writes to <code>userData</code> and reads of the
       credential file. On Linux, <code>bubblewrap</code> + network namespaces block egress but there is
-      <em>no file-confinement layer yet</em> — an air-gapped agent can still read/write arbitrary files
+      <em>no file-confinement layer yet</em> — a network-contained agent can still read/write arbitrary files
       in the user's home. The README's "containment cell" framing overstates what Linux delivers today.</p>
     <p class="action">Action: implement Landlock (or a <code>--tmpfs</code>/bind-mount equivalent), or
       explicitly scope the Linux claim to "network isolation" until it lands.</p>

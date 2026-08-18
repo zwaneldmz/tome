@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Tome — one workspace for your coding agents, with the agents in a containment cell. Terminals, editors, documents, flows and an assistant share one tiling grid; every agent runs sandboxed with no direct network access unless you open a door for it.">
+<meta name="color-scheme" content="dark light">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Tome — one workspace for your coding agents">
+<meta property="og:description" content="Terminals, editors, documents, flows and an assistant in one grid — every agent sandboxed, with an allowlist proxy as the only route out.">
+<meta property="og:image" content="https://zwaneldmz.github.io/tome/screenshot.png">
+<link rel="icon" href="icon.png">
+<title>Tome — one workspace for your coding agents</title>
+<style>
+/* Tokens lifted from src/renderer/style.css and how-tome-works.html. Dark first. */
+:root {
+  color-scheme: dark;
+  --bg: #0b0b11;
+  --bg-sunken: #050508;
+  --surface-2: #151723;
+  --line: rgba(255, 255, 255, 0.09);
+  --line-2: rgba(255, 255, 255, 0.16);
+  --text: #c9d4e3;
+  --bright: #eef4fb;
+  --muted: #737e96;
+  --faint: #5d6780;
+  --accent: #00e5ff;
+  --accent-soft: rgba(0, 229, 255, 0.14);
+  --accent-ring: rgba(0, 229, 255, 0.4);
+  --accent-fg: #04121a;
+  --spark: #ff2ea6;
+  --ok: #3dff9e;
+  --no: #ff3b5c;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 18px -6px rgba(0, 0, 0, 0.7);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.6), 0 26px 56px -18px rgba(0, 0, 0, 0.9);
+
+  --r-xs: 5px; --r: 10px; --r-lg: 14px; --r-pill: 999px;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
+
+  --fs-micro: 11.5px; --fs-meta: 13px; --fs-ui: 15px; --fs-read: 17px;
+  --fs-title: 21px; --fs-section: 26px; --fs-display: clamp(29px, 5.4vw, 48px);
+  --measure: 66ch;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --bg-sunken: #eeeef2;
+    --surface-2: #f1f1f5;
+    --line: rgba(0, 0, 0, 0.1);
+    --line-2: rgba(0, 0, 0, 0.18);
+    --text: #35353d;
+    --bright: #101014;
+    --muted: #6b6b73;
+    --faint: #8a8a94;
+    --accent: #0071e3;
+    --accent-soft: rgba(0, 113, 227, 0.1);
+    --accent-ring: rgba(0, 113, 227, 0.3);
+    --accent-fg: #ffffff;
+    --spark: #d70a63;
+    --ok: #12925a;
+    --no: #d02a4d;
+    --shadow-1: 0 0.5px 1px rgba(0, 0, 0, 0.05), 0 4px 14px -4px rgba(0, 0, 0, 0.14);
+    --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.06), 0 22px 48px -16px rgba(0, 0, 0, 0.28);
+  }
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fs-read)/1.65 var(--sans);
+  overflow-wrap: break-word;
+}
+h1, h2, h3 { font-family: var(--mono); font-weight: 600; color: var(--bright); line-height: 1.2; letter-spacing: -0.01em; margin: 0; }
+p { margin: 0; }
+a { color: var(--accent); text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--r-xs); }
+img { max-width: 100%; height: auto; display: block; }
+code {
+  font-family: var(--mono); font-size: 0.86em; color: var(--bright);
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--r-xs); padding: 0.08em 0.34em;
+}
+.wrap { max-width: 880px; margin: 0 auto; padding: 0 20px; }
+
+/* ---- masthead ---- */
+.mast {
+  display: flex; align-items: center; gap: 10px;
+  padding: 18px 20px; max-width: 880px; margin: 0 auto;
+  font-family: var(--mono); font-size: var(--fs-meta);
+  border-bottom: 1px solid var(--line);
+}
+.mast img { width: 22px; height: 22px; border-radius: var(--r-xs); }
+.mast .name { color: var(--bright); font-weight: 600; }
+.mast nav { margin-left: auto; display: flex; gap: 4px; }
+.mast nav a { color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: var(--r-xs); border: 1px solid transparent; font-size: var(--fs-meta); }
+.mast nav a:hover { color: var(--accent); border-color: var(--line-2); }
+
+/* ---- hero ---- */
+.hero { padding: 48px 0 8px; text-align: center; }
+.hero .sigil { width: 64px; height: 64px; border-radius: var(--r); margin: 0 auto 22px; }
+.hero h1 { font-size: var(--fs-display); max-width: 24ch; margin: 0 auto; letter-spacing: -0.02em; }
+.hero .sub { color: var(--muted); margin: 20px auto 0; max-width: var(--measure); }
+.hero-cta { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 28px; }
+.cta {
+  display: inline-block; padding: 12px 22px;
+  font-family: var(--mono); font-size: var(--fs-ui);
+  color: var(--accent); text-decoration: none;
+  border: 1px solid var(--accent-ring); border-radius: var(--r-pill);
+}
+.cta:hover { border-color: var(--accent); }
+.cta-primary { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
+.cta-primary:hover { filter: brightness(1.05); }
+.cta-2 { color: var(--text); border-color: var(--line-2); }
+.cta-2:hover { border-color: var(--text); color: var(--bright); }
+
+.shot {
+  margin: 40px 0 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-1);
+}
+
+/* ---- sections ---- */
+.section { padding: 56px 0 0; }
+.section + .section { border-top: 1px solid var(--line); margin-top: 56px; }
+.section .label {
+  font-family: var(--mono); font-size: var(--fs-micro);
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted);
+  margin: 0 0 10px;
+}
+.section h2 { font-size: var(--fs-section); margin-bottom: 18px; max-width: var(--measure); }
+.section .lead { color: var(--muted); max-width: var(--measure); }
+
+/* ---- the one claim, stated as a diagram ---- */
+.claim {
+  margin: 28px 0 0;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+.claim .card {
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: 20px;
+}
+.claim .card h3 { font-size: var(--fs-title); margin-bottom: 10px; }
+.claim .card p { color: var(--muted); font-size: var(--fs-meta); }
+.claim .card .stat {
+  font-family: var(--mono); font-size: var(--fs-display); color: var(--bright);
+  line-height: 1; margin-bottom: 6px;
+}
+.claim .card .stat.cyan { color: var(--accent); }
+.claim .card .stat.green { color: var(--ok); }
+.claim .card .stat.pink { color: var(--spark); }
+
+/* ---- feature grid ---- */
+.grid { margin: 28px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.grid .item {
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: 18px 20px;
+}
+.grid .item h3 { font-size: var(--fs-ui); margin-bottom: 8px; }
+.grid .item p { color: var(--muted); font-size: var(--fs-meta); }
+
+/* ---- pages index ---- */
+.pages { margin: 28px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pages .item {
+  border: 1px solid var(--line); border-radius: var(--r-lg); padding: 18px 20px;
+  text-decoration: none; color: var(--text); display: block;
+  transition: border-color 0.2s var(--ease);
+}
+.pages .item:hover { border-color: var(--accent-ring); }
+.pages .item .tag {
+  font-family: var(--mono); font-size: var(--fs-micro); text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--accent); margin-bottom: 8px; display: block;
+}
+.pages .item h3 { font-size: var(--fs-title); margin-bottom: 6px; }
+.pages .item p { color: var(--muted); font-size: var(--fs-meta); }
+
+/* ---- footer ---- */
+.footer { border-top: 1px solid var(--line); margin-top: 64px; padding: 40px 0 90px; text-align: center; }
+.footer .links { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; margin-bottom: 16px; font-family: var(--mono); font-size: var(--fs-meta); }
+.footer p { color: var(--faint); font-size: var(--fs-meta); }
+
+@media (max-width: 719px) {
+  .claim, .grid, .pages { grid-template-columns: 1fr; }
+  .mast nav { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition: none !important; }
+}
+</style>
+</head>
+<body>
+<header class="mast">
+  <img src="icon.png" width="256" height="256" alt="The Tome app icon: a small book mark on a dark tile.">
+  <span class="name">tome</span>
+  <nav aria-label="Site">
+    <a href="how-tome-works.html">tour</a>
+    <a href="https://github.com/zwaneldmz/tome">source &#8599;</a>
+    <a href="https://github.com/zwaneldmz/tome/releases">releases &#8599;</a>
+  </nav>
+</header>
+
+<div class="wrap">
+  <section class="hero" aria-labelledby="title">
+    <img class="sigil" src="icon.png" width="256" height="256" alt="">
+    <h1 id="title">One workspace for your coding agents — with the agents in a containment cell.</h1>
+    <p class="sub">Terminals, editors, documents, flows and an assistant share one tiling grid. Every agent pane runs in an OS-level sandbox with no direct network access — raw sockets, SSH and DNS denied — and the only route out is a per-pane allowlist proxy that permits model-provider domains and nothing else. Opening that door takes a second factor and re-locks on a timer.</p>
+    <p class="hero-cta">
+      <a class="cta cta-primary" href="https://github.com/zwaneldmz/tome/releases">Download for macOS or Linux</a>
+      <a class="cta" href="how-tome-works.html">Take the tour &#8594;</a>
+      <a class="cta cta-2" href="https://github.com/zwaneldmz/tome">Read the source</a>
+    </p>
+    <figure class="shot"><img src="screenshot.png" width="2880" height="1800" alt="Tome running in dark mode: a project tree on the left, a zsh terminal pane in the middle, and on the right an assistant chat above an editor tab showing package.json."></figure>
+  </section>
+
+  <section class="section" aria-labelledby="h-claim">
+    <p class="label">The one claim</p>
+    <h2 id="h-claim">Sandboxed, with an allowlist proxy as the only route out.</h2>
+    <p class="lead">Everything else is evidence. The claim is stated as mechanism, not adjective.</p>
+    <div class="claim">
+      <div class="card"><h3>Contained</h3><p class="stat cyan">0</p><p>direct network routes from a contained pane — seatbelt on macOS, bubblewrap on Linux.</p></div>
+      <div class="card"><h3>Gated</h3><p class="stat green">1</p><p>route out — a per-pane CONNECT proxy allowing model-provider domains, opened behind a second factor.</p></div>
+      <div class="card"><h3>Audited</h3><p class="stat pink">5000</p><p>events kept in an append-only log of unlocks, blocked hosts, and assistant actions — actions, never payloads.</p></div>
+      <div class="card"><h3>Reviewed</h3><p class="stat">8.0</p><p>two independent reviews scored the codebase 8.0/10; findings tracked publicly.</p></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="h-grid">
+    <p class="label">What's in the grid</p>
+    <h2 id="h-grid">Agents, terminals, editors, documents, flows, notes.</h2>
+    <div class="grid">
+      <div class="item"><h3>Agents</h3><p>Claude Code, opencode, pi, and any CLI on your <code>PATH</code> — sandboxed by default.</p></div>
+      <div class="item"><h3>Flows</h3><p>Wire agents into a graph, run it headless, keep the products and the manifest.</p></div>
+      <div class="item"><h3>Assistant</h3><p>A chat that can drive the grid — read scrollback, open panes, type into terminals, with guardrails.</p></div>
+      <div class="item"><h3>Voice</h3><p>Push-to-talk, transcribed locally by whisper.cpp — audio never leaves the machine.</p></div>
+      <div class="item"><h3>Editor</h3><p>CodeMirror 6 with language auto-detect and LSP diagnostics.</p></div>
+      <div class="item"><h3>Git</h3><p>Branch chip, live counters, and a commit History pane.</p></div>
+      <div class="item"><h3>Documents</h3><p>PDFs, images, and converted <code>.docx</code>/<code>.xlsx</code> in sandboxed viewers.</p></div>
+      <div class="item"><h3>Brain</h3><p>A per-workspace markdown vault with <code>[[wikilinks]]</code> and a graph view.</p></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="h-pages">
+    <p class="label">Around the repo</p>
+    <h2 id="h-pages">Where to go next</h2>
+    <div class="pages">
+      <a class="item" href="how-tome-works.html"><span class="tag">Tour</span><h3>How Tome works</h3><p>Ten clickable steps through a real session — empty workspace to shipped pipeline.</p></a>
+      <a class="item" href="viibi.html"><span class="tag">Mascot</span><h3>Viibi</h3><p>Tome's bookmark sigil, animated across its five states.</p></a>
+      <a class="item" href="technical-council.html"><span class="tag">Review</span><h3>Technical council</h3><p>The independent technical review, findings and score.</p></a>
+      <a class="item" href="adoption-council.html"><span class="tag">Review</span><h3>Adoption council</h3><p>The open-source adoption review and launch counsel.</p></a>
+      <a class="item" href="https://github.com/zwaneldmz/tome/blob/main/docs/THREATMODEL.md"><span class="tag">Security</span><h3>Threat model</h3><p>The maintainer-facing invariants the sandbox and proxy must hold.</p></a>
+      <a class="item" href="https://github.com/zwaneldmz/tome/blob/main/SECURITY.md"><span class="tag">Security</span><h3>Reporting</h3><p>The security summary and how to report a vulnerability.</p></a>
+    </div>
+  </section>
+</div>
+
+<footer class="footer">
+  <div class="links">
+    <a href="https://github.com/zwaneldmz/tome">GitHub</a>
+    <a href="https://github.com/zwaneldmz/tome/releases">Releases</a>
+    <a href="https://github.com/zwaneldmz/tome/blob/main/CONTRIBUTING.md">Contributing</a>
+    <a href="https://github.com/zwaneldmz/tome/blob/main/LICENSE">License</a>
+  </div>
+  <p>MIT · macOS + Linux · Rust + Tauri v2</p>
+</footer>
+</body>
+</html>

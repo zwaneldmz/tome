@@ -1,6 +1,6 @@
 [package]
 name = "tome"
-version = "0.2.0"
+version = "0.3.0"
 description = "A coding harness: agents, terminals, editors, and chat in one bound workspace."
 authors = ["Lwando Zwane"]
 edition = "2021"

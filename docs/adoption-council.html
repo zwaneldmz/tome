@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tome — Open-Source Adoption Council</title>
+<style>
+:root {
+  --void: #060609; --panel: #0c0d15; --panel-2: #12141f;
+  --line: #1b1e2f; --line-2: #262b42;
+  --text: #c9d4e3; --bright: #eef4fb; --muted: #566179;
+  --cyan: #00e5ff; --cyan-dim: rgba(0,229,255,.14);
+  --magenta: #ff2ea6; --magenta-dim: rgba(255,46,166,.14);
+  --green: #3dff9e; --green-dim: rgba(61,255,158,.12);
+  --yellow: #ffd23e; --yellow-dim: rgba(255,210,62,.12);
+  --red: #ff3b5c; --red-dim: rgba(255,59,92,.12);
+  --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  --sans: system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; }
+html { scroll-behavior: smooth; }
+body { background: var(--void); color: var(--text); font-family: var(--sans); line-height: 1.6; }
+h1, h2, h3 { color: var(--bright); font-weight: 650; letter-spacing: .01em; }
+code, kbd { font-family: var(--mono); font-size: .88em; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: .1em .4em; color: var(--cyan); }
+a { color: var(--cyan); }
+
+nav#top {
+  position: sticky; top: 0; z-index: 50; display: flex; gap: 4px; align-items: center;
+  padding: 10px 18px; background: rgba(6,6,9,.92); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line); overflow-x: auto;
+}
+nav#top .brand { color: var(--bright); font-weight: 700; margin-right: 14px; white-space: nowrap; }
+nav#top .brand span { color: var(--cyan); }
+nav#top a {
+  color: var(--muted); text-decoration: none; font-size: 13px; padding: 4px 10px;
+  border-radius: 6px; white-space: nowrap; border: 1px solid transparent;
+}
+nav#top a:hover { color: var(--cyan); border-color: var(--line-2); }
+main { max-width: 1060px; margin: 0 auto; padding: 0 22px 120px; }
+section.chapter { padding-top: 70px; margin-top: -40px; }
+.lede { color: var(--muted); font-size: 15px; max-width: 74ch; }
+.lede b, .lede strong { color: var(--text); }
+
+header.hero { padding: 90px 0 50px; text-align: center; }
+header.hero h1 { font-size: clamp(30px, 5vw, 52px); }
+header.hero h1 em { font-style: normal; color: var(--cyan); text-shadow: 0 0 24px var(--cyan-dim); }
+header.hero p { color: var(--muted); margin: 14px auto 0; max-width: 62ch; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 26px; }
+.pill { font-family: var(--mono); font-size: 12px; color: var(--cyan); background: var(--cyan-dim); border: 1px solid var(--line-2); border-radius: 99px; padding: 4px 12px; }
+.pill.m { color: var(--magenta); background: var(--magenta-dim); }
+.pill.g { color: var(--green); background: var(--green-dim); }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 22px 24px; margin: 18px 0; }
+.card h3 { margin-bottom: 8px; }
+.card h3 .num { color: var(--magenta); font-family: var(--mono); font-size: .8em; margin-right: 8px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+@media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+.note { border-left: 3px solid var(--cyan); background: var(--cyan-dim); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 14px 0; font-size: 14px; }
+.note.verdict { border-left-color: var(--magenta); background: var(--magenta-dim); }
+
+ul.findings { list-style: none; padding: 0; margin: 12px 0 0; }
+ul.findings li { padding: 10px 0 10px 34px; position: relative; border-top: 1px solid var(--line); font-size: 14.5px; }
+ul.findings li:first-child { border-top: 0; }
+ul.findings li::before {
+  content: ""; position: absolute; left: 4px; top: 16px; width: 10px; height: 10px; border-radius: 3px;
+}
+ul.findings li.g::before { background: var(--green); box-shadow: 0 0 10px var(--green-dim); }
+ul.findings li.y::before { background: var(--yellow); }
+ul.findings li.o::before { background: #ff9f43; }
+ul.findings li.r::before { background: var(--red); }
+ul.findings li b { color: var(--bright); }
+.sev { font-family: var(--mono); font-size: 10.5px; padding: 2px 8px; border-radius: 99px; margin-right: 8px; vertical-align: 2px; }
+.sev.g { color: var(--green); background: var(--green-dim); }
+.sev.y { color: var(--yellow); background: var(--yellow-dim); }
+.sev.o { color: #ff9f43; background: rgba(255,159,67,.12); }
+.sev.r { color: var(--red); background: var(--red-dim); }
+
+table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+th { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line-2); }
+td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td b { color: var(--bright); }
+
+.expert-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.expert-head .seat { font-family: var(--mono); color: var(--magenta); font-size: 13px; }
+.expert-head .grade { margin-left: auto; }
+
+footer { text-align: center; color: var(--muted); font-size: 13px; padding: 60px 0 20px; border-top: 1px solid var(--line); margin-top: 60px; }
+footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<nav id="top">
+  <span class="brand">▚ tome <span>/ adoption council</span></span>
+  <a href="index.html">home</a>
+  <a href="#verdict">Verdict</a>
+  <a href="#e1">E1 · AI adoption</a>
+  <a href="#e2">E2 · Product</a>
+  <a href="#e3">E3 · Security</a>
+  <a href="#e4">E4 · Tech lead</a>
+  <a href="#e5">E5 · Open source</a>
+  <a href="#e6">E6 · Competitive</a>
+  <a href="#e7">E7 · DevRel</a>
+  <a href="#roadmap">Roadmap</a>
+</nav>
+
+<header class="hero">
+  <h1>The <em>adoption</em> council</h1>
+  <p>Seven experts, one question: <b style="color:var(--text)">would a tech lead champion Tome?</b>
+     Open-source, agent-agnostic coding harness — evaluated as a product a team stakes its credibility on.</p>
+  <div class="pills">
+    <span class="pill g">moat: governance plane</span>
+    <span class="pill">2× independent 8/10 code reviews</span>
+    <span class="pill">228 tests green</span>
+    <span class="pill m">gap: trust surface + packaging</span>
+  </div>
+</header>
+
+<main>
+
+<section class="chapter" id="verdict">
+  <h2>Verdict</h2>
+  <div class="note verdict">
+    Tome has a genuinely differentiated position — <b>the governance plane for agent CLIs</b>:
+    per-pane containment, seatbelt sandboxing, a human-gated conductor. That is the story for AI adoption
+    in B2B SaaS, where <b>shadow AI is now the top blocker</b>. But the repo under-sells it:
+    the README leads with window management, there are no releases, no CONTRIBUTING, and
+    macOS-only unsigned builds cap the champion motion. <b>The moat is policy-as-product;
+    the gap is trust surface and packaging.</b>
+  </div>
+  <p class="lede" style="margin-top:14px">Method: seven-expert review of the README, THREATMODEL.md,
+  the UX council report, both prior code reviews (pi 8.0/10, Kimi K3), the improvements plan/status,
+  and the flows feature plan. Every seat answered the same framing question from a tech lead's chair:
+  <i>"My engineers already have Claude Code / Cursor / Copilot — why would I champion this,
+  and what would make me walk away?"</i></p>
+</section>
+
+<section class="chapter" id="e1">
+  <div class="card">
+    <div class="expert-head">
+      <span class="seat">E1</span><h3>AI Adoption Strategist — B2B SaaS</h3>
+      <span class="grade"><span class="sev g">thesis 🟢</span> <span class="sev o">execution 🟠</span></span>
+    </div>
+    <p class="lede">Every B2B SaaS org has the same 2026 problem: engineers adopted agent CLIs bottoms-up,
+    security found out later, and now there's a spreadsheet of un-audited API keys. Tome's containment is the
+    <b>only shipping answer</b> to "how do I let my team run Claude Code without it being able to
+    <code>curl</code> my source anywhere on the internet."</p>
+    <ul class="findings">
+      <li class="g"><span class="sev g">🟢</span><b>The wedge is governance, not productivity.</b> "Agents, terminals, editors and chat in one grid" is a Cursor-adjacent pitch and loses. "Run any agent CLI behind a per-pane egress allowlist enforced by the macOS seatbelt, with a second factor to open the pipe" has no competitor. Lead with it.</li>
+      <li class="g"><span class="sev g">🟢</span><b>Agent-agnostic is an adoption superpower.</b> Claude Code, opencode, pi light up on PATH with no config — Tome rides every model wave instead of betting on one. The tool survives the next model switch.</li>
+      <li class="o"><span class="sev o">🟠</span><b>The buyer and the user are different people.</b> The champion is an IC; the approver is the tech lead; the blocker is security. The README speaks only to the champion. THREATMODEL.md is excellent but reads like maintainer notes — ship an evaluation-facing <code>SECURITY.md</code>.</li>
+      <li class="o"><span class="sev o">🟠</span><b>No audit trail.</b> Governance buyers ask "what did the agent do?" The blocked-host flash vanishes in 4 s. A persistent, exportable event log — conductor tool calls, unlocks, blocked egress — turns the containment from a feature into <b>evidence</b>.</li>
+      <li class="y"><span class="sev y">🟡</span><b>Flows are the team story.</b> A committed <code>.flow.json</code> is a code-reviewable multi-agent pipeline — the artifact a tech lead puts in a design doc. It's buried mid-README; it belongs in the hero.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="chapter" id="e2">
+  <div class="card">
+    <div class="expert-head">
+      <span class="seat">E2</span><h3>Dev-Tools Product Manager</h3>
+      <span class="grade"><span class="sev o">🟠</span></span>
+    </div>
+    <ul class="findings">
+      <li class="g"><span class="sev g">🟢</span><b>Clear ICP:</b> senior IC / tech lead at a 20–500 person SaaS company, macOS-heavy eng org, already paying for agent CLIs, nervous about egress. Real and reachable.</li>
+      <li class="r"><span class="sev r">🔴</span><b>Zero onboarding path for a team.</b> Workspaces, flows and allowlists are per-machine. The first thing a tech lead wants is "commit a recommended Tome config so my team gets the same setup." <code>.tome/flows/</code> proves the instinct — extend it to workspace definitions and allowlists as committable files.</li>
+      <li class="o"><span class="sev o">🟠</span><b>The conductor's default-off auto-run is the right product call</b> — market it: "the assistant proposes, you dispose." It captures the anti-Cursor sentiment precisely.</li>
+      <li class="o"><span class="sev o">🟠</span><b>Docs assume discovery.</b> Glyph iconography plus hidden tear-off/tabs means a 10-minute evaluation never finds the best features. <code>how-tome-works.html</code> is the best onboarding asset you have — link it from the README's first screen.</li>
+      <li class="y"><span class="sev y">🟡</span><b>Version optics:</b> v0.1.0 and <code>private: true</code> matter less than installability — see E5.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="chapter" id="e3">
+  <div class="card">
+    <div class="expert-head">
+      <span class="seat">E3</span><h3>Security Engineer — the approver</h3>
+      <span class="grade"><span class="sev g">core 🟢</span> <span class="sev o">surface 🟠</span></span>
+    </div>
+    <p class="lede">Reviewed THREATMODEL.md against both prior code reviews. The strongest part of the project.</p>
+    <ul class="findings">
+      <li class="g"><span class="sev g">🟢</span><b>The load-bearing invariants are correct:</b> proxy-widens-never-sandbox, lock-gate wrapping <code>ipcMain.handle</code> (fail-closed by construction), vetted pane kinds, the conductor auto-run guard in main with control-char stripping, second-factor pane unlock. Two independent reviewers at 8/10 is a <b>marketable fact</b>.</li>
+      <li class="g"><span class="sev g">🟢</span><b>The confused-deputy loop is named and capped.</b> Scrollback→model→tool-call is the exact attack security teams worry about; a written, bounded answer (ANSI-stripped scrollback, 8-turn cap, human-gated submit) puts Tome ahead of tools that haven't thought about it.</li>
+      <li class="r"><span class="sev r">🔴</span><b>Unsigned builds kill the enterprise motion.</b> <code>identity: null</code> means Gatekeeper blocks the app; no tech lead can hand an unsigned binary to their security team. Signing + notarization is table stakes. Until then, document the <code>xattr</code> workaround — silence reads as naivety.</li>
+      <li class="o"><span class="sev o">🟠</span><b><code>TOME_SHOT</code> auth bypass</b> is gated on <code>!app.isPackaged</code> per WS2 — keep it verifiable in CI so it can't regress into a packaged build.</li>
+      <li class="o"><span class="sev o">🟠</span><b>Supply-chain provenance:</b> the SheetJS CDN pin is well documented (§7); add CI-built release artifacts so "the binary matches the repo" is checkable.</li>
+      <li class="y"><span class="sev y">🟡</span><b>TOTP at rest:</b> confirm <code>safeStorage</code> encryption shipped (WS2) — it's a checklist line item in every security review.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="chapter" id="e4">
+  <div class="card">
+    <div class="expert-head">
+      <span class="seat">E4</span><h3>Staff Engineer / Tech Lead — the champion</h3>
+      <span class="grade"><span class="sev o">🟠</span></span>
+    </div>
+    <p class="lede">Simulated evaluation: clone, 10 minutes, decide whether to pilot with two engineers for a week.</p>
+    <ul class="findings">
+      <li class="g"><span class="sev g">🟢</span><b>"Real PTY, login shell, your prompt, your keybindings"</b> — this sentence sells to exactly me. Keep it verbatim in the hero.</li>
+      <li class="g"><span class="sev g">🟢</span><b>The conductor is the daily-driver feature.</b> "What is claude doing in the other pane?" — cross-pane awareness is what tmux + 4 terminal windows can't do, and the human-gated submit makes it trustworthy enough to leave on.</li>
+      <li class="r"><span class="sev r">🔴</span><b>I can't install it.</b> No releases, no Homebrew cask. My evaluation starts with <code>npm run package</code> and an unsigned-app warning. Every other tool I evaluate this quarter installs in one command. Highest-leverage fix in this report.</li>
+      <li class="o"><span class="sev o">🟠</span><b>macOS-only halves my team.</b> Say the quiet part: "macOS first; Linux is design-compatible" — the proxy-not-sandbox architecture genuinely ports. Otherwise I assume personal project and move on.</li>
+      <li class="o"><span class="sev o">🟠</span><b>Maturity signals are invisible:</b> 228 tests, CI, threat model, two independent reviews — none of it visible from the README. A badges row and a "Project maturity" section do disproportionate work.</li>
+      <li class="y"><span class="sev y">🟡</span><b>Electron footprint</b> with 6+ ptys — someone will ask. One measured line preempts the HN thread.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="chapter" id="e5">
+  <div class="card">
+    <div class="expert-head">
+      <span class="seat">E5</span><h3>Open-Source Strategy</h3>
+      <span class="grade"><span class="sev r">🔴</span></span>
+    </div>
+    <ul class="findings">
+      <li class="g"><span class="sev g">🟢</span><b>MIT license</b> — right call for bottoms-up dev-tool adoption. No hesitation.</li>
+      <li class="r"><span class="sev r">🔴</span><b><code>"private": true</code> while calling it open source</b> — trivial fix, but it signals the repo isn't ready. Same for the missing pieces: no CONTRIBUTING, no issue templates, no roadmap. A tech lead evaluating <i>dependence</i> on a solo-maintainer project judges bus factor by exactly these.</li>
+      <li class="o"><span class="sev o">🟠</span><b>Distribution is the open-source product.</b> A Homebrew cask is the install path this audience trusts — and it forces the signing/notarization fix (E3), killing two findings with one pipeline.</li>
+      <li class="o"><span class="sev o">🟠</span><b>The moat is policy, and policy wants to be data.</b> If the allowlist becomes committable (<code>.tome/airgap.json</code>) with org presets shared on GitHub, Tome gains a network effect no pane feature can produce: teams publishing their policies. The engine stays MIT; hosted policy distribution is the eventual honest business.</li>
+      <li class="y"><span class="sev y">🟡</span><b>Community fuel:</b> a <code>tome-flows</code> examples repo demonstrates the conductor story better than any screencast.</li>
+      <li class="y"><span class="sev y">🟡</span><b>Release cadence:</b> even monthly tags signal life. The git history shows intense development; the public surface shows none of it.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="chapter" id="e6">
+  <div class="card">
+    <div class="expert-head">
+      <span class="seat">E6</span><h3>Competitive Analyst</h3>
+      <span class="grade"><span class="sev o">🟠</span></span>
+    </div>
+    <table>
+      <tr><th>Tool</th><th>What it is</th><th>Tome's angle</th></tr>
+      <tr><td><b>Cursor / VS Code + Copilot</b></td><td>Editor-first, single-model, cloud-routed</td><td>Agent-agnostic, local-first, no editor lock-in</td></tr>
+      <tr><td><b>Claude Code / opencode / pi</b></td><td>One agent, one terminal, full network access</td><td>Tome wraps <i>any</i> of them in egress policy + orchestration</td></tr>
+      <tr><td><b>Warp</b></td><td>Modern terminal, AI features, their cloud</td><td>Real PTYs, your shell, no account, containment</td></tr>
+      <tr><td><b>tmux + iTerm</b></td><td>The actual incumbent</td><td>Conductor (cross-pane awareness), flows (repeatable graphs), editors/docs in-grid</td></tr>
+      <tr><td><b>Zed</b></td><td>Fast editor, collab focus</td><td>Different category — Tome is a harness, not an editor</td></tr>
+    </table>
+    <ul class="findings">
+      <li class="g"><span class="sev g">🟢</span><b>Defensible niche:</b> nobody else combines agent-agnostic PTY hosting + per-pane egress enforcement + a human-gated orchestrating assistant + committable multi-agent graphs. Any two exist somewhere; all four don't.</li>
+      <li class="o"><span class="sev o">🟠</span><b>Category risk:</b> if Anthropic/OpenAI ship first-party sandboxed team offerings, the wedge narrows. Mitigation: speed, policy-as-data (E5), and being the Switzerland layer when teams run 2–3 agent CLIs at once — they do.</li>
+      <li class="o"><span class="sev o">🟠</span><b>"Harness" is not a category anyone searches for.</b> First line should name the job: "Run your coding agents in a containment cell, in one workspace."</li>
+      <li class="y"><span class="sev y">🟡</span><b>Watch:</b> VS Code's agent-hosting APIs and Warp's team features — both one release away from nibbling the wedge.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="chapter" id="e7">
+  <div class="card">
+    <div class="expert-head">
+      <span class="seat">E7</span><h3>Developer Relations</h3>
+      <span class="grade"><span class="sev o">🟠</span></span>
+    </div>
+    <ul class="findings">
+      <li class="g"><span class="sev g">🟢</span><b>The assets are unusually good:</b> <code>how-tome-works.html</code> is a better launch artifact than most funded startups produce; the threat model is a credibility weapon with exactly this audience.</li>
+      <li class="r"><span class="sev r">🔴</span><b>The README buries the lede.</b> Current order: workspaces → panes → appearance → … → containment near the bottom. A tech lead's evaluation order is: <i>what is it → why trust it → how do I install it → what does it cost my team</i>. Reorder accordingly.</li>
+      <li class="o"><span class="sev o">🟠</span><b>One demo beats ten bullets.</b> The killer 60-second clip: spawn claude in a contained pane, watch it fail to reach a non-allowlisted host, unlock with Touch ID + TOTP, watch the conductor ask the other pane what it's doing. The whole moat in one take.</li>
+      <li class="o"><span class="sev o">🟠</span><b>Launch sequencing:</b> Show HN with the threat model + containment story — the security angle travels. r/commandline and the Claude Code/opencode communities are warmer first audiences than r/programming.</li>
+      <li class="y"><span class="sev y">🟡</span><b>Identity:</b> "Tome" + the ▚ glyph is distinctive and thematically coherent — keep it, but make the tagline do the explaining.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="chapter" id="roadmap">
+  <h2>Consensus roadmap</h2>
+  <p class="lede">Ranked by adoption impact per unit of effort.</p>
+  <div class="card">
+    <table>
+      <tr><th>#</th><th>Pri</th><th>Item</th><th>Seats</th><th>Effort</th></tr>
+      <tr><td>1</td><td><span class="sev r">P0</span></td><td><b>Signed + notarized builds, GitHub releases, Homebrew cask</b></td><td>E3 E4 E5</td><td>M</td></tr>
+      <tr><td>2</td><td><span class="sev r">P0</span></td><td><b>README reorder:</b> governance hero → containment demo → install → conductor → features; badges row</td><td>E4 E6 E7</td><td>S</td></tr>
+      <tr><td>3</td><td><span class="sev r">P0</span></td><td><b><code>SECURITY.md</code> + <code>CONTRIBUTING.md</code> + issue templates</b>; flip <code>private: true</code></td><td>E5 E3</td><td>S</td></tr>
+      <tr><td>4</td><td><span class="sev o">P1</span></td><td>Committable team config: <code>.tome/</code> workspace + allowlist in-repo</td><td>E1 E2 E5</td><td>M</td></tr>
+      <tr><td>5</td><td><span class="sev o">P1</span></td><td>Persistent, exportable event log: conductor tool calls, unlocks, blocked egress</td><td>E1 E3</td><td>M</td></tr>
+      <tr><td>6</td><td><span class="sev o">P1</span></td><td>60-second containment demo clip + flows example repo</td><td>E7 E5</td><td>S</td></tr>
+      <tr><td>7</td><td><span class="sev o">P1</span></td><td>Linux statement in README (design-compatible; proxy ports, sandbox TBD)</td><td>E4 E6</td><td>XS</td></tr>
+      <tr><td>8</td><td><span class="sev y">P2</span></td><td>Policy-as-data: shareable allowlist presets, org distribution story</td><td>E5 E1</td><td>M</td></tr>
+      <tr><td>9</td><td><span class="sev y">P2</span></td><td>CI-built release artifacts (binary matches repo) + release cadence</td><td>E3 E5</td><td>M</td></tr>
+      <tr><td>10</td><td><span class="sev y">P2</span></td><td>Memory/perf one-pager: footprint with N ptys</td><td>E4</td><td>S</td></tr>
+    </table>
+  </div>
+  <div class="note">
+    <b>Summary:</b> Tome's engineering credibility is already where it needs to be — two independent 8/10
+    reviews, a real threat model, 228 green tests. What's missing is everything <i>around</i> the code that
+    lets a tech lead stake their credibility on it: an installable signed artifact, a README that leads with
+    the governance wedge, and team-shareable policy. <b>Ship P0 and the containment does the marketing.</b>
+  </div>
+</section>
+
+<footer>
+  Tome adoption council · 2026-08-09 · companions:
+  <a href="how-tome-works.html">how tome works</a> ·
+  <a href="ux-council-report.md">ux council</a> ·
+  <a href="THREATMODEL.md">threat model</a> ·
+  <a href="adoption-council-report.md">markdown source</a>
+</footer>
+
+</main>
+</body>
+</html>

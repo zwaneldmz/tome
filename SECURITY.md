@@ -44,7 +44,7 @@ invariants live in [docs/THREATMODEL.md](docs/THREATMODEL.md).
 ## Key invariants
 
 - **Second-factor pane unlock.** App login already proves the passphrase (or
-  Touch ID); freeing an air-gapped pane therefore demands a *second* factor —
+  Touch ID); freeing a contained pane therefore demands a *second* factor —
   the TOTP code when enrolled, the passphrase again otherwise
   (`src-tauri/src/authlock.rs`).
 - **Credentials and allowlist are unreachable from panes.** The seatbelt
@@ -75,7 +75,7 @@ invariants live in [docs/THREATMODEL.md](docs/THREATMODEL.md).
 - **The event log records actions, never payloads.**
   `<app_data_dir>/events.jsonl` keeps a capped, append-only audit of
   security-relevant actions — conductor tool calls (name, ids, outcome),
-  air-gap unlocks/relocks, blocked egress hosts
+  pane unlocks/relocks, blocked egress hosts
   (`src-tauri/src/eventlog.rs`, cap 5000; `src-tauri/src/events.rs`). Tool
   inputs/outputs and typed text stay out by design: they may contain
   secrets. The renderer reads it only through the lock-gated `events:list`

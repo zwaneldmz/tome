@@ -15,6 +15,11 @@ reviews/validation/*
 docs/*
 !docs/AFFORDANCES-PLAN.md
 !docs/how-tome-works.html
+!docs/index.html
+!docs/banner.svg
+!docs/viibi.html
+!docs/adoption-council.html
+!docs/affordance-mockups.html
 !docs/icon.png
 !docs/screenshot.png
 !docs/tour-*.png
