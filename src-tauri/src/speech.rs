@@ -23,7 +23,11 @@
 //! Objective-C state (`SFSpeechRecognizer`, the request, the audio buffer,
 //! the result-handler block) is created, used, and dropped entirely inside
 //! the blocking closure — nothing Objective-C crosses an await point,
-//! exactly like `touchid.rs`'s `LAContext`.
+//! exactly like `touchid.rs`'s `LAContext`. The recognition rendezvous is
+//! bounded by `stt::DEFAULT_TIMEOUT` so a framework that never fires its
+//! result handler can't hang the thread forever; only the user-driven
+//! authorization wait is unbounded (the user may take as long as they
+//! like).
 
 /// The one string shown when Speech Recognition authorization is denied or
 /// restricted — the user has to flip it in System Settings; nothing in-app
@@ -32,11 +36,29 @@
 const DENIED: &str = "Speech Recognition is disabled for Tome. Enable it in \
                        System Settings → Privacy & Security → Speech Recognition, then try again.";
 
-/// The error surfaced when the recognizer produced no text. Kept here (not
-/// in `stt.rs`) because it is Apple-path-specific, unlike the shared
-/// `stt::APPLE_UNAVAILABLE` availability message.
+/// The error surfaced when the recognizer produced no text.
 #[cfg(target_os = "macos")]
 const NO_TEXT: &str = "Speech recognition returned no text.";
+
+/// The error surfaced when the WAV header isn't the canonical RIFF/WAVE/fmt
+/// layout the renderer produces — a malformed payload fails loudly rather
+/// than running recognition over garbage and returning an empty transcript.
+const MALFORMED: &str = "Speech recognition received malformed audio.";
+
+/// The error surfaced when the WAV is a well-formed header with no sample
+/// data at all.
+const NO_AUDIO: &str = "Speech recognition received no audio.";
+
+/// The on-device readiness probe shared by [`apple_available`] (status
+/// reporting) and [`transcribe_on_device`] (the pre-task availability
+/// check): the recognizer must report itself available AND able to
+/// recognize without a network. A pure read, never a prompt.
+#[cfg(target_os = "macos")]
+fn supports_on_device(recognizer: &objc2_speech::SFSpeechRecognizer) -> bool {
+    // SAFETY: both getters are pure reads that never prompt; the caller
+    // guarantees `recognizer` is a valid, retained instance.
+    unsafe { recognizer.isAvailable() && recognizer.supportsOnDeviceRecognition() }
+}
 
 /// The real on-device availability probe (`resolve_engine` calls this, not a
 /// stub): true when an `SFSpeechRecognizer` can be built for the system
@@ -54,13 +76,14 @@ pub fn apple_available() -> bool {
     // when the system locale isn't a supported dictation locale, and
     // objc2's `new()` panics on a nil return — `init` returns `Option`, so
     // a nil recognizer is handled as "not available" instead of crashing.
+    // SAFETY: `alloc` is always safe (it never raises the TCC prompt), and
+    // `init` merely constructs the recognizer — nil is its documented
+    // "not supported" signal, returned as `None` here.
     let recognizer = unsafe { SFSpeechRecognizer::init(SFSpeechRecognizer::alloc()) };
     let Some(recognizer) = recognizer else {
         return false;
     };
-    // SAFETY: both getters are pure reads that never prompt; the recognizer
-    // is a valid, retained instance at this point.
-    unsafe { recognizer.isAvailable() && recognizer.supportsOnDeviceRecognition() }
+    supports_on_device(&recognizer)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -69,14 +92,15 @@ pub fn apple_available() -> bool {
 }
 
 /// Parses a canonical 44-byte-header mono int16 WAV into Float32 samples
-/// plus the sample rate. Pure and testable; the renderer only ever sends
-/// the standard `fmt `+`data` layout, so the data payload is simply
+/// plus the sample rate. Pure and cross-platform; the renderer only ever
+/// sends the standard `fmt `+`data` layout, so the data payload is simply
 /// everything after the 44-byte header (no `LIST`/`INFO` chunk walk
-/// needed).
-#[cfg(target_os = "macos")]
+/// needed). The RIFF/WAVE/fmt magic check rejects non-WAV input loudly
+/// instead of transcribing garbage into an empty result.
 fn parse_wav(wav: &[u8]) -> Result<(Vec<f32>, u32), String> {
-    if wav.len() < 44 {
-        return Err("stt: bad audio payload".to_string());
+    if wav.len() < 44 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" || &wav[12..16] != b"fmt "
+    {
+        return Err(MALFORMED.to_string());
     }
     let sample_rate = u32::from_le_bytes([wav[24], wav[25], wav[26], wav[27]]);
     let samples: Vec<f32> = wav[44..]
@@ -88,7 +112,7 @@ fn parse_wav(wav: &[u8]) -> Result<(Vec<f32>, u32), String> {
         })
         .collect();
     if samples.is_empty() {
-        return Err("stt: bad audio payload".to_string());
+        return Err(NO_AUDIO.to_string());
     }
     Ok((samples, sample_rate))
 }
@@ -125,6 +149,10 @@ fn transcribe_on_device(samples: &[f32], sample_rate: u32) -> Result<String, Str
 
     // 1. An AVAudioFormat matching the WAV: parsed sample rate, mono,
     //    deinterleaved Float32.
+    // SAFETY: `alloc`/`initStandardFormatWithSampleRate_channels` only build
+    // an immutable format descriptor from the caller's sample rate/channel
+    // count — no audio, no prompt — and a nil return (handled below) is its
+    // only failure mode.
     let format = unsafe {
         AVAudioFormat::initStandardFormatWithSampleRate_channels(
             AVAudioFormat::alloc(),
@@ -138,6 +166,9 @@ fn transcribe_on_device(samples: &[f32], sample_rate: u32) -> Result<String, Str
 
     // 2. An AVAudioPCMBuffer sized to hold every sample, filled in-place.
     let frame_count = samples.len() as u32;
+    // SAFETY: `alloc`/`initWithPCMFormat_frameCapacity` allocate a plain PCM
+    // buffer for the given format; a nil return (handled below) is its only
+    // failure mode, and no samples are read or written here.
     let buffer = unsafe {
         AVAudioPCMBuffer::initWithPCMFormat_frameCapacity(
             AVAudioPCMBuffer::alloc(),
@@ -148,13 +179,13 @@ fn transcribe_on_device(samples: &[f32], sample_rate: u32) -> Result<String, Str
     let Some(buffer) = buffer else {
         return Err("Speech recognition: could not allocate an audio buffer.".to_string());
     };
+    // SAFETY: floatChannelData() returns a pointer to `channelCount` pointers
+    // to float; deinterleaved mono has exactly one channel, so deref the
+    // array once to reach channel 0's buffer and copy the run in. The
+    // destination holds exactly `frameCapacity` floats (we just allocated it
+    // with `samples.len()`), so `copy_nonoverlapping` is in bounds and the
+    // two regions can never alias.
     unsafe {
-        // floatChannelData() returns a pointer to `channelCount` pointers to
-        // float; deinterleaved mono has exactly one channel, so deref the
-        // array once to reach channel 0's buffer and copy the run in. The
-        // destination holds exactly `frameCapacity` floats (we just allocated
-        // it with `samples.len()`), so `copy_nonoverlapping` is in bounds and
-        // the two regions can never alias.
         let channel = *buffer.floatChannelData();
         std::ptr::copy_nonoverlapping(samples.as_ptr(), channel.as_ptr(), samples.len());
         buffer.setFrameLength(frame_count);
@@ -162,7 +193,12 @@ fn transcribe_on_device(samples: &[f32], sample_rate: u32) -> Result<String, Str
 
     // 3. The batch request: on-device only, no partial results, all audio
     //    up front.
+    // SAFETY: `new()` allocates an empty request object — no prompt, no
+    // audio — and cannot return nil for this class.
     let request = unsafe { SFSpeechAudioBufferRecognitionRequest::new() };
+    // SAFETY: these setters/append/end only configure the freshly created
+    // request with already-owned values; no borrowed pointer escapes the
+    // call, so nothing can outlive `buffer`/`request` below.
     unsafe {
         // requiresOnDeviceRecognition/shouldReportPartialResults live on the
         // base SFSpeechRecognitionRequest — reach them through as_super().
@@ -174,14 +210,17 @@ fn transcribe_on_device(samples: &[f32], sample_rate: u32) -> Result<String, Str
 
     // 4. Recognizer + availability + authorization, all before the task
     //    starts so a denied/unavailable device never spins one up.
+    // SAFETY: `alloc`/`init` construct the recognizer (nil → `None`, handled
+    // below); this reads availability/auth status only, never prompts.
     let recognizer = unsafe { SFSpeechRecognizer::init(SFSpeechRecognizer::alloc()) };
     let Some(recognizer) = recognizer else {
         return Err(crate::stt::APPLE_UNAVAILABLE.to_string());
     };
-    let available = unsafe { recognizer.isAvailable() && recognizer.supportsOnDeviceRecognition() };
-    if !available {
+    if !supports_on_device(&recognizer) {
         return Err(crate::stt::APPLE_UNAVAILABLE.to_string());
     }
+    // SAFETY: `authorizationStatus` is a pure class-method read of the app's
+    // current TCC state; it never raises the prompt.
     let status = unsafe { SFSpeechRecognizer::authorizationStatus() };
     if status == SFSpeechRecognizerAuthorizationStatus::Denied
         || status == SFSpeechRecognizerAuthorizationStatus::Restricted
@@ -196,10 +235,14 @@ fn transcribe_on_device(samples: &[f32], sample_rate: u32) -> Result<String, Str
             // left to report to.
             let _ = tx.send(status);
         });
-        // requestAuthorization raises the one-time TCC prompt; its reply
-        // block delivers the user's answer on an arbitrary queue, which the
-        // mpsc rendezvous hands back to this blocking thread.
+        // SAFETY: `requestAuthorization` posts a request and returns
+        // immediately; the reply block (`handler`) is a valid heap block that
+        // outlives the call (it lives until this function returns).
         unsafe { SFSpeechRecognizer::requestAuthorization(&handler) };
+        // Unbounded by design: this waits on the user's answer to the system
+        // TCC prompt (mirroring touchid.rs's `evaluatePolicy` wait) — the
+        // user may take as long as they like, and the reply block fires only
+        // once they respond, so a timeout would be wrong here.
         let status = rx
             .recv()
             .unwrap_or(SFSpeechRecognizerAuthorizationStatus::Denied);
@@ -214,6 +257,9 @@ fn transcribe_on_device(samples: &[f32], sample_rate: u32) -> Result<String, Str
     let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
     let handler = block2::RcBlock::new(
         move |result: *mut SFSpeechRecognitionResult, err: *mut NSError| {
+            // SAFETY: the Speech framework hands this block either a non-null
+            // result or a non-null error; `as_ref` only reads that pointer's
+            // pointee while it is valid for the duration of the callback.
             if let Some(result) = unsafe { result.as_ref() } {
                 let text = unsafe { result.bestTranscription().formattedString().to_string() };
                 let _ = tx.send(Ok(text));
@@ -228,14 +274,23 @@ fn transcribe_on_device(samples: &[f32], sample_rate: u32) -> Result<String, Str
     );
     // Keep the task alive until the block fires — dropping it cancels
     // recognition mid-flight. recognizer/request/buffer/format/handler stay
-    // alive too: they all drop only after rx.recv() returns below.
+    // alive too: they all drop only after the recv below returns.
+    // SAFETY: `recognitionTaskWithRequest_resultHandler` starts recognition
+    // on the (valid, retained) recognizer with the (valid, retained) request
+    // and the heap block; every argument outlives the call.
     let _task = unsafe {
         recognizer.recognitionTaskWithRequest_resultHandler(request.as_super(), &handler)
     };
 
-    let text = rx
-        .recv()
-        .unwrap_or_else(|_| Err("Speech recognition failed.".to_string()))?;
+    // The whisper path guards with stt::DEFAULT_TIMEOUT (60s); the Speech
+    // framework makes no completion guarantee, so the recognition rendezvous
+    // gets the same hard cap — a result handler that never fires must not
+    // hang this blocking thread forever.
+    let text = match rx.recv_timeout(crate::stt::DEFAULT_TIMEOUT) {
+        Ok(Ok(text)) => text,
+        Ok(Err(e)) => return Err(e),
+        Err(_) => return Err("Speech recognition timed out.".to_string()),
+    };
     if text.trim().is_empty() {
         return Err(NO_TEXT.to_string());
     }
@@ -245,6 +300,29 @@ fn transcribe_on_device(samples: &[f32], sample_rate: u32) -> Result<String, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Builds a canonical 44-byte-header mono int16 WAV around `data` at the
+    /// given sample rate — the exact shape the renderer's encoder produces,
+    /// so the parse tests exercise the real header layout.
+    fn make_wav(sample_rate: u32, data: &[u8]) -> Vec<u8> {
+        let data_len = data.len() as u32;
+        let mut wav = Vec::with_capacity(44 + data.len());
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+        wav.extend_from_slice(b"WAVE");
+        wav.extend_from_slice(b"fmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes()); // fmt chunk size
+        wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+        wav.extend_from_slice(&sample_rate.to_le_bytes());
+        wav.extend_from_slice(&(sample_rate * 2).to_le_bytes()); // byte rate
+        wav.extend_from_slice(&2u16.to_le_bytes()); // block align
+        wav.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        wav.extend_from_slice(data);
+        wav
+    }
 
     /// On the macOS dev host this is a real hardware/framework probe, so it
     /// only asserts the call doesn't crash and returns a bool — the actual
@@ -267,29 +345,15 @@ mod tests {
         assert!(err.contains("not available"));
     }
 
-    // ---- parse_wav — the one piece of pure logic in this module, worth
-    // pinning on the macOS host since the real recognizer can't run in CI.
+    // ---- parse_wav — pure cross-platform logic, worth pinning on every OS
+    // since the real recognizer can't run in CI at all.
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn parse_wav_reads_sample_rate_and_converts_int16_pcm_to_f32() {
-        let sample_rate = 16_000u32;
-        let mut wav = Vec::new();
-        wav.extend_from_slice(b"RIFF");
-        wav.extend_from_slice(&36u32.to_le_bytes());
-        wav.extend_from_slice(b"WAVE");
-        wav.extend_from_slice(b"fmt ");
-        wav.extend_from_slice(&16u32.to_le_bytes()); // fmt chunk size
-        wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
-        wav.extend_from_slice(&1u16.to_le_bytes()); // mono
-        wav.extend_from_slice(&sample_rate.to_le_bytes());
-        wav.extend_from_slice(&(sample_rate * 2).to_le_bytes()); // byte rate
-        wav.extend_from_slice(&2u16.to_le_bytes()); // block align
-        wav.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
-        wav.extend_from_slice(b"data");
-        wav.extend_from_slice(&4u32.to_le_bytes()); // data length = 2 samples
-        wav.extend_from_slice(&16_384i16.to_le_bytes());
-        wav.extend_from_slice(&(-32_768i16).to_le_bytes());
+        let mut data = Vec::new();
+        data.extend_from_slice(&16_384i16.to_le_bytes());
+        data.extend_from_slice(&(-32_768i16).to_le_bytes());
+        let wav = make_wav(16_000, &data);
 
         let (samples, rate) = parse_wav(&wav).unwrap();
         assert_eq!(rate, 16_000);
@@ -298,9 +362,21 @@ mod tests {
         assert_eq!(samples[1], -1.0);
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn parse_wav_rejects_a_truncated_header() {
         assert!(parse_wav(&[0u8; 20]).is_err());
+    }
+
+    #[test]
+    fn parse_wav_rejects_non_wav_magic_bytes() {
+        // 64 zero bytes: right length, wrong RIFF/WAVE/fmt magic.
+        let err = parse_wav(&[0u8; 64]).unwrap_err();
+        assert!(err.contains("malformed"), "{err}");
+    }
+
+    #[test]
+    fn parse_wav_rejects_a_header_with_no_samples() {
+        let err = parse_wav(&make_wav(16_000, &[])).unwrap_err();
+        assert!(err.contains("no audio"), "{err}");
     }
 }

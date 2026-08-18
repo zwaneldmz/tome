@@ -89,21 +89,18 @@ pub async fn stt_transcribe(
         });
     }
 
-    let bin = stt::whisper_bin(whisper_bin_override().as_deref());
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let model = stt::model_path(&dir);
-    if let Some(why) = stt::stt_unavailable(bin.as_deref(), &model) {
+    // Whisper path: `resolve_engine` already walked `$PATH` for the binary,
+    // resolved the model path, and ran `stt_unavailable` — reuse those
+    // results rather than recomputing them here.
+    if let Some(why) = resolved.whisper_why.as_deref() {
         return Ok(json!({ "error": why }));
     }
     let temp_dir = app.path().temp_dir().map_err(|e| e.to_string())?;
-    // stt_unavailable(bin.as_deref(), _) just returned None above, which
-    // only happens when `bin` matched its `Some(non-empty)` arm.
-    let bin = bin.unwrap_or_default();
 
     let result = stt::transcribe(stt::TranscribeRequest {
         wav: &wav,
-        bin: &bin,
-        model: &model,
+        bin: &resolved.bin,
+        model: &resolved.model,
         temp_dir: &temp_dir,
         timeout: stt::DEFAULT_TIMEOUT,
     })
