@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
 
-use crate::{lock_gate, state::AppState, store, stt};
+use crate::{lock_gate, speech, state::AppState, store, stt};
 
 /// `TOME_WHISPER_BIN`, treated as unset when absent *or* empty — mirrors
 /// JS's `if (env.TOME_WHISPER_BIN)`, which treats `""` as falsy the same
@@ -74,6 +74,19 @@ pub async fn stt_transcribe(
     // ~10 minutes of 16 kHz mono int16; anything bigger is not push-to-talk.
     if wav.is_empty() || wav.len() > 20_000_000 {
         return Ok(json!({ "error": "stt: bad audio payload" }));
+    }
+
+    // Task 2: when the resolved engine is Apple and on-device recognition is
+    // actually available, transcribe with the Speech framework (audio stays
+    // on the Mac) and return the same `{ text }` / `{ error }` shapes the
+    // whisper path below produces. Any other resolution falls through to
+    // whisper unchanged.
+    let resolved = resolve_engine(app.clone(), state.clone()).await?;
+    if resolved.engine == stt::Engine::Apple && resolved.apple_available {
+        return Ok(match speech::transcribe_wav(&wav).await {
+            Ok(text) => json!({ "text": text }),
+            Err(e) => json!({ "error": e }),
+        });
     }
 
     let bin = stt::whisper_bin(whisper_bin_override().as_deref());
@@ -159,8 +172,8 @@ pub async fn stt_warmup(app: AppHandle, state: State<'_, AppState>) -> Result<Va
 /// [`stt::stt_unavailable`] reason `stt:status`'s `why` field surfaces, so
 /// `whisper_ready` is simply `whisper_why.is_none()` — the store read, the
 /// bin/model path resolution, the availability probe, and the engine choice
-/// all happen exactly once, shared by both commands (and probed once when
-/// Task 2 makes [`stt::apple_available`] a real objc2 probe).
+/// all happen exactly once, shared by both commands — including the
+/// [`crate::speech::apple_available`] on-device probe (Task 2).
 struct EngineResolution {
     preference: String,
     engine: stt::Engine,
@@ -187,14 +200,15 @@ async fn resolve_engine(
 
     let locked = *state.locked.read().unwrap();
     let dir_for_store = dir.clone();
-    let pref = tokio::task::spawn_blocking(move || store::get(&dir_for_store, "stt-engine", locked))
-        .await
-        .unwrap_or(Value::Null);
+    let pref =
+        tokio::task::spawn_blocking(move || store::get(&dir_for_store, "stt-engine", locked))
+            .await
+            .unwrap_or(Value::Null);
     let preference = engine_preference(&pref);
 
     let whisper_why = stt::stt_unavailable(Some(&bin), &model);
     let whisper_ready = whisper_why.is_none();
-    let apple_available = stt::apple_available();
+    let apple_available = speech::apple_available();
     let engine = stt::engine_kind(&preference, apple_available);
 
     Ok(EngineResolution {
@@ -223,7 +237,11 @@ pub async fn stt_status(app: AppHandle, state: State<'_, AppState>) -> Result<Va
     let bin_ok = stt::bin_exists(&r.bin);
     let model_ok = stt::model_exists(&r.model);
     let apple = r.engine == stt::Engine::Apple;
-    let ready = if apple { r.apple_available } else { r.whisper_ready };
+    let ready = if apple {
+        r.apple_available
+    } else {
+        r.whisper_ready
+    };
     let why = if apple {
         if r.apple_available {
             None

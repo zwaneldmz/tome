@@ -86,3 +86,11 @@ block2 = "0.6.2"
 objc2 = "0.6.4"
 objc2-foundation = "0.3.2"
 objc2-local-authentication = "0.3.2"
+# Apple on-device speech recognition (voice-0.4 Task 2): SFSpeechRecognizer
+# + SFSpeechAudioBufferRecognitionRequest live in objc2-speech, the PCM
+# buffer they consume in objc2-avf-audio; objc2-core-media provides the
+# CMTime etc. those two share. Versions match the objc2-* 0.3.x line the
+# macOS target block already pins.
+objc2-speech = "0.3.2"
+objc2-avf-audio = "0.3.2"
+objc2-core-media = "0.3.2"

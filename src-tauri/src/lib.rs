@@ -46,6 +46,7 @@ mod remote;
 mod review;
 mod schedule;
 mod skills;
+mod speech;
 mod state;
 mod store;
 mod store_keys;
