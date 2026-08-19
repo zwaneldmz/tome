@@ -248,11 +248,17 @@ fn is_special_root(p: &Path) -> bool {
 /// proxy-socket bind and the config-dir tmpfs last.
 pub fn build_bwrap_mounts(spec: &GappedSpawnSpec) -> Vec<String> {
     let mut m: Vec<String> = vec![
-        "--proc".into(), "/proc".into(),
-        "--dev".into(), "/dev".into(),
-        "--ro-bind-try".into(), "/sys".into(), "/sys".into(),
-        "--tmpfs".into(), "/tmp".into(),
-        "--tmpfs".into(), "/run".into(),
+        "--proc".into(),
+        "/proc".into(),
+        "--dev".into(),
+        "/dev".into(),
+        "--ro-bind-try".into(),
+        "/sys".into(),
+        "/sys".into(),
+        "--tmpfs".into(),
+        "/tmp".into(),
+        "--tmpfs".into(),
+        "/run".into(),
     ];
 
     let mut ro: Vec<PathBuf> = Vec::new();
@@ -1147,7 +1153,11 @@ mod tests {
         let mounts = build_bwrap_mounts(&sample_spec());
         for root in ["/bin", "/lib", "/opt"] {
             let idx = mounts.iter().position(|t| t == root).unwrap();
-            assert_eq!(mounts[idx - 1], "--ro-bind-try", "{root} must use --ro-bind-try");
+            assert_eq!(
+                mounts[idx - 1],
+                "--ro-bind-try",
+                "{root} must use --ro-bind-try"
+            );
         }
         for root in ["/usr", "/etc"] {
             let idx = mounts.iter().position(|t| t == root).unwrap();
@@ -1174,11 +1184,17 @@ mod tests {
         assert_eq!(
             &mounts[..11],
             &[
-                "--proc", "/proc",
-                "--dev", "/dev",
-                "--ro-bind-try", "/sys", "/sys",
-                "--tmpfs", "/tmp",
-                "--tmpfs", "/run",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--ro-bind-try",
+                "/sys",
+                "/sys",
+                "--tmpfs",
+                "/tmp",
+                "--tmpfs",
+                "/run",
             ]
         );
     }
@@ -1331,7 +1347,13 @@ mod tests {
 
         // The curated safe-dir block: every entry is readable AND writable.
         for safe_dir in [
-            ".ssh", ".npm", ".cargo", ".local/share", ".config/gh", ".claude.json", ".gitconfig",
+            ".ssh",
+            ".npm",
+            ".cargo",
+            ".local/share",
+            ".config/gh",
+            ".claude.json",
+            ".gitconfig",
             ".npmrc",
         ] {
             let path = home.join(safe_dir);
