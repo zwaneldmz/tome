@@ -1120,11 +1120,22 @@ mod tests {
         assert!(allow_read.contains(&PathBuf::from("/home/tester/.config/pi")));
         assert!(allow_read.contains(&PathBuf::from("/home/tester/.cache")));
         assert!(allow_read.contains(&PathBuf::from("/home/tester/.local/bin")));
-        assert!(allow_read.contains(&PathBuf::from("/home/tester/.ssh")));
-        assert!(allow_read.contains(&PathBuf::from("/home/tester/.npm")));
-        assert!(allow_read.contains(&PathBuf::from("/home/tester/.cargo")));
-        assert!(allow_read.contains(&PathBuf::from("/home/tester/.local/share")));
-        assert!(allow_read.contains(&PathBuf::from("/home/tester/.claude.json")));
+
+        // The curated safe-dir block: every entry is readable AND writable.
+        for safe_dir in [
+            ".ssh", ".npm", ".cargo", ".local/share", ".config/gh", ".claude.json", ".gitconfig",
+            ".npmrc",
+        ] {
+            let path = home.join(safe_dir);
+            assert!(
+                allow_read.contains(&path),
+                "{safe_dir} must be read-allowed"
+            );
+            assert!(
+                allow_write.contains(&path),
+                "{safe_dir} must be write-allowed"
+            );
+        }
 
         assert!(allow_write.contains(&cwd));
         assert!(allow_write.contains(&brain));
