@@ -223,10 +223,13 @@ pub struct GappedSpawnSpec {
 
 // ---- rung 1: bwrap ----
 
-/// System roots that may be absent or symlinked on merged-usr distros —
-/// bound read-only with `--ro-bind-try` so a missing `/lib64` (or a
-/// symlinked `/bin` → `/usr/bin`) skips instead of failing the sandbox.
-const TRY_RO_BIND_ROOTS: &[&str] = &["/bin", "/sbin", "/lib", "/lib64", "/opt"];
+/// System roots that are always present on any Linux install this app runs
+/// on, and therefore bound with a hard `--ro-bind` (fail loudly rather than
+/// silently skip if the host is broken). Every OTHER read root — the
+/// merged-usr compat dirs (`/bin`→`/usr/bin`, `/lib`, `/lib64`, …) and the
+/// login shell's harvested PATH entries — may be absent or symlinked, so
+/// those use `--ro-bind-try` (skip if missing) instead.
+const HARD_RO_BIND_ROOTS: &[&str] = &["/usr", "/etc"];
 
 /// Roots that get a dedicated bwrap mount rather than a plain `--bind`/
 /// `--ro-bind` of the host path (fresh procfs/devtmpfs/tmpfs, never the
@@ -275,17 +278,22 @@ pub fn build_bwrap_mounts(spec: &GappedSpawnSpec) -> Vec<String> {
     }
 
     for p in &ro {
-        let flag = if TRY_RO_BIND_ROOTS.iter().any(|s| p == Path::new(s)) {
-            "--ro-bind-try"
-        } else {
+        let flag = if HARD_RO_BIND_ROOTS.iter().any(|s| p == Path::new(s)) {
             "--ro-bind"
+        } else {
+            "--ro-bind-try"
         };
         m.push(flag.to_string());
         m.push(p.display().to_string());
         m.push(p.display().to_string());
     }
+    // Write roots use `--bind-try`: the workspace and brain vault are
+    // created by the caller before spawn so they bind for real, but the
+    // optional user dirs/files (~/.npm, ~/.cargo, ~/.claude.json, …) may
+    // not exist yet on a fresh machine — a hard `--bind` would abort the
+    // whole sandbox on the first missing one.
     for p in &rw {
-        m.push("--bind".to_string());
+        m.push("--bind-try".to_string());
         m.push(p.display().to_string());
         m.push(p.display().to_string());
     }
@@ -914,10 +922,10 @@ mod tests {
                 "--ro-bind-try",
                 "/opt",
                 "/opt",
-                "--bind",
+                "--bind-try",
                 "/home/tester/proj",
                 "/home/tester/proj",
-                "--bind",
+                "--bind-try",
                 "/home/tester/.claude",
                 "/home/tester/.claude",
                 "--bind",
@@ -982,10 +990,10 @@ mod tests {
                 "--ro-bind-try",
                 "/opt",
                 "/opt",
-                "--bind",
+                "--bind-try",
                 "/home/tester/proj",
                 "/home/tester/proj",
-                "--bind",
+                "--bind-try",
                 "/home/tester/.claude",
                 "/home/tester/.claude",
                 "--bind",
@@ -1175,7 +1183,7 @@ mod tests {
             let idx = mounts.iter().position(|t| t == root).unwrap();
             let prev = &mounts[idx - 1];
             assert!(
-                prev != "--bind" && prev != "--ro-bind",
+                prev != "--bind" && prev != "--bind-try" && prev != "--ro-bind",
                 "{root} must be a special mount, but is preceded by {prev}"
             );
         }
