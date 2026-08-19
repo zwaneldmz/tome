@@ -67,14 +67,19 @@ pub struct RunnerEnv {
     /// symlink-safe confinement is `flow::confine::confine_real_abs`,
     /// applied at every later sink).
     pub can_open_file: Arc<dyn Fn(&Path) -> bool + Send + Sync>,
-    /// `(pane_id, gapped, inner_argv) -> Result<BuiltEnv, reason>` — mirrors
-    /// `buildAgentEnv({ paneId, agent: true, gapped, ws: undefined })`.
+    /// `(pane_id, gapped, inner_argv, workspace_root) -> Result<BuiltEnv, reason>` —
+    /// mirrors `buildAgentEnv({ paneId, agent: true, gapped, ws: undefined })`.
     /// `inner_argv` (the node's own already-resolved `[cmd, ...args]`) is a
     /// Rust-only addition to the JS shape — see this module's doc comment
     /// on why the Linux wrap needs it up front, unlike JS's macOS-only
-    /// `{cmd,args}` prefix shape.
-    pub build_agent_env:
-        Arc<dyn Fn(String, bool, Vec<String>) -> BoxFuture<Result<BuiltEnv, String>> + Send + Sync>,
+    /// `{cmd,args}` prefix shape. `workspace_root` is the node's workspace
+    /// root (the runner's `SpawnRequest.cwd`), needed by the Linux
+    /// curated-mount allow-list.
+    pub build_agent_env: Arc<
+        dyn Fn(String, bool, Vec<String>, std::path::PathBuf) -> BoxFuture<Result<BuiltEnv, String>>
+            + Send
+            + Sync,
+    >,
     /// Tears a node's pane-scoped proxy down — mirrors `egress.closePane`.
     pub close_agent_env: Arc<dyn Fn(&str) + Send + Sync>,
     /// The same egress default a freshly spawned pane would read.

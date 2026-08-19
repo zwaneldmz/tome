@@ -156,6 +156,7 @@ async fn build_production_agent_env(
     pane_id: &str,
     gapped: bool,
     inner_argv: Vec<String>,
+    cwd: &std::path::Path,
 ) -> Result<BuiltEnv, String> {
     let login = crate::login_env::login_env().await;
     let mut process_env: std::collections::HashMap<String, String> = std::env::vars().collect();
@@ -223,6 +224,19 @@ async fn build_production_agent_env(
             .into_iter()
             .collect();
 
+        // The curated allow-list (rung-1 bwrap mounts + rung-2 Landlock)
+        // from the node's workspace root — the app config dir stays out of
+        // both sets (see `egress::linux::default_landlock_allow_set`).
+        let home = std::env::home_dir().unwrap_or_default();
+        let path_entries: Vec<PathBuf> = login
+            .path
+            .split(':')
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .collect();
+        let (allow_read, allow_write) =
+            crate::egress::linux::default_landlock_allow_set(cwd, &home, None, &path_entries);
+
         let spec = crate::egress::linux::GappedSpawnSpec {
             pane_id: pane_id.to_string(),
             proxy_port: proxy.port(),
@@ -233,15 +247,8 @@ async fn build_production_agent_env(
             // The flag ipc::pty.rs's own doc comment anticipated: THIS is
             // the headless spawn path landing.
             headless: true,
-            // F-02 (Landlock) degradation: this seam does not carry the
-            // node's workspace root (the runner owns the cwd), so no
-            // allow-set can be named here. tome-shim treats an empty
-            // allow-set as "fail open on file confinement" (netns egress
-            // still enforced, stderr NOTE) rather than enforcing an empty
-            // whitelist that would deny everything. Thread the workspace
-            // through the RunnerEnv seam to close this for flow nodes.
-            allow_read: Vec::new(),
-            allow_write: Vec::new(),
+            allow_read,
+            allow_write,
         };
         let argv = match &strategy {
             crate::egress::linux::SandboxStrategy::Bwrap => {
@@ -299,10 +306,10 @@ pub fn production_env(app: AppHandle) -> RunnerEnv {
         build_agent_env: {
             let app = app.clone();
             Arc::new(
-                move |pane_id: String, gapped: bool, inner_argv: Vec<String>| {
+                move |pane_id: String, gapped: bool, inner_argv: Vec<String>, cwd: PathBuf| {
                     let app = app.clone();
                     Box::pin(async move {
-                        build_production_agent_env(&app, &pane_id, gapped, inner_argv).await
+                        build_production_agent_env(&app, &pane_id, gapped, inner_argv, &cwd).await
                     }) as BoxFuture<Result<BuiltEnv, String>>
                 },
             )
