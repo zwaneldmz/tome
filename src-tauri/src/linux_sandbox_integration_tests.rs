@@ -483,6 +483,13 @@ async fn curl_via_proxy_to_an_allowlisted_host_succeeds() {
     .await else {
         return;
     };
+    // F-05: Providers mode matches host AND port (80/443), and this
+    // fixture's mock upstream is a kernel-assigned port — admit it so this
+    // test pins the host-allow logic end-to-end rather than the port gate
+    // (the port gate itself is unit-tested in proxy.rs).
+    fixture
+        .proxy
+        .set_allowed_ports(vec![80, 443, upstream_port]);
 
     let child = fixture.spawn(&[]);
     let out = run_to_completion(child, TEST_TIMEOUT).await;
