@@ -26,7 +26,12 @@ invariants live in [docs/THREATMODEL.md](docs/THREATMODEL.md).
    with all direct egress denied, DNS included. The only way out is a
    per-pane CONNECT proxy on `127.0.0.1`
    (`src-tauri/src/egress/proxy.rs`) enforcing the model-provider
-   allowlist (`src-tauri/src/egress/allowlist.rs`). Freeing a pane widens
+   allowlist (`src-tauri/src/egress/allowlist.rs`). The sandbox also
+   confines the filesystem: Linux rung 1 mounts a curated allow-list
+   (no more `--dev-bind / /`), rung 2 enforces the same list via Landlock,
+   and the macOS seatbelt profile denies the Docker socket by path — a
+   gapped pane can't reach a container-runtime daemon and escape. Freeing a
+   pane widens
    the *proxy*, never the sandbox — the seatbelt profile / bwrap wrap is
    fixed at spawn and no code path weakens it afterward; the proxy remains
    the only route out even when open.
@@ -52,12 +57,16 @@ invariants live in [docs/THREATMODEL.md](docs/THREATMODEL.md).
   (scrypt passphrase hash + TOTP secret, the allowlist, repo consents,
   event log, store files — all 0600), not just the auth file (F-03). On
   Linux, the bwrap wrap replaces the config dir with a fresh tmpfs, and
-  the self-unshare rung now enforces a Landlock `PathBeneath` whitelist
-  that never includes the config dir (F-02; fail-open on file confinement
-  when Landlock is unavailable — see docs/THREATMODEL.md for the three
-  documented caveats). The note vault lives outside the app
-  config dir (`~/Tome/Brains/<ws>`, `src-tauri/src/brain.rs`) precisely so
-  agents get full read/write of it with zero sandbox changes.
+  the self-unshare rung enforces a Landlock `PathBeneath` whitelist
+  that never includes the config dir (F-02). The note vault lives outside
+  the app config dir (`~/Tome/Brains/<ws>`, `src-tauri/src/brain.rs`)
+  precisely so agents get full read/write of it with zero sandbox changes.
+- **Container-runtime sockets are unreachable.** The Linux allow-list
+  (`egress::linux::default_landlock_allow_set`) and the macOS seatbelt
+  profile both exclude the Docker socket (`~/.docker`, rootless
+  `$XDG_RUNTIME_DIR/docker.sock`, `/var/run/docker.sock`), closing the
+  "spawn a privileged container and mount the host" escape on both
+  platforms.
 - **Vetted pane kinds.** The renderer names a pane kind from a shared
   allowlist; the Rust backend builds the command line
   (`src-tauri/src/agent_spawn.rs`, `src-tauri/src/custom_agents.rs`). A

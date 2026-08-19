@@ -80,31 +80,43 @@ profile denies **reads** of the whole app config dir too (F-03, the
 pentest finding: it used to read-deny only `egress-auth.json`, leaving the
 allowlist/consents/event log readable from inside the gap), and its
 loopback network carve-out is pinned to the pane's own proxy port
-(F-01 — see invariant 4).
+(F-01 — see invariant 4). The profile also **denies the Docker socket by
+literal path** (`~/.docker/run/docker.sock`, `~/.docker/desktop/docker.sock`,
+`/var/run/docker.sock`, `/private/var/run/docker.sock`) — a unix-socket
+path the network-outbound deny does not cover, and the route a gapped pane
+would otherwise use to break out by spawning a privileged container on the
+host.
 If the vault location ever moves (`src-tauri/src/brain.rs`'s `brains_root`),
 re-check the seatbelt profile against it.
 
-Linux rung 2 (self-unshare) file confinement landed with the F-02 fix:
-`tome-shim` now enforces a Landlock `PathBeneath` whitelist built from
-`--allow-read`/`--allow-write` roots (`egress::linux::default_landlock_allow_set`)
-that never include the app config dir. Three caveats, all deliberate:
+Linux file confinement (F-02) landed on **both rungs** with one shared
+allow-list (`egress::linux::default_landlock_allow_set`):
 
-- **Fail-open on file confinement.** When Landlock is unavailable
-  (pre-5.13 kernel, LSM disabled, ruleset negotiated away), the shim
-  prints a stderr NOTE and the pane runs egress-only — the netns egress
-  kill is the load-bearing control either way.
-- **Allow-list conservatism.** `~/.claude.json` and `~/.ssh` are not
-  writable/readable from a rung-2 pane (home is not wholesale-allowed;
-  Landlock has no "except" rule). Pane uses that need them should use an
-  ungapped spawn.
-- **Headless flow nodes pass an empty allow-set** (their spawn seam does
-  not carry the workspace root yet), which the shim treats as "skip file
-  confinement, egress-only" — same posture as the unsupported-kernel
-  case. Threading the workspace through the `RunnerEnv` seam closes this.
+- **Rung 1 (bwrap)** now mounts a curated allow-list
+  (`egress::linux::build_bwrap_mounts`) derived from that same set — the
+  old `--dev-bind / /` (whole host root, read-write) is gone. System roots
+  bind read-only (`/usr`/`/etc` hard; `/bin`/`/lib`/`/lib64`/`/opt` and
+  PATH entries with `--ro-bind-try`), the workspace/brain/agent-config
+  roots bind read-write with `--bind-try` (so a missing `~/.npm` never
+  aborts the spawn), and `--proc`/`--dev`/`--tmpfs`/`/run` are fresh.
+- **Rung 2 (self-unshare)** enforces the identical allow-list via a
+  Landlock `PathBeneath` whitelist (`--allow-read`/`--allow-write`), which
+  never includes the app config dir.
+- **Fail-open on file confinement (rung 2 only).** When Landlock is
+  unavailable (pre-5.13 kernel, LSM disabled, ruleset negotiated away),
+  the shim prints a stderr NOTE and the pane runs egress-only — the netns
+  egress kill is the load-bearing control either way.
+- **Container-runtime sockets are excluded.** The allow-list deliberately
+  omits `~/.docker` (and the rootless `$XDG_RUNTIME_DIR/docker.sock`), so a
+  gapped pane cannot reach a Docker/Podman daemon and escape by mounting
+  the host. Common tool roots ARE allowed (`~/.ssh`, `~/.npm`, `~/.cargo`,
+  `~/.local/share`, `~/.claude.json`, `~/.gitconfig`, …); home itself is
+  not wholesale-allowed.
 
-`linux_sandbox_integration_tests.rs` carries the three CI-gated rung-2
-assertions: auth file unreadable, config dir unwritable, workspace + `/tmp`
-still writable.
+`linux_sandbox_integration_tests.rs` carries the CI-gated assertions for
+both rungs: the auth file unreadable, the config dir unwritable, the
+workspace + `/tmp` still writable, and (rung 1) the Docker socket
+unreachable and host files outside the allow-set unwritable.
 
 ### 4. Unlock widens the proxy, never the sandbox
 
