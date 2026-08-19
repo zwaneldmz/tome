@@ -364,17 +364,7 @@ pub fn default_landlock_allow_set(
     // loader, and agent CLIs need to exec from), the workspace, the brain
     // vault, the agent CLIs' own config dirs, and kernel interfaces.
     let mut allow_read: Vec<PathBuf> = [
-        "/usr",
-        "/etc",
-        "/bin",
-        "/lib",
-        "/lib64",
-        "/opt",
-        "/sbin",
-        "/proc",
-        "/sys",
-        "/dev",
-        "/tmp",
+        "/usr", "/etc", "/bin", "/lib", "/lib64", "/opt", "/sbin", "/proc", "/sys", "/dev", "/tmp",
     ]
     .iter()
     .map(PathBuf::from)
@@ -1095,7 +1085,10 @@ mod tests {
         let (allow_read, allow_write) =
             default_landlock_allow_set(&cwd, &home, Some(&brain), &path_entries);
 
-        for must_read in ["/usr", "/etc", "/bin", "/lib", "/lib64", "/opt", "/sbin", "/proc", "/sys", "/dev", "/tmp"] {
+        for must_read in [
+            "/usr", "/etc", "/bin", "/lib", "/lib64", "/opt", "/sbin", "/proc", "/sys", "/dev",
+            "/tmp",
+        ] {
             assert!(
                 allow_read.contains(&PathBuf::from(must_read)),
                 "{must_read} must be read-allowed"
@@ -1130,8 +1123,12 @@ mod tests {
     fn landlock_allow_set_skips_empty_path_entries_and_brain() {
         let home = PathBuf::from("/home/tester");
         let cwd = PathBuf::from("/home/tester/proj");
-        let (allow_read, allow_write) =
-            default_landlock_allow_set(&cwd, &home, None, &[PathBuf::from(""), PathBuf::from("/a/bin")]);
+        let (allow_read, allow_write) = default_landlock_allow_set(
+            &cwd,
+            &home,
+            None,
+            &[PathBuf::from(""), PathBuf::from("/a/bin")],
+        );
         assert!(!allow_read.contains(&PathBuf::from("")));
         assert!(allow_read.contains(&PathBuf::from("/a/bin")));
         assert!(!allow_write.contains(&PathBuf::from("")));

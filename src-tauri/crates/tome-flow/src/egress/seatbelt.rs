@@ -103,17 +103,12 @@ pub fn seatbelt_profile(app_data_dir: &Path, proxy_port: u16) -> String {
         "(version 1)".to_string(),
         "(allow default)".to_string(),
         "(deny network-outbound)".to_string(),
-        format!(
-            "(allow network-outbound (remote ip \"localhost:{proxy_port}\"))"
-        ),
+        format!("(allow network-outbound (remote ip \"localhost:{proxy_port}\"))"),
         format!(
             "(deny file-write* (subpath \"{}\"))",
             app_data_dir.display()
         ),
-        format!(
-            "(deny file-read* (subpath \"{}\"))",
-            app_data_dir.display()
-        ),
+        format!("(deny file-read* (subpath \"{}\"))", app_data_dir.display()),
     ]
     .join("\n")
 }

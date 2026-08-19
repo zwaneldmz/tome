@@ -871,8 +871,14 @@ fn pgrep_matches(pattern: &str) -> bool {
 /// allow-set; `config_dir` is the EXCLUDED root (never in either set —
 /// `default_landlock_allow_set` never adds it). Returns `(exit_code,
 /// stdout, stderr)`.
-async fn run_rung2(config_dir: &std::path::Path, workspace: &std::path::Path, script: String) -> (Option<i32>, String, String) {
-    let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/tmp"));
+async fn run_rung2(
+    config_dir: &std::path::Path,
+    workspace: &std::path::Path,
+    script: String,
+) -> (Option<i32>, String, String) {
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/tmp"));
     let (allow_read, allow_write) = default_landlock_allow_set(
         workspace,
         &home,
@@ -919,12 +925,16 @@ fn rung2_skip_conditions(code: Option<i32>, stderr: &str) -> Option<String> {
     if code == Some(3) {
         // tome-shim's EXIT_SELF_UNSHARE_FAILED — the AppArmor-style case
         // the probe heuristic cannot see.
-        return Some(format!("tome-shim --self-unshare failed at runtime (probe said yes, kernel said no): {stderr}"));
+        return Some(format!(
+            "tome-shim --self-unshare failed at runtime (probe said yes, kernel said no): {stderr}"
+        ));
     }
     if stderr.contains("landlock file confinement") {
         // The shim's NOTE — Landlock unavailable/disabled on this kernel,
         // the sandbox ran egress-only and the assertions can't apply.
-        return Some(format!("Landlock unavailable on this kernel (shim NOTE present): {stderr}"));
+        return Some(format!(
+            "Landlock unavailable on this kernel (shim NOTE present): {stderr}"
+        ));
     }
     None
 }
@@ -942,8 +952,7 @@ async fn rung2_cannot_read_the_auth_file() {
         "if cat '{}' >/dev/null 2>&1; then echo READABLE; else echo DENIED; fi",
         marker.display()
     );
-    let (code, stdout, stderr) =
-        run_rung2(config.path(), workspace.path(), script).await;
+    let (code, stdout, stderr) = run_rung2(config.path(), workspace.path(), script).await;
     if let Some(reason) = rung2_skip_conditions(code, &stderr) {
         eprintln!("SKIP rung2_cannot_read_the_auth_file: {reason}");
         return;
@@ -967,8 +976,7 @@ async fn rung2_cannot_write_the_config_dir() {
         "if touch '{}' 2>/dev/null; then echo WROTE; else echo DENIED; fi",
         target.display()
     );
-    let (code, stdout, stderr) =
-        run_rung2(config.path(), workspace.path(), script).await;
+    let (code, stdout, stderr) = run_rung2(config.path(), workspace.path(), script).await;
     if let Some(reason) = rung2_skip_conditions(code, &stderr) {
         eprintln!("SKIP rung2_cannot_write_the_config_dir: {reason}");
         return;
@@ -998,8 +1006,7 @@ async fn rung2_can_still_write_the_workspace_and_tmp() {
         "touch '{}' && touch /tmp/tome-rung2-ok-$$ && echo WROTE",
         ws_file.display()
     );
-    let (code, stdout, stderr) =
-        run_rung2(config.path(), workspace.path(), script).await;
+    let (code, stdout, stderr) = run_rung2(config.path(), workspace.path(), script).await;
     if let Some(reason) = rung2_skip_conditions(code, &stderr) {
         eprintln!("SKIP rung2_can_still_write_the_workspace_and_tmp: {reason}");
         return;
@@ -1010,5 +1017,8 @@ async fn rung2_can_still_write_the_workspace_and_tmp() {
         "WROTE",
         "workspace and /tmp writes must still succeed under the allow-set, stderr: {stderr}"
     );
-    assert!(ws_file.exists(), "the workspace write must have landed on disk");
+    assert!(
+        ws_file.exists(),
+        "the workspace write must have landed on disk"
+    );
 }

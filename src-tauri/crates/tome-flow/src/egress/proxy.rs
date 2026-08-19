@@ -359,7 +359,12 @@ impl PaneProxy {
         let mut tunnels = self.state.tunnels.lock().unwrap();
         tunnels.retain(|_, entry| {
             let keep = is_allowed(&allowed, &entry.host)
-                && self.state.allowed_ports.lock().unwrap().contains(&entry.port);
+                && self
+                    .state
+                    .allowed_ports
+                    .lock()
+                    .unwrap()
+                    .contains(&entry.port);
             if !keep {
                 entry.abort.abort();
             }
@@ -698,7 +703,16 @@ async fn handle_connect<S>(
     // injects a real delay, to deterministically pin that a
     // relock/shutdown landing while the handshake writes are still in
     // flight actually finds and kills this tunnel.
-    register_connect_tunnel(&state, host, port, client, upstream, pending, Duration::ZERO).await;
+    register_connect_tunnel(
+        &state,
+        host,
+        port,
+        client,
+        upstream,
+        pending,
+        Duration::ZERO,
+    )
+    .await;
 }
 
 /// The second half of TOME-002: re-runs the SAME pane/host recheck

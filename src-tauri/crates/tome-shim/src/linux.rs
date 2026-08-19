@@ -92,8 +92,8 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::thread;
 
 use landlock::{
-    path_beneath_rules, Access, AccessFs, ABI, Compatible, CompatLevel, LandlockStatus, Ruleset,
-    RulesetAttr, RulesetCreatedAttr, RulesetStatus,
+    path_beneath_rules, Access, AccessFs, CompatLevel, Compatible, LandlockStatus, Ruleset,
+    RulesetAttr, RulesetCreatedAttr, RulesetStatus, ABI,
 };
 use nix::sched::{unshare, CloneFlags};
 use nix::sys::prctl;
@@ -330,24 +330,22 @@ fn apply_landlock(allow_read: &[PathBuf], allow_write: &[PathBuf]) -> Result<(),
         Err(e) => return Err(format!("landlock: ruleset setup failed: {e}")),
     };
 
-    let status = match ruleset
-        .create()
-        .and_then(|created| {
-            created
-                .set_compatibility(CompatLevel::BestEffort)
-                .no_new_privs(true)
-                .add_rules(path_beneath_rules(
-                    allow_read.iter(),
-                    AccessFs::from_read(abi),
+    let status = match ruleset.create().and_then(|created| {
+        created
+            .set_compatibility(CompatLevel::BestEffort)
+            .no_new_privs(true)
+            .add_rules(path_beneath_rules(
+                allow_read.iter(),
+                AccessFs::from_read(abi),
+            ))
+            .and_then(|with_read| {
+                with_read.add_rules(path_beneath_rules(
+                    allow_write.iter(),
+                    AccessFs::from_all(abi),
                 ))
-                .and_then(|with_read| {
-                    with_read.add_rules(path_beneath_rules(
-                        allow_write.iter(),
-                        AccessFs::from_all(abi),
-                    ))
-                })
-                .and_then(|with_write| with_write.restrict_self())
-        }) {
+            })
+            .and_then(|with_write| with_write.restrict_self())
+    }) {
         Ok(s) => s,
         Err(e) => return Err(format!("landlock: restriction failed: {e}")),
     };
@@ -363,9 +361,7 @@ fn apply_landlock(allow_read: &[PathBuf], allow_write: &[PathBuf]) -> Result<(),
         LandlockStatus::NotEnabled => {
             Err("landlock: disabled in this kernel's LSM configuration".to_string())
         }
-        LandlockStatus::NotImplemented => {
-            Err("landlock: not built into this kernel".to_string())
-        }
+        LandlockStatus::NotImplemented => Err("landlock: not built into this kernel".to_string()),
     }
 }
 
