@@ -50,32 +50,32 @@
 //! [`self_unshare`] does the `CLONE_NEWUSER|CLONE_NEWNET` unshare and
 //! uid/gid mapping itself, before anything else in [`run`] executes (see
 //! that function's own doc comment for why it must run before any other
-//! thread in this process exists). Deliberately **not** attempted here:
-//! reproducing bwrap's `--tmpfs <appConfigDir>` filesystem confinement
-//! (hiding the store/auth/consents files from a self-`unshare`d pane) —
-//! that needs Landlock file rules, left as a clearly-marked follow-up
-//! (search this file for "TODO(landlock)"). The network-namespace egress
-//! kill is the load-bearing control this slice delivers; the filesystem
-//! hardening is real but strictly secondary (macOS's own seatbelt profile
-//! is the only OTHER OS this ships on today, and it already denies
-//! `file-read*`/`file-write*` on the same paths — a self-`unshare`d Linux
-//! pane without Landlock is thus no WORSE than the macOS baseline was
-//! before this phase, only not yet BETTER on this one axis).
+//! thread in this process exists).
 //!
-//! `ShimArgs::deny_write`/`ShimArgs::deny_read` (this rung's would-be
-//! Landlock targets) are accepted by `args::parse_args` and threaded all
-//! the way here — see that module's own doc comment for the cross-crate
-//! wire-contract drift this closes: the argv builder that emits them
-//! (`egress::linux::build_self_unshare_argv`, a sibling crate) landed
-//! before this parser had any arm for them, which made every rung-2 spawn
-//! crash with `UnknownFlag` before this function ever ran at all. Now that
-//! rung 2 can actually reach [`run`]/[`self_unshare`], the gap described in
-//! the paragraph above stops being moot (a crashed rung never got far
-//! enough to matter) and starts being live: [`run`] prints an explicit
-//! stderr NOTE whenever either path is present, so the still-missing
-//! file-confinement half of the contract is visible at the point a real
-//! operator would actually see it (this process's own stderr), not only in
-//! this doc comment.
+//! ## F-02: Landlock file confinement on rung 2
+//!
+//! Rung 2 previously had no `--tmpfs <appConfigDir>` equivalent — a
+//! self-unshared pane could read `egress-auth.json` and write the config
+//! dir (the pentest's F-02). [`apply_landlock`] now closes that gap: the
+//! host builds an allow-list (`--allow-read`/`--allow-write`, see
+//! `egress::linux::build_self_unshare_argv` + `default_landlock_allow_set`
+//! in the sibling crate) which this file turns into a Landlock ruleset of
+//! `PathBeneath` rules, applied to THIS process (and inherited by the
+//! child) after the bridge is up and before the agent spawns. The app
+//! config dir appears in neither set, which is what hides the store and
+//! `egress-auth.json` — Landlock is an allow-list LSM with no "except"
+//! rule (see `docs/LINUX-LANDLOCK-DESIGN.md`).
+//!
+//! Enforcement is deliberately **fail-open on file confinement**: when
+//! Landlock is unavailable (pre-5.13 kernel, disabled LSM, ruleset the
+//! kernel negotiated away), [`apply_landlock`] returns an `Err` NOTE that
+//! `run` prints to stderr and the pane continues with the
+//! network-namespace egress kill alone — the load-bearing control either
+//! way. The still-missing cases are the price of the whitelist and are
+//! documented in `default_landlock_allow_set`'s doc comment (e.g.
+//! `~/.claude.json` is not writable). `--deny-write`/`--deny-read` remain
+//! on the wire for compatibility and name the excluded roots; the
+//! allow-list is the actual mechanism.
 //!
 //! `ShimArgs::new_session` IS fully wired (unlike deny_write/deny_read):
 //! [`run`]'s `pre_exec` closure calls `setsid(2)` on the child when set —
@@ -91,6 +91,10 @@ use std::process::Command;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::thread;
 
+use landlock::{
+    path_beneath_rules, Access, AccessFs, ABI, Compatible, CompatLevel, LandlockStatus, Ruleset,
+    RulesetAttr, RulesetCreatedAttr, RulesetStatus,
+};
 use nix::sched::{unshare, CloneFlags};
 use nix::sys::prctl;
 use nix::sys::signal::{self, SaFlags, SigAction, SigHandler, SigSet, Signal};
@@ -140,24 +144,54 @@ pub fn run(args: ShimArgs) -> ! {
     };
     spawn_bridge(listener, args.sock.clone());
 
-    // `--deny-write`/`--deny-read` are accepted (see args.rs's own doc
-    // comment on the cross-crate wire contract) but this rung has no
-    // Landlock — or any other — filesystem-confinement mechanism yet (see
-    // this module's top doc comment and self_unshare's TODO(landlock)).
-    // Say so loudly, on THIS process's own stderr, every time either path
-    // is actually present — not only in a source comment a future spawn's
-    // operator never reads: the network-namespace egress kill below is
-    // real; the config-dir-hidden / auth-file-hidden half of the posture
-    // bwrap's rung 1 and macOS's seatbelt profile both provide is NOT, on
-    // this rung, yet.
-    if args.deny_write.is_some() || args.deny_read.is_some() {
-        eprintln!(
-            "tome-shim: NOTE this pane is running on the self-unshare fallback rung, which does \
-             not yet enforce file confinement (Landlock is a TODO — see linux.rs's self_unshare \
-             doc comment): the app config dir ({:?}) and auth file ({:?}) remain readable/writable \
-             from inside this sandbox. Network egress IS confined by the fresh network namespace.",
-            args.deny_write, args.deny_read
-        );
+    // F-02: on rung 2, enforce Landlock file confinement BEFORE the child
+    // exists (Landlock domains are inherited across fork+exec). Fail-open
+    // on file confinement: an Err here logs a NOTE and the pane continues
+    // with the network-namespace egress kill alone — the load-bearing
+    // control either way. `--deny-write`/`--deny-read` name the EXCLUDED
+    // roots; the allow-list below simply never includes them (the config
+    // dir is absent from both sets), so when Landlock applies, the deny
+    // paths are enforced transitively and when it doesn't, the NOTE says
+    // exactly that.
+    if args.self_unshare {
+        let mut allow_read = args.allow_read.clone();
+        let mut allow_write = args.allow_write.clone();
+        // TMPDIR may name a private temp root (the pane's env carries it
+        // through the host's allowlist); grant it write access at runtime
+        // rather than baking an env-dependent path into the host-built
+        // argv.
+        if let Ok(tmpdir) = std::env::var("TMPDIR") {
+            if !tmpdir.is_empty() {
+                let p = PathBuf::from(tmpdir);
+                if !allow_read.contains(&p) {
+                    allow_read.push(p.clone());
+                }
+                if !allow_write.contains(&p) {
+                    allow_write.push(p);
+                }
+            }
+        }
+        if allow_read.is_empty() || allow_write.is_empty() {
+            // A caller that couldn't name the pane's writable roots (the
+            // headless flow-node paths — their spawn seam doesn't carry
+            // the workspace root yet) supplies no allow-set; enforcing an
+            // empty whitelist would deny EVERYTHING, so fail open on file
+            // confinement exactly like the unsupported-kernel case below.
+            eprintln!(
+                "tome-shim: NOTE landlock file confinement skipped — no allow-set supplied \
+                 (headless spawn): the app config dir ({:?}) and auth file ({:?}) remain \
+                 readable/writable from inside this sandbox. Network egress IS confined by the \
+                 fresh network namespace.",
+                args.deny_write, args.deny_read
+            );
+        } else if let Err(note) = apply_landlock(&allow_read, &allow_write) {
+            eprintln!(
+                "tome-shim: NOTE landlock file confinement NOT applied ({note}): the app config \
+                 dir ({:?}) and auth file ({:?}) remain readable/writable from inside this \
+                 sandbox. Network egress IS confined by the fresh network namespace.",
+                args.deny_write, args.deny_read
+            );
+        }
     }
 
     let new_session = args.new_session;
@@ -247,14 +281,92 @@ fn self_unshare() -> io::Result<()> {
     std::fs::write("/proc/self/uid_map", id_map_line(0, uid))?;
     std::fs::write("/proc/self/gid_map", id_map_line(0, gid))?;
 
-    // TODO(landlock): file-confinement rules (bwrap's `--tmpfs
-    // <appConfigDir>` equivalent) belong here — the full design, including
-    // why this MUST be an allow-list (Landlock has no deny/except rule) and
-    // the allow-set the shim needs threaded through, is in
-    // docs/LINUX-LANDLOCK-DESIGN.md. Not implemented yet: the netns egress
-    // kill above is the load-bearing control; an unverified Landlock
-    // whitelist would break agent CLIs worse than an honestly-absent one.
+    // TODO(landlock): SUPERSEDED — file-confinement rules now live in
+    // `apply_landlock` (called from `run`, only on the `--self-unshare`
+    // rung), which turns the host-built `--allow-read`/`--allow-write`
+    // sets into a Landlock `PathBeneath` whitelist. See that function's
+    // doc comment and `docs/LINUX-LANDLOCK-DESIGN.md` for the full design
+    // (why this MUST be an allow-list and how the config dir is excluded).
     Ok(())
+}
+
+// ---- Landlock file confinement (F-02, rung 2 only) ----
+
+/// Applies the Landlock allow-list the host built for this pane
+/// (`--allow-read`/`--allow-write`, `egress::linux::default_landlock_allow_set`
+/// in the sibling crate). See the module doc comment's F-02 section for the
+/// full rationale; the short version:
+///
+/// - Landlock is an ALLOW-list LSM: a ruleset HANDLES a set of access
+///   rights, then grants them per-path via `PathBeneath` rules, and
+///   handled-but-ungranted rights are denied — there is no "deny this one
+///   subtree" rule. The app config dir (and therefore the store and
+///   `egress-auth.json`) appears in neither allow set, which is what hides
+///   it; `--deny-write`/`--deny-read` stay on the wire only to name the
+///   excluded roots for the operator-visible NOTEs.
+/// - Read roots get the read-shaped rights (`AccessFs::from_read`); write
+///   roots get the full set. Everything the ruleset handles is then denied
+///   everywhere else — `/home` is NOT wholesale-allowed precisely because
+///   the config dir lives under it and cannot be excepted back out.
+/// - `Err` means "not enforced" and the caller (`run`) fails OPEN on file
+///   confinement (stderr NOTE, egress-only continuation) — the design
+///   doc's explicit choice: the network-namespace egress kill is the
+///   load-bearing control, and an unverified hard failure would break
+///   agent CLIs worse than an honestly-absent whitelist.
+///
+/// `CompatLevel::BestEffort` + `ABI::V9` makes the crate negotiate the
+/// handled-rights set down to whatever the running kernel supports (a
+/// pre-5.19 kernel drops `Refer`, pre-6.2 drops `Truncate`, pre-5.13
+/// yields `LandlockStatus::NotImplemented`) rather than this function
+/// hand-parsing kernel versions.
+fn apply_landlock(allow_read: &[PathBuf], allow_write: &[PathBuf]) -> Result<(), String> {
+    let abi = ABI::V9;
+
+    let ruleset = match Ruleset::default()
+        .set_compatibility(CompatLevel::BestEffort)
+        .handle_access(AccessFs::from_all(abi))
+    {
+        Ok(r) => r,
+        Err(e) => return Err(format!("landlock: ruleset setup failed: {e}")),
+    };
+
+    let status = match ruleset
+        .create()
+        .and_then(|created| {
+            created
+                .set_compatibility(CompatLevel::BestEffort)
+                .no_new_privs(true)
+                .add_rules(path_beneath_rules(
+                    allow_read.iter(),
+                    AccessFs::from_read(abi),
+                ))
+                .and_then(|with_read| {
+                    with_read.add_rules(path_beneath_rules(
+                        allow_write.iter(),
+                        AccessFs::from_all(abi),
+                    ))
+                })
+                .and_then(|with_write| with_write.restrict_self())
+        }) {
+        Ok(s) => s,
+        Err(e) => return Err(format!("landlock: restriction failed: {e}")),
+    };
+
+    match status.landlock {
+        LandlockStatus::Available { .. } => {
+            if status.ruleset == RulesetStatus::NotEnforced {
+                Err("landlock: kernel negotiated the whole ruleset away (not enforced)".to_string())
+            } else {
+                Ok(())
+            }
+        }
+        LandlockStatus::NotEnabled => {
+            Err("landlock: disabled in this kernel's LSM configuration".to_string())
+        }
+        LandlockStatus::NotImplemented => {
+            Err("landlock: not built into this kernel".to_string())
+        }
+    }
 }
 
 // ---- bring `lo` up inside whatever netns this process is in ----

@@ -165,6 +165,15 @@ cannot enforce the egress for a gapped pane. Install bubblewrap — e.g. \
 /// here — not folded away — because it is a natural, load-bearing part of
 /// "which pane is this," useful to a future integrator for logging/
 /// diagnostics even where it never lands in a shell argv.
+///
+/// `allow_read`/`allow_write` are the Landlock allow-set for rung 2
+/// (F-02 — the pentest's Linux file-confinement finding): the roots a
+/// self-unshared pane may read (broadly) and write (narrowly) beneath.
+/// Emitted by [`build_self_unshare_argv`] as repeatable `--allow-read`/
+/// `--allow-write` flags and enforced by `tome-shim` via Landlock; the
+/// app config dir appears in NEITHER set, which is what hides the store
+/// and `egress-auth.json` from the pane. Rung 1 (bwrap) ignores both
+/// fields — `--tmpfs` already replaces the config dir there.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GappedSpawnSpec {
     pub pane_id: String,
@@ -203,6 +212,12 @@ pub struct GappedSpawnSpec {
     /// literal (interactive-only) example line, flagged as such rather
     /// than silently invented.
     pub headless: bool,
+    /// Landlock read-allow roots for rung 2 — see the field-doc block
+    /// above. Expected to be [`default_landlock_allow_set`]'s output (plus
+    /// the login shell's PATH entries, added by the caller).
+    pub allow_read: Vec<PathBuf>,
+    /// Landlock write-allow roots for rung 2 — narrower than `allow_read`.
+    pub allow_write: Vec<PathBuf>,
 }
 
 // ---- rung 1: bwrap ----
@@ -313,6 +328,90 @@ pub fn auth_file_path(app_config_dir: &Path) -> PathBuf {
     app_config_dir.join(AUTH_FILE_NAME)
 }
 
+/// The Landlock allow-set a rung-2 pane spawns with (F-02). Landlock is an
+/// allow-list LSM: a ruleset HANDLES a set of access rights, then grants
+/// them per-path via `PathBeneath` rules, and handled-but-ungranted rights
+/// are denied — there is no "deny this one subtree" rule. So the safe
+/// posture is a whitelist: read broadly beneath the roots an agent
+/// legitimately needs, write narrowly beneath the subset it may modify,
+/// and put the app config dir in NEITHER set (which transitively makes the
+/// store and `egress-auth.json` unreadable and unwritable without a
+/// per-file rule).
+///
+/// This is deliberately conservative — the design doc
+/// (`docs/LINUX-LANDLOCK-DESIGN.md`) flags that an unverified whitelist
+/// breaks agent CLIs worse than an honestly-absent one, so the allow set
+/// here is the documented first cut, and the shim FAILS OPEN (egress-only,
+/// stderr NOTE) when Landlock itself is unavailable rather than refusing
+/// the pane. Known, documented limitations of this set: `~/.claude.json`
+/// (claude's home-root config file) and `~/.ssh` are NOT writable/readable
+/// — a pane that needs either uses an ungapped spawn. CI integration tests
+/// (`linux_sandbox_integration_tests.rs`) assert the three load-bearing
+/// properties: auth file unreadable, config dir unwritable, workspace +
+/// `/tmp` still writable.
+///
+/// `path_entries` is the login shell's harvested PATH, split on `:` — every
+/// entry is a directory the user trusts to hold executables, so each gets
+/// read (and execute) access; without this, an agent binary installed in
+/// `~/.local/bin` or `~/.opencode/bin` could not be exec'd at all.
+pub fn default_landlock_allow_set(
+    cwd: &Path,
+    home: &Path,
+    brain: Option<&Path>,
+    path_entries: &[PathBuf],
+) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    // Read broadly: system roots (everything the login shell, dynamic
+    // loader, and agent CLIs need to exec from), the workspace, the brain
+    // vault, the agent CLIs' own config dirs, and kernel interfaces.
+    let mut allow_read: Vec<PathBuf> = [
+        "/usr",
+        "/etc",
+        "/bin",
+        "/lib",
+        "/lib64",
+        "/opt",
+        "/sbin",
+        "/proc",
+        "/sys",
+        "/dev",
+        "/tmp",
+    ]
+    .iter()
+    .map(PathBuf::from)
+    .collect();
+    // Write narrowly: the workspace, the brain vault, /tmp, /dev (device
+    // nodes like /dev/null take writes), and the agent CLIs' own config
+    // dirs. NOT home — the config dir lives under it, and Landlock has no
+    // way to except it back out.
+    let mut allow_write: Vec<PathBuf> = vec![PathBuf::from("/tmp"), PathBuf::from("/dev")];
+
+    allow_read.push(cwd.to_path_buf());
+    allow_write.push(cwd.to_path_buf());
+
+    if let Some(brain) = brain {
+        allow_read.push(brain.to_path_buf());
+        allow_write.push(brain.to_path_buf());
+    }
+
+    // Agent config dirs — the same three the design doc names. Also
+    // ~/.cache, which every real agent CLI writes through.
+    for rel in [".claude", ".cache", ".config/opencode", ".config/pi"] {
+        let path = home.join(rel);
+        allow_read.push(path.clone());
+        allow_write.push(path);
+    }
+
+    // Every harvested PATH entry gets read+execute so agent binaries
+    // installed outside the system roots still resolve.
+    for entry in path_entries {
+        if !entry.as_os_str().is_empty() {
+            allow_read.push(entry.clone());
+        }
+    }
+
+    (allow_read, allow_write)
+}
+
 /// Assembles the argv for rung 2 of the fallback ladder: `tome-shim`
 /// invoked directly (no `bwrap` wrapping it — there IS no bwrap on this
 /// system, that is why this rung exists), told to unshare itself. No
@@ -352,6 +451,19 @@ pub fn build_self_unshare_argv(spec: &GappedSpawnSpec) -> Vec<String> {
     argv.push(spec.app_config_dir.display().to_string());
     argv.push("--deny-read".to_string());
     argv.push(auth_file_path(&spec.app_config_dir).display().to_string());
+    // F-02: the Landlock allow-set. `--deny-write`/`--deny-read` above stay
+    // for wire compatibility and name the EXCLUDED roots; these name the
+    // INCLUDED ones (Landlock is an allow-list). The config dir appears in
+    // neither set, so exclusion is implicit — but the shim still receives
+    // the deny paths and logs a NOTE if Landlock can't be applied.
+    for path in &spec.allow_read {
+        argv.push("--allow-read".to_string());
+        argv.push(path.display().to_string());
+    }
+    for path in &spec.allow_write {
+        argv.push("--allow-write".to_string());
+        argv.push(path.display().to_string());
+    }
     argv.push("--".to_string());
     argv.extend(spec.inner_argv.iter().cloned());
     argv
@@ -685,6 +797,12 @@ mod tests {
             shim_path: PathBuf::from("/opt/tome/bin/tome-shim"),
             inner_argv: s(&["zsh", "-l", "-c", "claude"]),
             headless: false,
+            allow_read: vec![
+                PathBuf::from("/usr"),
+                PathBuf::from("/etc"),
+                PathBuf::from("/home/tester/proj"),
+            ],
+            allow_write: vec![PathBuf::from("/home/tester/proj"), PathBuf::from("/tmp")],
         }
     }
 
@@ -886,6 +1004,16 @@ mod tests {
                 "/home/tester/.config/tome",
                 "--deny-read",
                 "/home/tester/.config/tome/egress-auth.json",
+                "--allow-read",
+                "/usr",
+                "--allow-read",
+                "/etc",
+                "--allow-read",
+                "/home/tester/proj",
+                "--allow-write",
+                "/home/tester/proj",
+                "--allow-write",
+                "/tmp",
                 "--",
                 "zsh",
                 "-l",
@@ -956,6 +1084,59 @@ mod tests {
         );
     }
 
+    // ==== default_landlock_allow_set (F-02) ====
+
+    #[test]
+    fn landlock_allow_set_reads_broadly_writes_narrowly_and_excludes_the_config_dir() {
+        let home = PathBuf::from("/home/tester");
+        let cwd = PathBuf::from("/home/tester/proj");
+        let brain = PathBuf::from("/home/tester/Tome/Brains/proj");
+        let path_entries = vec![PathBuf::from("/home/tester/.local/bin")];
+        let (allow_read, allow_write) =
+            default_landlock_allow_set(&cwd, &home, Some(&brain), &path_entries);
+
+        for must_read in ["/usr", "/etc", "/bin", "/lib", "/lib64", "/opt", "/sbin", "/proc", "/sys", "/dev", "/tmp"] {
+            assert!(
+                allow_read.contains(&PathBuf::from(must_read)),
+                "{must_read} must be read-allowed"
+            );
+        }
+        assert!(allow_read.contains(&cwd));
+        assert!(allow_read.contains(&brain));
+        assert!(allow_read.contains(&PathBuf::from("/home/tester/.claude")));
+        assert!(allow_read.contains(&PathBuf::from("/home/tester/.config/opencode")));
+        assert!(allow_read.contains(&PathBuf::from("/home/tester/.config/pi")));
+        assert!(allow_read.contains(&PathBuf::from("/home/tester/.cache")));
+        assert!(allow_read.contains(&PathBuf::from("/home/tester/.local/bin")));
+
+        assert!(allow_write.contains(&cwd));
+        assert!(allow_write.contains(&brain));
+        assert!(allow_write.contains(&PathBuf::from("/tmp")));
+        assert!(allow_write.contains(&PathBuf::from("/dev")));
+        assert!(allow_write.contains(&PathBuf::from("/home/tester/.claude")));
+
+        // The load-bearing exclusion: the config dir (and therefore the
+        // store and egress-auth.json) appears in NEITHER set, and home
+        // itself — its parent — is not wholesale allowed either, since
+        // Landlock has no "except" rule to carve the config dir back out.
+        let config = PathBuf::from("/home/tester/.config/tome");
+        assert!(!allow_read.contains(&config));
+        assert!(!allow_write.contains(&config));
+        assert!(!allow_read.contains(&home));
+        assert!(!allow_write.contains(&home));
+    }
+
+    #[test]
+    fn landlock_allow_set_skips_empty_path_entries_and_brain() {
+        let home = PathBuf::from("/home/tester");
+        let cwd = PathBuf::from("/home/tester/proj");
+        let (allow_read, allow_write) =
+            default_landlock_allow_set(&cwd, &home, None, &[PathBuf::from(""), PathBuf::from("/a/bin")]);
+        assert!(!allow_read.contains(&PathBuf::from("")));
+        assert!(allow_read.contains(&PathBuf::from("/a/bin")));
+        assert!(!allow_write.contains(&PathBuf::from("")));
+    }
+
     // ==== cross-crate contract: tome_shim::args::parse_args accepts what
     // this module builds ====
     //
@@ -996,6 +1177,9 @@ mod tests {
         assert_eq!(parsed.sock, spec.host_socket_path);
         assert_eq!(parsed.deny_write, Some(spec.app_config_dir.clone()));
         assert_eq!(parsed.deny_read, Some(auth_file_path(&spec.app_config_dir)));
+        // F-02: the Landlock allow-set rides the same wire contract.
+        assert_eq!(parsed.allow_read, spec.allow_read);
+        assert_eq!(parsed.allow_write, spec.allow_write);
         assert_eq!(parsed.argv, spec.inner_argv);
     }
 

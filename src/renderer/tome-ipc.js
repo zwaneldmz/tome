@@ -1,10 +1,11 @@
 // Frontend IPC shim: rebuilds the Electron preload's `window.tome` bridge
-// (src/preload/index.js, ~71 channels) over Tauri v2's global API
-// (window.__TAURI__, enabled via app.withGlobalTauri in tauri.conf.json).
-// Imported first thing in renderer.js/popout entries so every other
-// module's read of `window.tome` (see util.js) sees a real bridge —
-// Electron's own preload where present, this shim otherwise. No
-// @tauri-apps/api npm dependency; everything comes off the injected global.
+// (src/preload/index.js, ~71 channels) over Tauri v2's npm API
+// (`@tauri-apps/api` — the F-04 pentest fix: `app.withGlobalTauri` is
+// disabled in tauri.conf.json so the API surface is NOT injected onto
+// `window`, and this file imports it explicitly instead). Imported first
+// thing in renderer.js/popout entries so every other module's read of
+// `window.tome` (see util.js) sees a real bridge — Electron's own preload
+// where present, this shim otherwise.
 //
 // Wire-naming binding decision: Electron channel "domain:verb" becomes
 // Tauri command "domain_verb" (snake_case). Main→renderer events keep their
@@ -22,19 +23,23 @@
 // `{ paneId }` reaches a Rust parameter named `pane_id`), so whichever task
 // writes the matching #[tauri::command] signatures needs to match the key
 // names chosen here — they are a judgment call, not read off any contract.
+import { invoke, Channel } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+
 ;(function initTomeIpc() {
   // Electron's preload already installed the real bridge — coexistence
   // holds through Phase 7, so both runtimes share this one file.
   if (window.tome) return
-  if (!window.__TAURI__) {
+  // `window.__TAURI__` is gone (withGlobalTauri is off — F-04); the
+  // internals object is still injected by Tauri and is what
+  // @tauri-apps/api talks through. Its absence means plain-browser or a
+  // broken wiring, either way the bridge cannot work.
+  if (!window.__TAURI_INTERNALS__) {
     console.warn(
-      '[tome-ipc] window.__TAURI__ is not present (not running under Tauri or Electron) — window.tome will be unavailable.'
+      '[tome-ipc] not running under Tauri (no __TAURI_INTERNALS__) — window.tome will be unavailable.'
     )
     return
   }
-
-  const { invoke, Channel } = window.__TAURI__.core
-  const { listen } = window.__TAURI__.event
 
   // Tauri command rejections are plain strings (the Err(String) arm of
   // Result<serde_json::Value, String>), but every renderer call site that

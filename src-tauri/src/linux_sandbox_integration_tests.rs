@@ -106,7 +106,10 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 use tokio::process::{Child, Command};
 
-use crate::egress::linux::{build_bwrap_argv, ensure_pane_socket_dir, GappedSpawnSpec};
+use crate::egress::linux::{
+    build_bwrap_argv, build_self_unshare_argv, default_landlock_allow_set, ensure_pane_socket_dir,
+    probe_userns_allowed, GappedSpawnSpec,
+};
 use crate::egress::proxy::{BlockedEvent, PaneProxy};
 
 // ---- environment preconditions ----
@@ -293,6 +296,10 @@ async fn build_fixture(
         shim_path: resolve_tome_shim_bin(),
         inner_argv,
         headless: true, // no interactive terminal need for any of these tests
+        // Rung 1 (bwrap) ignores the Landlock allow-set — `--tmpfs` over
+        // the config dir is bwrap's own file confinement. Empty is fine.
+        allow_read: Vec::new(),
+        allow_write: Vec::new(),
     };
     let argv = build_bwrap_argv(&spec);
 
@@ -642,6 +649,8 @@ async fn app_config_dir_is_hidden_by_the_bwrap_tmpfs() {
             ),
         ],
         headless: true,
+        allow_read: Vec::new(),
+        allow_write: Vec::new(),
     };
     let argv = build_bwrap_argv(&spec);
     let mut cmd = Command::new(&argv[0]);
@@ -836,4 +845,170 @@ fn pgrep_matches(pattern: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+// ==== F-02: rung-2 (self-unshare) Landlock file confinement ====
+//
+// The three assertions docs/LINUX-LANDLOCK-DESIGN.md's "Testing" section
+// names: the auth file unreadable, the config dir unwritable, and the
+// workspace + /tmp still writable (no over-restriction). These run the
+// rung-2 mechanism DIRECTLY (`tome-shim --self-unshare`, no bwrap), so they
+// exercise the fallback ladder's own enforcement rather than bwrap's
+// `--tmpfs`.
+//
+// Skip-vs-fail policy, both documented in `egress::linux`:
+// - `probe_userns_allowed()` is a heuristic — Ubuntu 23.10+ AppArmor can
+//   still deny the actual `unshare()` — so a spawn that dies with
+//   tome-shim's EXIT_SELF_UNSHARE_FAILED (3) skips with a note instead of
+//   failing the assertion.
+// - On a kernel without Landlock (or with it disabled), the shim prints its
+//   "landlock file confinement" NOTE and continues egress-only; the tests
+//   skip on that NOTE too — the assertions below can only meaningfully run
+//   where Landlock actually applies.
+
+/// Builds and runs one `tome-shim --self-unshare` sandbox whose inner
+/// command is `sh -c <script>`. `workspace` is granted read+write by the
+/// allow-set; `config_dir` is the EXCLUDED root (never in either set —
+/// `default_landlock_allow_set` never adds it). Returns `(exit_code,
+/// stdout, stderr)`.
+async fn run_rung2(config_dir: &std::path::Path, workspace: &std::path::Path, script: String) -> (Option<i32>, String, String) {
+    let home = std::env::var("HOME").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("/tmp"));
+    let (allow_read, allow_write) = default_landlock_allow_set(
+        workspace,
+        &home,
+        None,
+        &[PathBuf::from("/usr/bin"), PathBuf::from("/bin")],
+    );
+    let runtime_dir = tempfile::tempdir().expect("runtime tempdir");
+    ensure_pane_socket_dir(runtime_dir.path()).expect("ensure pane socket dir");
+
+    let spec = GappedSpawnSpec {
+        pane_id: "rung2-landlock".to_string(),
+        proxy_port: 18080, // bound in the fresh netns; nothing connects to it in these tests
+        host_socket_path: runtime_dir.path().join("pane-rung2-landlock.sock"),
+        app_config_dir: config_dir.to_path_buf(),
+        shim_path: resolve_tome_shim_bin(),
+        inner_argv: vec!["/bin/sh".to_string(), "-c".to_string(), script],
+        headless: true,
+        allow_read,
+        allow_write,
+    };
+    let argv = build_self_unshare_argv(&spec);
+    let mut cmd = Command::new(&argv[0]);
+    cmd.args(&argv[1..]);
+    cmd.env_clear();
+    cmd.env("PATH", "/usr/bin:/bin");
+    if let Ok(h) = std::env::var("HOME") {
+        cmd.env("HOME", h);
+    }
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    cmd.kill_on_drop(true);
+    let child = cmd.spawn().expect("spawn tome-shim --self-unshare");
+    let out = run_to_completion(child, TEST_TIMEOUT).await;
+    (out.code, out.stdout, out.stderr)
+}
+
+/// True when a rung-2 run must be treated as "cannot test here" rather
+/// than an assertion failure — the two documented skip conditions above.
+fn rung2_skip_conditions(code: Option<i32>, stderr: &str) -> Option<String> {
+    if !probe_userns_allowed() {
+        return Some("unprivileged user namespaces unavailable (probe)".to_string());
+    }
+    if code == Some(3) {
+        // tome-shim's EXIT_SELF_UNSHARE_FAILED — the AppArmor-style case
+        // the probe heuristic cannot see.
+        return Some(format!("tome-shim --self-unshare failed at runtime (probe said yes, kernel said no): {stderr}"));
+    }
+    if stderr.contains("landlock file confinement") {
+        // The shim's NOTE — Landlock unavailable/disabled on this kernel,
+        // the sandbox ran egress-only and the assertions can't apply.
+        return Some(format!("Landlock unavailable on this kernel (shim NOTE present): {stderr}"));
+    }
+    None
+}
+
+#[tokio::test]
+#[ignore = "requires a real Linux userns + Landlock — see .github/workflows/linux-sandbox.yml"]
+async fn rung2_cannot_read_the_auth_file() {
+    let config = tempfile::tempdir().expect("config tempdir");
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    let marker = config.path().join("egress-auth.json");
+    std::fs::write(&marker, r#"{"salt":"deadbeef","hash":"deadbeef"}"#)
+        .expect("write marker file on host");
+
+    let script = format!(
+        "if cat '{}' >/dev/null 2>&1; then echo READABLE; else echo DENIED; fi",
+        marker.display()
+    );
+    let (code, stdout, stderr) =
+        run_rung2(config.path(), workspace.path(), script).await;
+    if let Some(reason) = rung2_skip_conditions(code, &stderr) {
+        eprintln!("SKIP rung2_cannot_read_the_auth_file: {reason}");
+        return;
+    }
+    assert_ne!(code, None, "rung-2 run timed out: {stderr}");
+    assert_eq!(
+        stdout.trim(),
+        "DENIED",
+        "a rung-2 pane must not read egress-auth.json, stderr: {stderr}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires a real Linux userns + Landlock — see .github/workflows/linux-sandbox.yml"]
+async fn rung2_cannot_write_the_config_dir() {
+    let config = tempfile::tempdir().expect("config tempdir");
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    let target = config.path().join("pwned");
+
+    let script = format!(
+        "if touch '{}' 2>/dev/null; then echo WROTE; else echo DENIED; fi",
+        target.display()
+    );
+    let (code, stdout, stderr) =
+        run_rung2(config.path(), workspace.path(), script).await;
+    if let Some(reason) = rung2_skip_conditions(code, &stderr) {
+        eprintln!("SKIP rung2_cannot_write_the_config_dir: {reason}");
+        return;
+    }
+    assert_ne!(code, None, "rung-2 run timed out: {stderr}");
+    assert_eq!(
+        stdout.trim(),
+        "DENIED",
+        "a rung-2 pane must not write under the app config dir, stderr: {stderr}"
+    );
+    assert!(
+        !target.exists(),
+        "the denied write must not have landed on disk"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires a real Linux userns + Landlock — see .github/workflows/linux-sandbox.yml"]
+async fn rung2_can_still_write_the_workspace_and_tmp() {
+    // The no-over-restriction half of the design's test plan: the
+    // whitelist must not break the agent's legitimate write paths.
+    let config = tempfile::tempdir().expect("config tempdir");
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    let ws_file = workspace.path().join("ok");
+
+    let script = format!(
+        "touch '{}' && touch /tmp/tome-rung2-ok-$$ && echo WROTE",
+        ws_file.display()
+    );
+    let (code, stdout, stderr) =
+        run_rung2(config.path(), workspace.path(), script).await;
+    if let Some(reason) = rung2_skip_conditions(code, &stderr) {
+        eprintln!("SKIP rung2_can_still_write_the_workspace_and_tmp: {reason}");
+        return;
+    }
+    assert_ne!(code, None, "rung-2 run timed out: {stderr}");
+    assert_eq!(
+        stdout.trim(),
+        "WROTE",
+        "workspace and /tmp writes must still succeed under the allow-set, stderr: {stderr}"
+    );
+    assert!(ws_file.exists(), "the workspace write must have landed on disk");
 }

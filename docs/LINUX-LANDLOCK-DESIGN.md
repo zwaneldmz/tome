@@ -1,6 +1,13 @@
 # Linux Landlock File Confinement — Design (F2)
 
-**Status:** design only, not implemented. Needs a real-Linux test loop to land safely.
+**Status:** implemented (pentest F-02 remediation). Mechanism in
+`src-tauri/crates/tome-shim/src/linux.rs` (`apply_landlock`), host-side
+allow-set in `src-tauri/crates/tome-flow/src/egress/linux.rs`
+(`default_landlock_allow_set`, `--allow-read`/`--allow-write` flags),
+interactive wiring in `src-tauri/src/ipc/pty.rs`. The three CI-gated
+rung-2 assertions (auth unreadable / config unwritable / workspace+tmp
+writable) live in `src-tauri/src/linux_sandbox_integration_tests.rs` and
+run in `.github/workflows/linux-sandbox.yml`.
 **Owner:** `src-tauri/crates/tome-shim` (mechanism) + `src-tauri/src/egress/linux.rs` (argv builder).
 
 ## Problem
