@@ -213,7 +213,8 @@ enum GappedSpawnDecision {
 /// `localhost:*` carve-out let a gapped pane reach every host-local
 /// service directly), which is also why the caller creates the proxy
 /// BEFORE calling this for a macOS spawn. `app_data_dir` likewise feeds
-/// the profile's config-dir confinement rules (F-03). Both parameters are
+/// the profile's config-dir confinement rules (F-03); `home_dir` names the
+/// Docker-socket deny paths (the container-runtime escape). All three are
 /// ignored by the Linux and `Other` arms — a macOS-only input shape, same
 /// as `seatbelt_profile` in the pre-F-01 signature — but threading them
 /// through one function keeps the three-way decision testable as a single
@@ -229,6 +230,7 @@ fn resolve_gapped_spawn(
     host_os: HostOs,
     app_data_dir: &Path,
     proxy_port: u16,
+    home_dir: &Path,
     linux_strategy: egress::linux::SandboxStrategy,
 ) -> GappedSpawnDecision {
     match host_os {
@@ -236,7 +238,7 @@ fn resolve_gapped_spawn(
             cmd: "/usr/bin/sandbox-exec",
             args: vec![
                 "-p".to_string(),
-                egress::seatbelt::seatbelt_profile(app_data_dir, proxy_port),
+                egress::seatbelt::seatbelt_profile(app_data_dir, proxy_port, home_dir),
             ],
         },
         HostOs::Linux => GappedSpawnDecision::Linux(linux_strategy),
@@ -648,6 +650,7 @@ pub async fn pty_create(
             host_os,
             &dir,
             proxy_port.unwrap_or(0),
+            &home,
             current_linux_sandbox_strategy(),
         ) {
             GappedSpawnDecision::Sandbox { cmd, args } => {
@@ -1276,6 +1279,7 @@ mod tests {
                 HostOs::MacOs,
                 Path::new("/tmp/tome-test"),
                 4321,
+                Path::new("/Users/test"),
                 linux_strategy,
             ) {
                 GappedSpawnDecision::Sandbox { cmd, args } => {
@@ -1283,14 +1287,25 @@ mod tests {
                     // F-01/F-03: the profile is built HERE, from the
                     // pane's real proxy port and the config dir — pinning
                     // both the port-naming loopback rule and the subpath
-                    // config-dir confinement.
+                    // config-dir confinement. The Docker-socket denies
+                    // (container-runtime escape) ride along on the same
+                    // profile.
                     assert_eq!(
                         args,
                         vec![
                             "-p".to_string(),
-                            egress::seatbelt::seatbelt_profile(Path::new("/tmp/tome-test"), 4321)
+                            egress::seatbelt::seatbelt_profile(
+                                Path::new("/tmp/tome-test"),
+                                4321,
+                                Path::new("/Users/test")
+                            )
                         ]
                     );
+                    // Pin that the home-dir-derived Docker socket literal
+                    // made it into the profile built for the spawn.
+                    assert!(args[1].contains(
+                        "(deny file-read* (literal \"/Users/test/.docker/run/docker.sock\"))"
+                    ));
                 }
                 GappedSpawnDecision::Linux(_) => panic!("expected Sandbox on macOS, got Linux(_)"),
                 GappedSpawnDecision::RefuseUnsupportedOs => {
@@ -1311,6 +1326,7 @@ mod tests {
                 HostOs::Linux,
                 Path::new("/irrelevant-on-linux"),
                 0,
+                Path::new("/irrelevant-on-linux"),
                 linux_strategy.clone(),
             );
             assert!(
@@ -1327,6 +1343,7 @@ mod tests {
                 HostOs::Other,
                 Path::new("/irrelevant"),
                 0,
+                Path::new("/irrelevant"),
                 refuse_strategy()
             ),
             GappedSpawnDecision::RefuseUnsupportedOs
@@ -1339,6 +1356,7 @@ mod tests {
                 HostOs::Other,
                 Path::new("/irrelevant"),
                 0,
+                Path::new("/irrelevant"),
                 egress::linux::SandboxStrategy::Bwrap
             ),
             GappedSpawnDecision::RefuseUnsupportedOs

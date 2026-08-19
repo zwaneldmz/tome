@@ -215,7 +215,9 @@ async fn build_agent_env(
         let env = tome_flow::agent_env::compose_agent_env(&process_env, &extras)
             .into_iter()
             .collect();
-        let profile = tome_flow::egress::seatbelt::seatbelt_profile(config_dir, proxy.port());
+        let home = std::env::home_dir().unwrap_or_default();
+        let profile =
+            tome_flow::egress::seatbelt::seatbelt_profile(config_dir, proxy.port(), &home);
         registry.insert(pane_id.to_string(), proxy);
         return Ok(BuiltEnv {
             env,

@@ -184,7 +184,10 @@ async fn build_production_agent_env(
         let env = crate::agent_env::compose_agent_env(&process_env, &extras)
             .into_iter()
             .collect();
-        let profile = crate::egress::seatbelt::seatbelt_profile(&dir, proxy.port());
+        let profile = {
+            let home = std::env::home_dir().unwrap_or_default();
+            crate::egress::seatbelt::seatbelt_profile(&dir, proxy.port(), &home)
+        };
         return Ok(BuiltEnv {
             env,
             sandbox: Some(SandboxWrap::Prefix {
