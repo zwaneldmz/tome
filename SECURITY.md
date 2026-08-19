@@ -48,11 +48,14 @@ invariants live in [docs/THREATMODEL.md](docs/THREATMODEL.md).
   the TOTP code when enrolled, the passphrase again otherwise
   (`src-tauri/src/authlock.rs`).
 - **Credentials and allowlist are unreachable from panes.** The seatbelt
-  denies sandboxed panes reads of the auth file (scrypt passphrase hash +
-  TOTP secret, 0600) and writes under the app config dir generally
-  (allowlist tamper). On Linux, the bwrap wrap replaces the config dir with
-  a fresh tmpfs; the self-unshare fallback's file confinement is still a
-  documented TODO (see THREATMODEL.md). The note vault lives outside the app
+  denies sandboxed panes reads AND writes of the whole app config dir
+  (scrypt passphrase hash + TOTP secret, the allowlist, repo consents,
+  event log, store files — all 0600), not just the auth file (F-03). On
+  Linux, the bwrap wrap replaces the config dir with a fresh tmpfs, and
+  the self-unshare rung now enforces a Landlock `PathBeneath` whitelist
+  that never includes the config dir (F-02; fail-open on file confinement
+  when Landlock is unavailable — see docs/THREATMODEL.md for the three
+  documented caveats). The note vault lives outside the app
   config dir (`~/Tome/Brains/<ws>`, `src-tauri/src/brain.rs`) precisely so
   agents get full read/write of it with zero sandbox changes.
 - **Vetted pane kinds.** The renderer names a pane kind from a shared

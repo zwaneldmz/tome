@@ -184,7 +184,7 @@ async fn build_production_agent_env(
         let env = crate::agent_env::compose_agent_env(&process_env, &extras)
             .into_iter()
             .collect();
-        let profile = crate::egress::seatbelt::seatbelt_profile(&dir);
+        let profile = crate::egress::seatbelt::seatbelt_profile(&dir, proxy.port());
         return Ok(BuiltEnv {
             env,
             sandbox: Some(SandboxWrap::Prefix {
@@ -230,6 +230,15 @@ async fn build_production_agent_env(
             // The flag ipc::pty.rs's own doc comment anticipated: THIS is
             // the headless spawn path landing.
             headless: true,
+            // F-02 (Landlock) degradation: this seam does not carry the
+            // node's workspace root (the runner owns the cwd), so no
+            // allow-set can be named here. tome-shim treats an empty
+            // allow-set as "fail open on file confinement" (netns egress
+            // still enforced, stderr NOTE) rather than enforcing an empty
+            // whitelist that would deny everything. Thread the workspace
+            // through the RunnerEnv seam to close this for flow nodes.
+            allow_read: Vec::new(),
+            allow_write: Vec::new(),
         };
         let argv = match &strategy {
             crate::egress::linux::SandboxStrategy::Bwrap => {

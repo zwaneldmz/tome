@@ -104,6 +104,17 @@ pub struct ShimArgs {
     /// Path to deny READ access to (the auth file), once Landlock
     /// enforcement exists. Same status as [`ShimArgs::deny_write`].
     pub deny_read: Option<PathBuf>,
+    /// Landlock read-allow roots (F-02 — the pentest's Linux file-
+    /// confinement finding): repeatable `--allow-read <path>` flags,
+    /// emitted only by rung 2 (`build_self_unshare_argv`). Enforced by
+    /// `linux::run` via a Landlock `PathBeneath` whitelist when present;
+    /// together with `allow_write` they REPLACE the deny paths as the real
+    /// mechanism (Landlock is an allow-list LSM — see
+    /// `docs/LINUX-LANDLOCK-DESIGN.md`), while `--deny-write`/`--deny-read`
+    /// stay on the wire for compatibility and name the excluded roots.
+    pub allow_read: Vec<PathBuf>,
+    /// Landlock write-allow roots — see [`ShimArgs::allow_read`].
+    pub allow_write: Vec<PathBuf>,
     /// The command to exec, in `argv[0], argv[1], ...` form — everything
     /// after the first bare `--`, untouched. Always non-empty: [`parse_args`]
     /// refuses a `--` with nothing after it (see [`ArgError::EmptyArgv`]),
@@ -146,7 +157,7 @@ impl std::fmt::Display for ArgError {
             ArgError::InvalidPort(v) => write!(f, "--port value {v:?} is not a valid port (0-65535)"),
             ArgError::UnknownFlag(v) => write!(
                 f,
-                "unrecognized flag {v:?} (expected --port/--sock/--self-unshare/--new-session/--deny-write/--deny-read/--)"
+                "unrecognized flag {v:?} (expected --port/--sock/--self-unshare/--new-session/--deny-write/--deny-read/--allow-read/--allow-write/--)"
             ),
             ArgError::MissingSeparator => write!(f, "missing `--` separator before the command to exec"),
             ArgError::EmptyArgv => write!(f, "`--` was given but no command followed it"),
@@ -181,6 +192,8 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ShimArgs, A
     let mut new_session = false;
     let mut deny_write: Option<PathBuf> = None;
     let mut deny_read: Option<PathBuf> = None;
+    let mut allow_read: Vec<PathBuf> = Vec::new();
+    let mut allow_write: Vec<PathBuf> = Vec::new();
     let mut argv: Option<Vec<String>> = None;
 
     while let Some(token) = iter.next() {
@@ -210,6 +223,14 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ShimArgs, A
                 let raw = iter.next().ok_or(ArgError::MissingValue("--deny-read"))?;
                 deny_read = Some(PathBuf::from(raw));
             }
+            "--allow-read" => {
+                let raw = iter.next().ok_or(ArgError::MissingValue("--allow-read"))?;
+                allow_read.push(PathBuf::from(raw));
+            }
+            "--allow-write" => {
+                let raw = iter.next().ok_or(ArgError::MissingValue("--allow-write"))?;
+                allow_write.push(PathBuf::from(raw));
+            }
             "--" => {
                 let rest: Vec<String> = iter.collect();
                 if rest.is_empty() {
@@ -235,6 +256,8 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<ShimArgs, A
         new_session,
         deny_write,
         deny_read,
+        allow_read,
+        allow_write,
         argv,
     })
 }
@@ -270,6 +293,8 @@ mod tests {
                 new_session: false,
                 deny_write: None,
                 deny_read: None,
+                allow_read: Vec::new(),
+                allow_write: Vec::new(),
                 argv: v(&["zsh", "-l", "-c", "claude"]),
             }
         );
@@ -322,6 +347,53 @@ mod tests {
         assert_eq!(
             parsed.deny_read,
             Some(PathBuf::from("/home/tester/.config/tome/egress-auth.json"))
+        );
+        assert!(parsed.allow_read.is_empty());
+        assert!(parsed.allow_write.is_empty());
+    }
+
+    #[test]
+    fn parses_repeatable_allow_read_and_allow_write_flags_in_order() {
+        // F-02: the Landlock allow-set rides the wire as repeatable flags
+        // emitted by egress::linux::build_self_unshare_argv. Order is
+        // preserved (it is not observable by the enforcer, but pinning it
+        // keeps the two sides of the wire contract honest).
+        let parsed = parse_args(v(&[
+            "--port",
+            "1",
+            "--sock",
+            "/s",
+            "--allow-read",
+            "/usr",
+            "--allow-read",
+            "/etc",
+            "--allow-write",
+            "/tmp",
+            "--allow-write",
+            "/ws",
+            "--",
+            "true",
+        ]))
+        .unwrap();
+        assert_eq!(
+            parsed.allow_read,
+            vec![PathBuf::from("/usr"), PathBuf::from("/etc")]
+        );
+        assert_eq!(
+            parsed.allow_write,
+            vec![PathBuf::from("/tmp"), PathBuf::from("/ws")]
+        );
+    }
+
+    #[test]
+    fn errors_when_allow_read_or_allow_write_is_the_last_token_with_no_value() {
+        assert_eq!(
+            parse_args(v(&["--port", "1", "--sock", "/s", "--allow-read"])),
+            Err(ArgError::MissingValue("--allow-read"))
+        );
+        assert_eq!(
+            parse_args(v(&["--port", "1", "--sock", "/s", "--allow-write"])),
+            Err(ArgError::MissingValue("--allow-write"))
         );
     }
 
@@ -406,6 +478,8 @@ mod tests {
             parsed.deny_read,
             Some(PathBuf::from("/home/tester/.config/tome/egress-auth.json"))
         );
+        assert!(parsed.allow_read.is_empty());
+        assert!(parsed.allow_write.is_empty());
         assert_eq!(parsed.argv, v(&["claude", "--flow-node"]));
     }
 

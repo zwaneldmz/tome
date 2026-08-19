@@ -208,6 +208,17 @@ enum GappedSpawnDecision {
 /// ever reads `linux_strategy` inside the `HostOs::Linux` arm, which is
 /// only ever reached when the app is ACTUALLY running on Linux).
 ///
+/// `proxy_port` is the pane's already-bound loopback proxy port. The macOS
+/// arm needs it because the seatbelt profile must name it (F-01 — the old
+/// `localhost:*` carve-out let a gapped pane reach every host-local
+/// service directly), which is also why the caller creates the proxy
+/// BEFORE calling this for a macOS spawn. `app_data_dir` likewise feeds
+/// the profile's config-dir confinement rules (F-03). Both parameters are
+/// ignored by the Linux and `Other` arms — a macOS-only input shape, same
+/// as `seatbelt_profile` in the pre-F-01 signature — but threading them
+/// through one function keeps the three-way decision testable as a single
+/// pure call rather than splitting macOS handling out of it.
+///
 /// Linux's own fallback-ladder DECISION (bwrap vs. self-unshare vs.
 /// refuse) is not re-implemented here — `egress::linux::decide_sandbox_
 /// strategy`/`probe_sandbox_strategy` already own that, fully tested in
@@ -216,13 +227,17 @@ enum GappedSpawnDecision {
 /// branch's own `Sandbox { cmd, args }`.
 fn resolve_gapped_spawn(
     host_os: HostOs,
-    seatbelt_profile: String,
+    app_data_dir: &Path,
+    proxy_port: u16,
     linux_strategy: egress::linux::SandboxStrategy,
 ) -> GappedSpawnDecision {
     match host_os {
         HostOs::MacOs => GappedSpawnDecision::Sandbox {
             cmd: "/usr/bin/sandbox-exec",
-            args: vec!["-p".to_string(), seatbelt_profile],
+            args: vec![
+                "-p".to_string(),
+                egress::seatbelt::seatbelt_profile(app_data_dir, proxy_port),
+            ],
         },
         HostOs::Linux => GappedSpawnDecision::Linux(linux_strategy),
         HostOs::Other => GappedSpawnDecision::RefuseUnsupportedOs,
@@ -595,10 +610,12 @@ pub async fn pty_create(
     let open_folders = state.open_folders.read().unwrap().clone();
     // `resolve_spawn_cwd` ends in a `std::fs::metadata` call — run it off
     // this async command's worker thread, same as the two `store::get`
-    // calls above.
+    // calls above. `home` is cloned into the closure (it is ALSO used
+    // later, in the Linux Landlock allow-set — F-02).
     let cwd = opts.cwd.clone();
-    let spawn_cwd = tokio::task::spawn_blocking(move || {
-        pty_authority::resolve_spawn_cwd(cwd.as_deref(), &open_folders, &home)
+    let spawn_cwd = tokio::task::spawn_blocking({
+        let home_for_spawn = home.clone();
+        move || pty_authority::resolve_spawn_cwd(cwd.as_deref(), &open_folders, &home_for_spawn)
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -615,16 +632,25 @@ pub async fn pty_create(
         } else {
             HostOs::Other
         };
+        // F-01: the seatbelt profile must name THIS pane's proxy port (the
+        // old `localhost:*` carve-out let a gapped pane reach every
+        // host-local service directly), and the port is kernel-assigned at
+        // bind time — so macOS creates the proxy FIRST and the profile is
+        // built from its real port. If the spawn fails afterward, the
+        // existing cleanup (`close_pane_and_proxy`) tears it down.
+        if host_os == HostOs::MacOs {
+            let proxy = create_gapped_pane_proxy(&app, &state, &opts.id, None)
+                .await
+                .map_err(|e| e.to_string())?;
+            proxy_port = Some(proxy.port());
+        }
         match resolve_gapped_spawn(
             host_os,
-            egress::seatbelt::seatbelt_profile(&dir),
+            &dir,
+            proxy_port.unwrap_or(0),
             current_linux_sandbox_strategy(),
         ) {
             GappedSpawnDecision::Sandbox { cmd, args } => {
-                let proxy = create_gapped_pane_proxy(&app, &state, &opts.id, None)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                proxy_port = Some(proxy.port());
                 sandbox = Some(SandboxWrap::Prefix {
                     cmd: cmd.to_string(),
                     args,
@@ -686,6 +712,35 @@ pub async fn pty_create(
                 let login = login_env::login_env().await;
                 let inner_argv = login_shell_argv(&login.shell, agent_cmd.as_deref());
 
+                // F-02: the Landlock allow-set for rung 2 — the workspace
+                // cwd, the brain vault (when a workspace is open), system
+                // roots, agent config dirs, and the login shell's PATH
+                // entries. The app config dir appears in NEITHER set
+                // (Landlock is an allow-list; exclusion is implicit — see
+                // `egress::linux::default_landlock_allow_set`).
+                let brain_path = match opts.ws.as_deref() {
+                    Some(ws) => {
+                        let ws = ws.to_string();
+                        let root = tokio::task::spawn_blocking(move || brain::ensure_brain(&ws))
+                            .await
+                            .map_err(|e| e.to_string())??;
+                        Some(root)
+                    }
+                    None => None,
+                };
+                let path_entries: Vec<PathBuf> = login
+                    .path
+                    .split(':')
+                    .filter(|s| !s.is_empty())
+                    .map(PathBuf::from)
+                    .collect();
+                let (allow_read, allow_write) = egress::linux::default_landlock_allow_set(
+                    &spawn_cwd,
+                    &home,
+                    brain_path.as_deref(),
+                    &path_entries,
+                );
+
                 let spec = egress::linux::GappedSpawnSpec {
                     pane_id: opts.id.clone(),
                     proxy_port: proxy.port(),
@@ -702,6 +757,8 @@ pub async fn pty_create(
                     // same way `build_bwrap_argv`'s own doc comment
                     // anticipates.
                     headless: false,
+                    allow_read,
+                    allow_write,
                 };
                 // `?` here would be provably safe TODAY (the only
                 // `Refuse` case was already handled above, before the
@@ -1215,10 +1272,25 @@ mod tests {
             egress::linux::SandboxStrategy::SelfUnshare,
             refuse_strategy(),
         ] {
-            match resolve_gapped_spawn(HostOs::MacOs, "(version 1)".to_string(), linux_strategy) {
+            match resolve_gapped_spawn(
+                HostOs::MacOs,
+                Path::new("/tmp/tome-test"),
+                4321,
+                linux_strategy,
+            ) {
                 GappedSpawnDecision::Sandbox { cmd, args } => {
                     assert_eq!(cmd, "/usr/bin/sandbox-exec");
-                    assert_eq!(args, vec!["-p".to_string(), "(version 1)".to_string()]);
+                    // F-01/F-03: the profile is built HERE, from the
+                    // pane's real proxy port and the config dir — pinning
+                    // both the port-naming loopback rule and the subpath
+                    // config-dir confinement.
+                    assert_eq!(
+                        args,
+                        vec![
+                            "-p".to_string(),
+                            egress::seatbelt::seatbelt_profile(Path::new("/tmp/tome-test"), 4321)
+                        ]
+                    );
                 }
                 GappedSpawnDecision::Linux(_) => panic!("expected Sandbox on macOS, got Linux(_)"),
                 GappedSpawnDecision::RefuseUnsupportedOs => {
@@ -1237,7 +1309,8 @@ mod tests {
         ] {
             let decision = resolve_gapped_spawn(
                 HostOs::Linux,
-                "(version 1)".to_string(),
+                Path::new("/irrelevant-on-linux"),
+                0,
                 linux_strategy.clone(),
             );
             assert!(
@@ -1250,7 +1323,12 @@ mod tests {
     #[test]
     fn resolve_gapped_spawn_refuses_on_any_os_other_than_macos_or_linux() {
         assert!(matches!(
-            resolve_gapped_spawn(HostOs::Other, "(version 1)".to_string(), refuse_strategy()),
+            resolve_gapped_spawn(
+                HostOs::Other,
+                Path::new("/irrelevant"),
+                0,
+                refuse_strategy()
+            ),
             GappedSpawnDecision::RefuseUnsupportedOs
         ));
         // Even a real Bwrap/SelfUnshare verdict must not leak through on an
@@ -1259,7 +1337,8 @@ mod tests {
         assert!(matches!(
             resolve_gapped_spawn(
                 HostOs::Other,
-                "(version 1)".to_string(),
+                Path::new("/irrelevant"),
+                0,
                 egress::linux::SandboxStrategy::Bwrap
             ),
             GappedSpawnDecision::RefuseUnsupportedOs
@@ -1282,6 +1361,8 @@ mod tests {
                 "claude".to_string(),
             ],
             headless: false,
+            allow_read: vec![PathBuf::from("/usr"), PathBuf::from("/home/tester/proj")],
+            allow_write: vec![PathBuf::from("/home/tester/proj"), PathBuf::from("/tmp")],
         }
     }
 

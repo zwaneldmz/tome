@@ -72,30 +72,58 @@ point.
 The per-workspace note vault lives at `~/Tome/Brains/<ws>` (sanitized
 workspace name), not under Tauri's `<app_data_dir>`, precisely because the
 seatbelt profile denies gapped panes all writes under the app config dir
-(`src-tauri/src/egress/seatbelt.rs`) — and the Linux bwrap wrap replaces the
-config dir with a fresh tmpfs (`src-tauri/src/egress/linux.rs`). This gives
+(`src-tauri/crates/tome-flow/src/egress/seatbelt.rs`) — and the Linux
+bwrap wrap replaces the config dir with a fresh tmpfs
+(`src-tauri/crates/tome-flow/src/egress/linux.rs`). This gives
 agents full read/write of their vault with zero sandbox changes. The same
-profile also denies reads of `egress-auth.json` (TOTP secret) specifically.
+profile denies **reads** of the whole app config dir too (F-03, the
+pentest finding: it used to read-deny only `egress-auth.json`, leaving the
+allowlist/consents/event log readable from inside the gap), and its
+loopback network carve-out is pinned to the pane's own proxy port
+(F-01 — see invariant 4).
 If the vault location ever moves (`src-tauri/src/brain.rs`'s `brains_root`),
 re-check the seatbelt profile against it.
 
-Known gap on Linux: the self-unshare fallback rung of the sandbox ladder
-parses `--deny-write`/`--deny-read` (its Landlock file-confinement targets)
-but does **not** enforce them yet — file confinement there is a documented
-TODO (`src-tauri/crates/tome-shim/src/linux.rs`, `TODO(landlock)`). The
-network-namespace egress kill is what that rung actually delivers; its
-filesystem hardening is still open.
+Linux rung 2 (self-unshare) file confinement landed with the F-02 fix:
+`tome-shim` now enforces a Landlock `PathBeneath` whitelist built from
+`--allow-read`/`--allow-write` roots (`egress::linux::default_landlock_allow_set`)
+that never include the app config dir. Three caveats, all deliberate:
+
+- **Fail-open on file confinement.** When Landlock is unavailable
+  (pre-5.13 kernel, LSM disabled, ruleset negotiated away), the shim
+  prints a stderr NOTE and the pane runs egress-only — the netns egress
+  kill is the load-bearing control either way.
+- **Allow-list conservatism.** `~/.claude.json` and `~/.ssh` are not
+  writable/readable from a rung-2 pane (home is not wholesale-allowed;
+  Landlock has no "except" rule). Pane uses that need them should use an
+  ungapped spawn.
+- **Headless flow nodes pass an empty allow-set** (their spawn seam does
+  not carry the workspace root yet), which the shim treats as "skip file
+  confinement, egress-only" — same posture as the unsupported-kernel
+  case. Threading the workspace through the `RunnerEnv` seam closes this.
+
+`linux_sandbox_integration_tests.rs` carries the three CI-gated rung-2
+assertions: auth file unreadable, config dir unwritable, workspace + `/tmp`
+still writable.
 
 ### 4. Unlock widens the proxy, never the sandbox
 
 Unlocking a pane flips its per-pane proxy from "providers allowlist" to
-"open" (`src-tauri/src/egress/mod.rs`'s `PaneMode`,
-`src-tauri/src/egress/proxy.rs`'s `host_allowed`). The sandbox wrap (macOS
-seatbelt profile / Linux bwrap or self-unshare argv) is fixed at spawn and
+"open" (`src-tauri/crates/tome-flow/src/egress/mod.rs`'s `PaneMode`,
+`src-tauri/crates/tome-flow/src/egress/proxy.rs`'s `host_allowed`). The
+sandbox wrap (macOS seatbelt profile / Linux bwrap or self-unshare argv) is
+fixed at spawn and
 **no code path weakens the sandbox after spawn** — sandboxed processes can't
 be re-profiled, and the code doesn't try. All lock/unlock/relock state lives in the
 backend proxy. Corollary: the sandbox denies egress even in "open" mode; the
-proxy is still the only route out. `egress/proxy.rs` also re-checks
+proxy is still the only route out. Two pentest-driven tightenings (F-01,
+F-05): the macOS seatbelt profile's loopback carve-out names only the
+pane's own proxy port (`(remote ip "localhost:<port>")` — a gapped pane can
+no longer reach arbitrary host-local services directly), and Providers mode
+matches host AND port (`PROVIDER_PORTS = [80, 443]` in `proxy.rs` — an
+allowlisted host is only reachable on the standard HTTP/HTTPS ports; Open
+mode, the second-factor-gated unlock, drops the port check).
+`egress/proxy.rs` also re-checks
 pane-alive + host-allowed at CONNECT-completion time (TOME-002), so a tunnel
 that was only ever allowed because the pane was in `Open` mode can't finish
 handshaking after a relock and pipe forever.

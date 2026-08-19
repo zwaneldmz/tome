@@ -162,6 +162,11 @@ mod tests {
                 .await
                 .unwrap(),
         );
+        // F-05: Providers mode matches host AND port, and the fixture's
+        // kernel-assigned echo port is never 80/443 — widen the port set
+        // so this test exercises the consent/reapply logic rather than
+        // the port gate.
+        proxy.set_allowed_ports(vec![80, 443, echo_port]);
         state
             .proxies
             .lock()

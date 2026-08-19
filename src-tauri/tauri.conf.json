@@ -9,7 +9,7 @@
     "beforeBuildCommand": "bun run build:renderer && bash scripts/build-sidecar.sh"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "label": "main",

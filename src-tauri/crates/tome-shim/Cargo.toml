@@ -27,3 +27,4 @@ path = "src/main.rs"
 [target.'cfg(target_os = "linux")'.dependencies]
 nix = { version = "0.31", features = ["net", "sched", "process", "user", "mount", "fs", "socket", "signal"] }
 libc = "0.2"
+landlock = "0.4.7"

@@ -64,8 +64,9 @@ async fn main() {
     // text), not a path — `-f` is the file variant. Passing a path to
     // `-p` is exactly the "unbound variable" parse error the first run
     // of this example hit. Production (`pty.rs`) passes the profile
-    // string inline the same way.
-    let profile = tome_lib::egress::seatbelt::seatbelt_profile(&dir);
+    // string inline the same way. F-01: the profile names THIS proxy's
+    // port (created above so the port exists first).
+    let profile = tome_lib::egress::seatbelt::seatbelt_profile(&dir, port);
 
     // 3. spawn a login zsh under sandbox-exec with the pane's proxy env.
     let pty_system = native_pty_system();

@@ -215,7 +215,7 @@ async fn build_agent_env(
         let env = tome_flow::agent_env::compose_agent_env(&process_env, &extras)
             .into_iter()
             .collect();
-        let profile = tome_flow::egress::seatbelt::seatbelt_profile(config_dir);
+        let profile = tome_flow::egress::seatbelt::seatbelt_profile(config_dir, proxy.port());
         registry.insert(pane_id.to_string(), proxy);
         return Ok(BuiltEnv {
             env,
@@ -266,6 +266,14 @@ async fn build_agent_env(
             // tome-runner only ever spawns headless flow nodes — there is
             // no interactive pty pane path in this binary at all.
             headless: true,
+            // F-02 (Landlock) degradation: this env-builder seam does not
+            // carry the node's workspace root (the runner owns the cwd),
+            // so no allow-set can be named here. tome-shim treats an empty
+            // allow-set as "fail open on file confinement" (netns egress
+            // still enforced, stderr NOTE). Thread the workspace through
+            // to close this for headless nodes.
+            allow_read: Vec::new(),
+            allow_write: Vec::new(),
         };
         let argv = match &strategy {
             tome_flow::egress::linux::SandboxStrategy::Bwrap => {

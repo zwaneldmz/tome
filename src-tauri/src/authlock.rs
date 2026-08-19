@@ -89,16 +89,34 @@ pub const MIN_PASSPHRASE_LEN: usize = 8;
 
 const AUTH_FILE_NAME: &str = "egress-auth.json";
 
-// scrypt cost parameters matching Node's *documented default* for
-// `crypto.scryptSync(password, salt, keylen)` called with no `options`
-// object — exactly how `authlock.js` calls it (`scryptSync(pass, salt,
-// 32)`) — NOT this crate's own `Params::RECOMMENDED` (log_n 17), which
-// would produce different, cross-language-incompatible hashes. Pinned
-// byte-for-byte against `tests/auth_fixtures.json`'s `scrypt[]` array in
-// the `scrypt_hash_matches_fixtures` test below (written first, per this
-// slice's brief, since a mismatch here breaks every passphrase set by the
+// scrypt cost parameters. Two log-N values now exist, versioned through
+// `AuthState.log_n` (F-06, the security assessment's crypto-hardening
+// finding):
+//
+// - `SCRYPT_LOG_N` (2^16) is what `set_passphrase` uses for NEW
+//   enrollments. Node's documented default (2^14) is a GPU-trivial
+//   offline barrier against a stolen `egress-auth.json`; 2^16 keeps
+//   interactive login comfortably fast while making brute force ~4x more
+//   expensive per guess.
+// - `SCRYPT_LOG_N_LEGACY` (2^14) is Node's *documented default* for
+//   `crypto.scryptSync(password, salt, keylen)` called with no `options`
+//   object — exactly how `authlock.js` calls it (`scryptSync(pass, salt,
+//   32)`). Every pre-existing Electron-written hash was computed at these
+//   params, and a file whose `log_n` field is absent (all of them) must
+//   still VERIFY, so verification falls back to this value. Bumping the
+//   verification params outright would lock every existing user out of
+//   their own vault — the versioned scheme below is what makes the bump
+//   safe.
+//
+// NOT this crate's own `Params::RECOMMENDED` (log_n 17), which would
+// produce hashes cross-language-incompatible with either value above.
+// Legacy hashes are pinned byte-for-byte against
+// `tests/auth_fixtures.json`'s `scrypt[]` array in the
+// `scrypt_hash_matches_fixtures` test below (written first, per this
+// slice's brief, since a mismatch there breaks every passphrase set by the
 // Electron build).
-const SCRYPT_LOG_N: u8 = 14; // N = 2^14 = 16384
+const SCRYPT_LOG_N: u8 = 16; // N = 2^16 = 65536 — new enrollments
+const SCRYPT_LOG_N_LEGACY: u8 = 14; // N = 2^14 = 16384 — legacy files verify at this
 const SCRYPT_R: u32 = 8;
 const SCRYPT_P: u32 = 1;
 const SCRYPT_DKLEN: usize = 32;
@@ -145,6 +163,15 @@ struct AuthState {
     hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     totp: Option<TotpState>,
+    /// The scrypt log-N the stored hash was computed with. `None` means
+    /// "legacy default" (`SCRYPT_LOG_N_LEGACY`, what every Electron-built
+    /// file carries) — `verify_passphrase` falls back to that value, so
+    /// old files keep verifying after `set_passphrase` moved on to
+    /// stronger params. Written as `Some(SCRYPT_LOG_N)` on every new
+    /// enrollment; the JS original knows nothing about this field and
+    /// (being serde-tolerant) ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    log_n: Option<u8>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -357,9 +384,16 @@ impl AuthLock {
         let mut salt_bytes = [0u8; 16];
         rand::rng().fill_bytes(&mut salt_bytes);
         let salt = hex_encode(&salt_bytes);
-        let hash = hex_encode(&scrypt_hash(pass.as_bytes(), salt.as_bytes()));
+        // New enrollments hash at the stronger current params (F-06) and
+        // record which params, so a future bump never invalidates them.
+        let hash = hex_encode(&scrypt_hash_with(
+            pass.as_bytes(),
+            salt.as_bytes(),
+            SCRYPT_LOG_N,
+        ));
         self.state.salt = Some(salt);
         self.state.hash = Some(hash);
+        self.state.log_n = Some(SCRYPT_LOG_N);
         self.migrate_totp_secret(); // re-wrap any legacy plaintext TOTP secret on this write
         self.save()
     }
@@ -374,7 +408,11 @@ impl AuthLock {
         let Some(expected) = hex_decode(hash_hex) else {
             return false;
         };
-        let got = scrypt_hash(pass.as_bytes(), salt.as_bytes());
+        // Verify at the params the hash was STORED with, not whatever this
+        // build currently enrolls at — a legacy file (no `log_n`) was
+        // hashed by Node at 2^14 and must still match (F-06).
+        let log_n = self.state.log_n.unwrap_or(SCRYPT_LOG_N_LEGACY);
+        let got = scrypt_hash_with(pass.as_bytes(), salt.as_bytes(), log_n);
         bool::from(got[..].ct_eq(&expected[..]))
     }
 
@@ -417,9 +455,20 @@ impl AuthLock {
         };
         let secret = b32decode(&plain);
         let step = now_ms() / 30_000;
-        [step.saturating_sub(1), step, step + 1]
-            .iter()
-            .any(|&c| hotp(&secret, c) == code)
+        // Constant-time comparison (F-06): a 6-digit code is only ~20 bits,
+        // and although the per-purpose attempt throttling is the real
+        // brute-force wall, `==` on the digit string hands a timing oracle
+        // to a caller who can measure rejections. `subtle::ConstantTimeEq`
+        // is already a dependency of this file, so the stronger compare is
+        // free; a length-mismatched `code` compares unequal without
+        // leaking where the difference was.
+        for counter in [step.saturating_sub(1), step, step + 1] {
+            let candidate = hotp(&secret, counter);
+            if bool::from(candidate.as_bytes().ct_eq(code.as_bytes())) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Confirms enrollment: verifies `code` and, only on success, flips
@@ -529,13 +578,27 @@ impl AuthLock {
 /// this backwards is the single most likely way to fail the fixture pin
 /// silently (both sides would produce *a* hash, just the wrong one) —
 /// `scrypt_hash_matches_fixtures` below exists specifically to catch it.
-fn scrypt_hash(pass: &[u8], salt: &[u8]) -> [u8; SCRYPT_DKLEN] {
-    let params = scrypt::Params::new(SCRYPT_LOG_N, SCRYPT_R, SCRYPT_P)
+/// scrypt at an explicit log-N — the general form both [`SCRYPT_LOG_N`]
+/// (enrollment) and [`SCRYPT_LOG_N_LEGACY`] (legacy verification) go
+/// through (F-06). See the constants' doc comment for why two params
+/// values exist at all.
+fn scrypt_hash_with(pass: &[u8], salt: &[u8], log_n: u8) -> [u8; SCRYPT_DKLEN] {
+    let params = scrypt::Params::new(log_n, SCRYPT_R, SCRYPT_P)
         .expect("static scrypt params are always valid");
     let mut out = [0u8; SCRYPT_DKLEN];
     scrypt::scrypt(pass, salt, &params, &mut out)
         .expect("32-byte output is within scrypt's valid range");
     out
+}
+
+/// Legacy-params scrypt — kept as the named wrapper the fixture-pinning
+/// test below exercises, since `tests/auth_fixtures.json`'s hashes were
+/// all generated by Node at its default (2^14). Only the `#[cfg(test)]`
+/// suite (and the legacy-verification test) use it — production hashes
+/// through [`scrypt_hash_with`] at an explicit log-N.
+#[cfg(test)]
+fn scrypt_hash(pass: &[u8], salt: &[u8]) -> [u8; SCRYPT_DKLEN] {
+    scrypt_hash_with(pass, salt, SCRYPT_LOG_N_LEGACY)
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -781,6 +844,53 @@ mod tests {
             "same passphrase, different salt, must differ"
         );
         assert!(lock.verify_passphrase("hunter2-fake"));
+    }
+
+    // ---- F-06: versioned scrypt params - new enrollments hash stronger,
+    // legacy files still verify at Node's default - ----
+
+    #[test]
+    fn new_enrollments_record_log_n_16_and_verify_at_it() {
+        let (_dir, mut lock) = fresh_lock();
+        lock.set_passphrase("hunter2-fake").unwrap();
+        assert_eq!(
+            lock.state.log_n,
+            Some(SCRYPT_LOG_N),
+            "enrollment must stamp the params it hashed at"
+        );
+        assert!(lock.verify_passphrase("hunter2-fake"));
+        assert!(!lock.verify_passphrase("wrong-passphrase"));
+    }
+
+    #[test]
+    fn legacy_enrollment_without_a_stored_log_n_verifies_at_legacy_params() {
+        // Simulates an Electron-written egress-auth.json: salt+hash only,
+        // no log_n field. Must still verify — bumping verification params
+        // outright would lock every pre-existing user out (F-06).
+        let (_dir, mut lock) = fresh_lock();
+        let salt = hex_encode(&[7u8; 16]);
+        let hash = hex_encode(&scrypt_hash(b"legacy-passphrase", salt.as_bytes()));
+        lock.state.salt = Some(salt);
+        lock.state.hash = Some(hash);
+        assert_eq!(lock.state.log_n, None);
+        assert!(lock.verify_passphrase("legacy-passphrase"));
+        assert!(!lock.verify_passphrase("wrong-passphrase"));
+    }
+
+    #[test]
+    fn verify_totp_rejects_an_odd_length_code_without_panicking() {
+        // The constant-time compare must be length-tolerant: a caller can
+        // send any string, and a mismatch must read as false rather than
+        // panic (subtle's slice ct_eq compares lengths as part of the
+        // choice).
+        let (_dir, mut lock) = fresh_lock();
+        lock.state.totp = Some(TotpState {
+            secret: "PLAINBASE32SECRETXXX".to_string(),
+            active: true,
+        });
+        for bad in ["", "1", "12345", "1234567", "abcdef"] {
+            assert!(!lock.verify_totp(bad), "{bad:?} must verify false");
+        }
     }
 
     #[test]

@@ -128,10 +128,24 @@ pub enum BlockedEvent {
     Coalesced { host: String, count: u32 },
 }
 
+/// The only ports a Providers-mode pane may reach on an otherwise
+/// allowlisted host (F-05, the security assessment's port-restriction
+/// finding): the standard HTTP/HTTPS ports — which is all every shipped
+/// allowlist entry uses, and all a provider API's own traffic should
+/// ever need. Without this, `host_allowed`'s hostname-only match let a
+/// gapped pane CONNECT to arbitrary ports on allowlisted hosts
+/// (`api.anthropic.com:22` as an SSH relay, for example). A pane that
+/// genuinely needs a non-standard port on an allowlisted host uses the
+/// explicit, second-factor-gated unlock (`Mode::Open`, which imposes no
+/// port restriction) — the same tradeoff the unlock already makes for
+/// hostnames.
+const PROVIDER_PORTS: &[u16] = &[80, 443];
+
 const BLOCKED_COALESCE: Duration = Duration::from_secs(60);
 
 struct TunnelEntry {
     host: String,
+    port: u16,
     abort: AbortHandle,
 }
 
@@ -162,6 +176,13 @@ struct ProxyState {
     /// (this slice does not own `Cargo.toml`), so the coalescing tests use
     /// a short real window instead of `tokio::time::pause`/`advance`.
     coalesce_window: Duration,
+    /// Ports a Providers-mode pane may reach on an allowlisted host —
+    /// [`PROVIDER_PORTS`] in production; a field (not a constant read) so
+    /// `#[cfg(test)]` can widen it to the kernel-assigned ports their
+    /// echo/upstream fixtures actually bind to. `Mutex`, not a bare
+    /// `Vec`: `ProxyState` is shared behind an `Arc`, and the tests
+    /// mutate this list after spawn.
+    allowed_ports: Mutex<Vec<u16>>,
     http_client: reqwest::Client,
 }
 
@@ -170,6 +191,7 @@ impl ProxyState {
         initial_allowed: &[String],
         on_blocked: Box<dyn Fn(BlockedEvent) + Send + Sync>,
         coalesce_window: Duration,
+        allowed_ports: Vec<u16>,
     ) -> Self {
         Self {
             allowed: RwLock::new(compile_allowlist(initial_allowed)),
@@ -181,6 +203,7 @@ impl ProxyState {
             on_blocked,
             blocked_pending: Mutex::new(HashMap::new()),
             coalesce_window,
+            allowed_ports: Mutex::new(allowed_ports),
             // Direct connections only: this client makes the proxy's OWN
             // outbound requests (the absolute-URI HTTP leg) and must never
             // itself chain through an ambient HTTP_PROXY/HTTPS_PROXY the
@@ -252,6 +275,7 @@ impl PaneProxy {
             &initial_allowed,
             Box::new(on_blocked),
             BLOCKED_COALESCE,
+            PROVIDER_PORTS.to_vec(),
         ));
 
         let mut accept_tasks = Vec::with_capacity(2);
@@ -303,6 +327,18 @@ impl PaneProxy {
         *self.state.allowed.write().unwrap() = compile_allowlist(&patterns);
     }
 
+    /// Replaces the Providers-mode port allow-set (F-05). Production only
+    /// ever leaves the [`PROVIDER_PORTS`] default `spawn` installs; this
+    /// setter exists so a future policy change (for example consenting a
+    /// repo host that lives on a non-standard port) and the test suites'
+    /// kernel-assigned echo/upstream fixtures can widen the set without a
+    /// second spawn path. Takes effect for every connection accepted from
+    /// now on, including the TOME-002 recheck and [`relock`](Self::relock)'s
+    /// tunnel-retain sweep.
+    pub fn set_allowed_ports(&self, ports: Vec<u16>) {
+        *self.state.allowed_ports.lock().unwrap() = ports;
+    }
+
     /// Widens this pane's egress to any host until [`relock`](Self::relock)
     /// is called — mirrors `unlockPane`'s mode transition only. See the
     /// module doc comment: minutes validation and the auto-relock timer
@@ -312,16 +348,18 @@ impl PaneProxy {
     }
 
     /// Narrows back to providers-only AND kills every live tunnel whose
-    /// host isn't allowed on its own merits under the CURRENT allow set —
-    /// mirrors `relockPane`. A tunnel that's independently allowlisted
-    /// (or repo-consented) survives, matching what the UI promises: relock
-    /// narrows egress, it doesn't kill legitimate in-flight traffic.
+    /// host+port isn't allowed on its own merits under the CURRENT allow
+    /// set — mirrors `relockPane`. A tunnel that's independently
+    /// allowlisted (or repo-consented) survives, matching what the UI
+    /// promises: relock narrows egress, it doesn't kill legitimate
+    /// in-flight traffic.
     pub fn relock(&self) {
         *self.state.mode.write().unwrap() = Mode::Providers;
         let allowed = self.state.allowed.read().unwrap();
         let mut tunnels = self.state.tunnels.lock().unwrap();
         tunnels.retain(|_, entry| {
-            let keep = is_allowed(&allowed, &entry.host);
+            let keep = is_allowed(&allowed, &entry.host)
+                && self.state.allowed_ports.lock().unwrap().contains(&entry.port);
             if !keep {
                 entry.abort.abort();
             }
@@ -494,11 +532,15 @@ where
     }
 }
 
-fn host_allowed(state: &ProxyState, host: &str) -> bool {
+fn host_allowed(state: &ProxyState, host: &str, port: u16) -> bool {
     if *state.mode.read().unwrap() == Mode::Open {
         return true;
     }
-    is_allowed(&state.allowed.read().unwrap(), host)
+    // F-05: Providers mode matches host AND port — an allowlisted host is
+    // only reachable on the standard HTTP/HTTPS ports. Open mode (the
+    // second-factor-gated unlock) drops the port check.
+    state.allowed_ports.lock().unwrap().contains(&port)
+        && is_allowed(&state.allowed.read().unwrap(), host)
 }
 
 fn note_blocked(state: &Arc<ProxyState>, host: &str) {
@@ -614,7 +656,7 @@ async fn connect_upstream_rechecked(
 ) -> Option<TcpStream> {
     let upstream = TcpStream::connect((host, port)).await.ok()?;
     after_connect();
-    if state.closed.load(Ordering::SeqCst) || !host_allowed(state, host) {
+    if state.closed.load(Ordering::SeqCst) || !host_allowed(state, host, port) {
         return None;
     }
     Some(upstream)
@@ -630,7 +672,7 @@ async fn handle_connect<S>(
 {
     let (host, port) = parse_connect_target(&head.target);
 
-    if !host_allowed(&state, &host) {
+    if !host_allowed(&state, &host, port) {
         note_blocked(&state, &host);
         let _ = client
             .write_all(
@@ -656,7 +698,7 @@ async fn handle_connect<S>(
     // injects a real delay, to deterministically pin that a
     // relock/shutdown landing while the handshake writes are still in
     // flight actually finds and kills this tunnel.
-    register_connect_tunnel(&state, host, client, upstream, pending, Duration::ZERO).await;
+    register_connect_tunnel(&state, host, port, client, upstream, pending, Duration::ZERO).await;
 }
 
 /// The second half of TOME-002: re-runs the SAME pane/host recheck
@@ -689,6 +731,7 @@ async fn handle_connect<S>(
 async fn register_connect_tunnel<S>(
     state: &Arc<ProxyState>,
     host: String,
+    port: u16,
     client: S,
     upstream: TcpStream,
     pending: Vec<u8>,
@@ -697,7 +740,7 @@ async fn register_connect_tunnel<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    if state.closed.load(Ordering::SeqCst) || !host_allowed(state, &host) {
+    if state.closed.load(Ordering::SeqCst) || !host_allowed(state, &host, port) {
         return false;
     }
 
@@ -728,6 +771,7 @@ where
         id,
         TunnelEntry {
             host,
+            port,
             abort: join.abort_handle(),
         },
     );
@@ -792,8 +836,12 @@ async fn handle_plain<S>(
         let _ = client.shutdown().await;
         return;
     };
+    // The URL's effective port: an explicit `:PORT` when present, else the
+    // scheme's default (80 for http, 443 for https) — F-05's port check
+    // covers this leg too.
+    let port = url.port_or_known_default().unwrap_or(80);
 
-    if !host_allowed(&state, &host) {
+    if !host_allowed(&state, &host, port) {
         note_blocked(&state, &host);
         let body = format!("egress: {host} is blocked (providers-only mode)\n");
         let resp = format!(
@@ -992,7 +1040,23 @@ mod tests {
         on_blocked: impl Fn(BlockedEvent) + Send + Sync + 'static,
         window: Duration,
     ) -> Arc<ProxyState> {
-        Arc::new(ProxyState::new(&[], Box::new(on_blocked), window))
+        Arc::new(ProxyState::new(
+            &[],
+            Box::new(on_blocked),
+            window,
+            PROVIDER_PORTS.to_vec(),
+        ))
+    }
+
+    /// Admits a kernel-assigned test port into a proxy's Providers-mode
+    /// port allow-set — production admits only [`PROVIDER_PORTS`], but the
+    /// tests' echo/upstream fixtures bind to whatever port the kernel
+    /// hands out, which is never 80/443 (both privileged). F-05's port
+    /// check is what makes this helper necessary at all: without it every
+    /// Providers-mode test below would be refused for port reasons instead
+    /// of testing the host logic it means to pin.
+    fn admit_port(proxy: &PaneProxy, port: u16) {
+        proxy.state.allowed_ports.lock().unwrap().push(port);
     }
 
     // ---- CONNECT leg: allow / block ----
@@ -1004,6 +1068,7 @@ mod tests {
         let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, cb)
             .await
             .unwrap();
+        admit_port(&proxy, echo_port);
 
         let (mut stream, status) =
             connect_via_proxy(proxy.port(), &format!("127.0.0.1:{echo_port}")).await;
@@ -1015,6 +1080,38 @@ mod tests {
         assert_eq!(&buf, b"hello");
 
         assert!(events.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn providers_mode_refuses_an_allowlisted_host_on_a_non_provider_port() {
+        // F-05: hostname match alone must not be enough — the port must
+        // also be one of PROVIDER_PORTS, so an allowlisted host can't be
+        // used as a relay to arbitrary services on itself.
+        let (echo_port, _echo) = spawn_echo_server("127.0.0.1").await;
+        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {})
+            .await
+            .unwrap();
+        // Deliberately NOT admitting echo_port: the host is allowlisted,
+        // the port is not.
+
+        let (_stream, status) =
+            connect_via_proxy(proxy.port(), &format!("127.0.0.1:{echo_port}")).await;
+        assert_eq!(status, 403);
+    }
+
+    #[tokio::test]
+    async fn open_mode_allows_an_allowlisted_host_on_any_port() {
+        // The other half of F-05: the second-factor-gated unlock widens
+        // ports as well as hosts.
+        let (echo_port, _echo) = spawn_echo_server("127.0.0.1").await;
+        let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {})
+            .await
+            .unwrap();
+        proxy.unlock();
+
+        let (_stream, status) =
+            connect_via_proxy(proxy.port(), &format!("127.0.0.1:{echo_port}")).await;
+        assert_eq!(status, 200);
     }
 
     #[tokio::test]
@@ -1076,6 +1173,7 @@ mod tests {
     async fn set_allowed_recompiles_the_matcher_set_for_subsequent_connects() {
         let (echo_port, _echo) = spawn_echo_server("127.0.0.1").await;
         let proxy = PaneProxy::spawn(vec![], None, |_| {}).await.unwrap();
+        admit_port(&proxy, echo_port);
 
         let (_s, status) = connect_via_proxy(proxy.port(), &format!("127.0.0.1:{echo_port}")).await;
         assert_eq!(status, 403);
@@ -1095,6 +1193,7 @@ mod tests {
         let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {})
             .await
             .unwrap();
+        admit_port(&proxy, echo_port);
         proxy.unlock(); // mode Open: any host may tunnel right now
 
         let (mut allowed_sock, s1) =
@@ -1140,6 +1239,7 @@ mod tests {
         let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {})
             .await
             .unwrap();
+        admit_port(&proxy, echo_port);
         let (mut sock, status) =
             connect_via_proxy(proxy.port(), &format!("127.0.0.1:{echo_port}")).await;
         assert_eq!(status, 200);
@@ -1170,6 +1270,7 @@ mod tests {
         let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {})
             .await
             .unwrap();
+        admit_port(&proxy, echo_port);
 
         let result = connect_upstream_rechecked(&proxy.state, "127.0.0.1", echo_port, || {
             // Simulates the allow set changing during the connect's flight
@@ -1188,6 +1289,7 @@ mod tests {
         let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {})
             .await
             .unwrap();
+        admit_port(&proxy, echo_port);
 
         let result = connect_upstream_rechecked(&proxy.state, "127.0.0.1", echo_port, || {
             proxy.state.closed.store(true, Ordering::SeqCst);
@@ -1226,6 +1328,7 @@ mod tests {
         let registered = register_connect_tunnel(
             &proxy.state,
             "attacker.example".to_string(),
+            echo_port,
             client_leg,
             upstream,
             Vec::new(),
@@ -1365,6 +1468,7 @@ mod tests {
         let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {})
             .await
             .unwrap();
+        admit_port(&proxy, upstream_port);
 
         let mut stream = TcpStream::connect(("127.0.0.1", proxy.port()))
             .await
@@ -1486,6 +1590,7 @@ mod tests {
         let proxy = PaneProxy::spawn(vec!["127.0.0.1".to_string()], None, |_| {})
             .await
             .unwrap();
+        admit_port(&proxy, redirector_port);
 
         let mut stream = TcpStream::connect(("127.0.0.1", proxy.port()))
             .await
@@ -1531,6 +1636,7 @@ mod tests {
         )
         .await
         .unwrap();
+        admit_port(&proxy, echo_port);
         assert_eq!(proxy.unix_path(), Some(&sock_path));
 
         let mut stream = tokio::net::UnixStream::connect(&sock_path).await.unwrap();
