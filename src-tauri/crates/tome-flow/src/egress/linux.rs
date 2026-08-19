@@ -328,7 +328,8 @@ pub fn auth_file_path(app_config_dir: &Path) -> PathBuf {
     app_config_dir.join(AUTH_FILE_NAME)
 }
 
-/// The Landlock allow-set a rung-2 pane spawns with (F-02). Landlock is an
+/// The shared allow-set both Linux sandbox rungs spawn with: rung-1 bwrap
+/// mounts plus rung-2 Landlock (F-02). Landlock is an
 /// allow-list LSM: a ruleset HANDLES a set of access rights, then grants
 /// them per-path via `PathBeneath` rules, and handled-but-ungranted rights
 /// are denied — there is no "deny this one subtree" rule. So the safe
@@ -343,9 +344,10 @@ pub fn auth_file_path(app_config_dir: &Path) -> PathBuf {
 /// breaks agent CLIs worse than an honestly-absent one, so the allow set
 /// here is the documented first cut, and the shim FAILS OPEN (egress-only,
 /// stderr NOTE) when Landlock itself is unavailable rather than refusing
-/// the pane. Known, documented limitations of this set: `~/.claude.json`
-/// (claude's home-root config file) and `~/.ssh` are NOT writable/readable
-/// — a pane that needs either uses an ungapped spawn. CI integration tests
+/// the pane. `~/.docker` and the Docker socket (`$XDG_RUNTIME_DIR/docker.sock`
+/// for rootless) are deliberately excluded from BOTH sets, which
+/// transitively blocks the `docker run -v /:/host` escape without a
+/// per-file rule. CI integration tests
 /// (`linux_sandbox_integration_tests.rs`) assert the three load-bearing
 /// properties: auth file unreadable, config dir unwritable, workspace +
 /// `/tmp` still writable.
@@ -386,6 +388,23 @@ pub fn default_landlock_allow_set(
     // Agent config dirs — the same three the design doc names. Also
     // ~/.cache, which every real agent CLI writes through.
     for rel in [".claude", ".cache", ".config/opencode", ".config/pi"] {
+        let path = home.join(rel);
+        allow_read.push(path.clone());
+        allow_write.push(path);
+    }
+    // Docker-escape hardening: a small, curated set of common tool roots
+    // that MUST NOT include any container-runtime socket path. The Docker
+    // socket (~/.docker/..., rootless $XDG_RUNTIME_DIR/docker.sock) is
+    // deliberately absent from BOTH sets, which transitively blocks the
+    // `docker run -v /:/host` escape without a per-file rule.
+    for rel in [".ssh", ".npm", ".cargo", ".local/share", ".config/gh"] {
+        let path = home.join(rel);
+        allow_read.push(path.clone());
+        allow_write.push(path);
+    }
+    // Single-file entries directly under home (PathBeneath on a file grants
+    // that file specifically; no need to allowlist home wholesale).
+    for rel in [".claude.json", ".gitconfig", ".npmrc"] {
         let path = home.join(rel);
         allow_read.push(path.clone());
         allow_write.push(path);
@@ -1101,6 +1120,11 @@ mod tests {
         assert!(allow_read.contains(&PathBuf::from("/home/tester/.config/pi")));
         assert!(allow_read.contains(&PathBuf::from("/home/tester/.cache")));
         assert!(allow_read.contains(&PathBuf::from("/home/tester/.local/bin")));
+        assert!(allow_read.contains(&PathBuf::from("/home/tester/.ssh")));
+        assert!(allow_read.contains(&PathBuf::from("/home/tester/.npm")));
+        assert!(allow_read.contains(&PathBuf::from("/home/tester/.cargo")));
+        assert!(allow_read.contains(&PathBuf::from("/home/tester/.local/share")));
+        assert!(allow_read.contains(&PathBuf::from("/home/tester/.claude.json")));
 
         assert!(allow_write.contains(&cwd));
         assert!(allow_write.contains(&brain));
@@ -1117,6 +1141,12 @@ mod tests {
         assert!(!allow_write.contains(&config));
         assert!(!allow_read.contains(&home));
         assert!(!allow_write.contains(&home));
+
+        // Docker-escape hardening: the docker config/socket root must not
+        // appear in either set, transitively denying the socket.
+        let docker = PathBuf::from("/home/tester/.docker");
+        assert!(!allow_read.contains(&docker));
+        assert!(!allow_write.contains(&docker));
     }
 
     #[test]
