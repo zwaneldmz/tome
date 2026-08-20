@@ -25,6 +25,8 @@
   "scripts": {
     "dev": "tauri dev",
     "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test --grep @smoke",
     "build": "vite build",
     "lint": "eslint src",
     "icon": "node scripts/gen-icon.mjs",
@@ -53,6 +55,7 @@
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tauri-apps/cli": "^2",
     "eslint": "^10.8.1",
     "vite": "^8.2.1",

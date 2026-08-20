@@ -42,3 +42,7 @@ src-tauri/binaries/
 # Planning + mockup sites: working decision-of-record docs and standalone
 # mockup sites, personal to the author — never committed.
 planning/
+
+# Playwright E2E artifacts
+test-results/
+playwright-report/
