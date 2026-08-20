@@ -91,6 +91,18 @@ pub const SANDBOX_EXEC_PATH: &str = "/usr/bin/sandbox-exec";
 ///   config dir (auth, allowlist, consents, event log, store keys) is now
 ///   unreadable AND unwritable from inside the gap.
 ///
+/// A third hardening, Docker-socket denial, is NEW in this port (not a
+/// divergence from the JS original, which had no such rule): the profile
+/// read- AND write-denies the known Docker socket paths by literal —
+/// `~/.docker/run/docker.sock` and `~/.docker/desktop/docker.sock` for
+/// Docker Desktop, plus the legacy `/var/run/docker.sock` and its
+/// macOS-canonical `/private/var/run/docker.sock` form. These close the
+/// container-runtime escape: the blanket `(deny network-outbound)` does
+/// NOT cover them (seatbelt's network filters match TCP/UDP sockets, not
+/// AF_UNIX paths), so without them a gapped pane could reach the Docker
+/// daemon and break out of the sandbox by spawning a privileged container
+/// on the host.
+///
 /// `app_data_dir` is Tauri's per-OS app-data directory — the direct
 /// counterpart of Electron's `app.getPath('userData')`, which is what the
 /// JS original's `userData` parameter always receives at its one real call
@@ -98,8 +110,19 @@ pub const SANDBOX_EXEC_PATH: &str = "/usr/bin/sandbox-exec";
 /// here — same as the JS original, which does plain string interpolation
 /// with no existence check; a caller handing in a relative or nonexistent
 /// path gets a profile that says exactly that back, verbatim.
-pub fn seatbelt_profile(app_data_dir: &Path, proxy_port: u16) -> String {
-    [
+///
+/// `home_dir` is the pane user's home directory, used only to name the two
+/// Docker Desktop socket paths; the `/var/run` paths are absolute and
+/// independent of it. Carries the same "not validated or required to
+/// exist" contract as `app_data_dir`.
+pub fn seatbelt_profile(app_data_dir: &Path, proxy_port: u16, home_dir: &Path) -> String {
+    let docker_sockets = [
+        home_dir.join(".docker/run/docker.sock"),
+        home_dir.join(".docker/desktop/docker.sock"),
+        std::path::PathBuf::from("/var/run/docker.sock"),
+        std::path::PathBuf::from("/private/var/run/docker.sock"),
+    ];
+    let mut lines = vec![
         "(version 1)".to_string(),
         "(allow default)".to_string(),
         "(deny network-outbound)".to_string(),
@@ -109,8 +132,18 @@ pub fn seatbelt_profile(app_data_dir: &Path, proxy_port: u16) -> String {
             app_data_dir.display()
         ),
         format!("(deny file-read* (subpath \"{}\"))", app_data_dir.display()),
-    ]
-    .join("\n")
+    ];
+    for sock in &docker_sockets {
+        lines.push(format!(
+            "(deny file-read* (literal \"{}\"))",
+            sock.display()
+        ));
+        lines.push(format!(
+            "(deny file-write* (literal \"{}\"))",
+            sock.display()
+        ));
+    }
+    lines.join("\n")
 }
 
 #[cfg(test)]
@@ -125,13 +158,22 @@ mod tests {
     #[test]
     fn profile_names_the_pane_proxy_port_and_denies_config_dir_reads_and_writes() {
         let dir = PathBuf::from("/Users/test/Library/Application Support/Tome");
+        let home = PathBuf::from("/Users/test");
         let expected = "(version 1)\n\
             (allow default)\n\
             (deny network-outbound)\n\
             (allow network-outbound (remote ip \"localhost:54321\"))\n\
             (deny file-write* (subpath \"/Users/test/Library/Application Support/Tome\"))\n\
-            (deny file-read* (subpath \"/Users/test/Library/Application Support/Tome\"))";
-        assert_eq!(seatbelt_profile(&dir, 54321), expected);
+            (deny file-read* (subpath \"/Users/test/Library/Application Support/Tome\"))\n\
+            (deny file-read* (literal \"/Users/test/.docker/run/docker.sock\"))\n\
+            (deny file-write* (literal \"/Users/test/.docker/run/docker.sock\"))\n\
+            (deny file-read* (literal \"/Users/test/.docker/desktop/docker.sock\"))\n\
+            (deny file-write* (literal \"/Users/test/.docker/desktop/docker.sock\"))\n\
+            (deny file-read* (literal \"/var/run/docker.sock\"))\n\
+            (deny file-write* (literal \"/var/run/docker.sock\"))\n\
+            (deny file-read* (literal \"/private/var/run/docker.sock\"))\n\
+            (deny file-write* (literal \"/private/var/run/docker.sock\"))";
+        assert_eq!(seatbelt_profile(&dir, 54321, &home), expected);
     }
 
     #[test]
@@ -141,9 +183,13 @@ mod tests {
         // (silently changing what "later wins" means) fails loudly here
         // even if the golden-text fixture above were ever updated to match
         // a bad reorder.
-        let profile = seatbelt_profile(&PathBuf::from("/tmp/tome-test"), 8443);
+        let profile = seatbelt_profile(
+            &PathBuf::from("/tmp/tome-test"),
+            8443,
+            &PathBuf::from("/Users/test"),
+        );
         let lines: Vec<&str> = profile.lines().collect();
-        assert_eq!(lines.len(), 6);
+        assert_eq!(lines.len(), 14);
         assert_eq!(lines[0], "(version 1)");
         assert_eq!(lines[1], "(allow default)");
         assert_eq!(lines[2], "(deny network-outbound)");
@@ -153,11 +199,50 @@ mod tests {
         );
         assert!(lines[4].starts_with("(deny file-write* (subpath "));
         assert!(lines[5].starts_with("(deny file-read* (subpath "));
+        // The eight Docker-socket denies follow, read-then-write for each
+        // of the four known socket paths, in the fixed order the builder
+        // emits them (see the `docker_sockets` array).
+        assert_eq!(
+            lines[6],
+            "(deny file-read* (literal \"/Users/test/.docker/run/docker.sock\"))"
+        );
+        assert_eq!(
+            lines[7],
+            "(deny file-write* (literal \"/Users/test/.docker/run/docker.sock\"))"
+        );
+        assert_eq!(
+            lines[8],
+            "(deny file-read* (literal \"/Users/test/.docker/desktop/docker.sock\"))"
+        );
+        assert_eq!(
+            lines[9],
+            "(deny file-write* (literal \"/Users/test/.docker/desktop/docker.sock\"))"
+        );
+        assert_eq!(
+            lines[10],
+            "(deny file-read* (literal \"/var/run/docker.sock\"))"
+        );
+        assert_eq!(
+            lines[11],
+            "(deny file-write* (literal \"/var/run/docker.sock\"))"
+        );
+        assert_eq!(
+            lines[12],
+            "(deny file-read* (literal \"/private/var/run/docker.sock\"))"
+        );
+        assert_eq!(
+            lines[13],
+            "(deny file-write* (literal \"/private/var/run/docker.sock\"))"
+        );
     }
 
     #[test]
     fn denies_write_to_the_whole_app_data_subtree() {
-        let profile = seatbelt_profile(&PathBuf::from("/tmp/tome-test"), 1);
+        let profile = seatbelt_profile(
+            &PathBuf::from("/tmp/tome-test"),
+            1,
+            &PathBuf::from("/Users/test"),
+        );
         assert!(profile.contains("(deny file-write* (subpath \"/tmp/tome-test\"))"));
     }
 
@@ -169,7 +254,11 @@ mod tests {
         // now covers every main-owned file under the config dir in one
         // rule — a store key, a chat transcript, or a future file added
         // there is denied by construction rather than by being remembered.
-        let profile = seatbelt_profile(&PathBuf::from("/tmp/tome-test"), 1);
+        let profile = seatbelt_profile(
+            &PathBuf::from("/tmp/tome-test"),
+            1,
+            &PathBuf::from("/Users/test"),
+        );
         assert!(profile.contains("(deny file-read* (subpath \"/tmp/tome-test\"))"));
     }
 
@@ -179,9 +268,26 @@ mod tests {
         // on the host directly. The profile must now name ONLY the pane's
         // own proxy port, so the proxy (and its allowlist) is the sole
         // route out even on loopback.
-        let profile = seatbelt_profile(&PathBuf::from("/x"), 4242);
+        let profile = seatbelt_profile(&PathBuf::from("/x"), 4242, &PathBuf::from("/Users/test"));
         assert!(profile.contains("(remote ip \"localhost:4242\")"));
         assert!(!profile.contains("localhost:*"));
+    }
+
+    #[test]
+    fn denies_the_docker_socket_by_literal_read_and_write() {
+        // The container-runtime escape: a unix socket path the
+        // `(deny network-outbound)` rule does not cover (seatbelt network
+        // filters match TCP/UDP, not AF_UNIX). Pin that the Docker Desktop
+        // socket under the pane's home dir is denied for BOTH reads and
+        // writes, so a gapped pane cannot reach the Docker daemon to spawn
+        // a privileged host container.
+        let home = PathBuf::from("/Users/test");
+        let profile = seatbelt_profile(&PathBuf::from("/tmp/tome-test"), 1, &home);
+        assert!(
+            profile.contains("(deny file-read* (literal \"/Users/test/.docker/run/docker.sock\"))")
+        );
+        assert!(profile
+            .contains("(deny file-write* (literal \"/Users/test/.docker/run/docker.sock\"))"));
     }
 
     #[test]
@@ -190,16 +296,24 @@ mod tests {
         // module doc comment): this test itself carries no #[cfg] and must
         // pass on a Linux CI runner too, not just macOS — only
         // `SANDBOX_EXEC_PATH` above is behind `cfg(target_os = "macos")`.
-        let profile = seatbelt_profile(&PathBuf::from("/any/path"), 1);
+        let profile = seatbelt_profile(
+            &PathBuf::from("/any/path"),
+            1,
+            &PathBuf::from("/Users/test"),
+        );
         assert!(profile.starts_with("(version 1)\n"));
-        assert!(profile.ends_with("(subpath \"/any/path\"))"));
+        assert!(profile.ends_with("(deny file-write* (literal \"/private/var/run/docker.sock\"))"));
     }
 
     #[test]
     fn does_not_touch_the_filesystem_or_require_the_path_to_exist() {
         // Matches the JS original's plain template-literal interpolation —
         // no existence check, no canonicalization.
-        let profile = seatbelt_profile(&PathBuf::from("/this/path/does/not/exist/anywhere"), 1);
+        let profile = seatbelt_profile(
+            &PathBuf::from("/this/path/does/not/exist/anywhere"),
+            1,
+            &PathBuf::from("/Users/test"),
+        );
         assert!(profile.contains("/this/path/does/not/exist/anywhere"));
     }
 }

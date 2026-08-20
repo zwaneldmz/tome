@@ -164,6 +164,7 @@ async fn build_agent_env(
     pane_id: &str,
     gapped: bool,
     inner_argv: Vec<String>,
+    cwd: &Path,
     config_dir: &Path,
     state_dir: &Path,
     registry: &Arc<ProxyRegistry>,
@@ -215,7 +216,9 @@ async fn build_agent_env(
         let env = tome_flow::agent_env::compose_agent_env(&process_env, &extras)
             .into_iter()
             .collect();
-        let profile = tome_flow::egress::seatbelt::seatbelt_profile(config_dir, proxy.port());
+        let home = std::env::home_dir().unwrap_or_default();
+        let profile =
+            tome_flow::egress::seatbelt::seatbelt_profile(config_dir, proxy.port(), &home);
         registry.insert(pane_id.to_string(), proxy);
         return Ok(BuiltEnv {
             env,
@@ -256,6 +259,19 @@ async fn build_agent_env(
             .into_iter()
             .collect();
 
+        // The curated allow-list (rung-1 bwrap mounts + rung-2 Landlock)
+        // from the node's workspace root — the app config dir stays out of
+        // both sets (see `tome_flow::egress::linux::default_landlock_allow_set`).
+        let home = std::env::home_dir().unwrap_or_default();
+        let path_entries: Vec<PathBuf> = login
+            .path
+            .split(':')
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .collect();
+        let (allow_read, allow_write) =
+            tome_flow::egress::linux::default_landlock_allow_set(cwd, &home, None, &path_entries);
+
         let spec = tome_flow::egress::linux::GappedSpawnSpec {
             pane_id: pane_id.to_string(),
             proxy_port: proxy.port(),
@@ -266,14 +282,8 @@ async fn build_agent_env(
             // tome-runner only ever spawns headless flow nodes — there is
             // no interactive pty pane path in this binary at all.
             headless: true,
-            // F-02 (Landlock) degradation: this env-builder seam does not
-            // carry the node's workspace root (the runner owns the cwd),
-            // so no allow-set can be named here. tome-shim treats an empty
-            // allow-set as "fail open on file confinement" (netns egress
-            // still enforced, stderr NOTE). Thread the workspace through
-            // to close this for headless nodes.
-            allow_read: Vec::new(),
-            allow_write: Vec::new(),
+            allow_read,
+            allow_write,
         };
         let argv = match &strategy {
             tome_flow::egress::linux::SandboxStrategy::Bwrap => {
@@ -312,7 +322,7 @@ pub fn build(flow_path: &str, config_dir: PathBuf, state_dir: PathBuf) -> Runner
             let config_dir = config_dir.clone();
             let state_dir = state_dir.clone();
             Arc::new(
-                move |pane_id: String, gapped: bool, inner_argv: Vec<String>| {
+                move |pane_id: String, gapped: bool, inner_argv: Vec<String>, cwd: PathBuf| {
                     let registry = registry.clone();
                     let config_dir = config_dir.clone();
                     let state_dir = state_dir.clone();
@@ -321,6 +331,7 @@ pub fn build(flow_path: &str, config_dir: PathBuf, state_dir: PathBuf) -> Runner
                             &pane_id,
                             gapped,
                             inner_argv,
+                            &cwd,
                             &config_dir,
                             &state_dir,
                             &registry,

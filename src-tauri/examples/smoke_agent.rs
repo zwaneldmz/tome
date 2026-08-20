@@ -37,8 +37,8 @@ async fn main() {
     log(&evidence, "=== live-agent smoke: start ===");
 
     // --- the same pieces pty_create assembles ---
-    let dir = std::path::PathBuf::from(std::env::var("HOME").unwrap())
-        .join("Library/Application Support/tech.abantu.tome");
+    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+    let dir = home.join("Library/Application Support/tech.abantu.tome");
 
     // 1. PaneProxy on loopback with the production default allowlist.
     let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
@@ -66,7 +66,7 @@ async fn main() {
     // of this example hit. Production (`pty.rs`) passes the profile
     // string inline the same way. F-01: the profile names THIS proxy's
     // port (created above so the port exists first).
-    let profile = tome_lib::egress::seatbelt::seatbelt_profile(&dir, port);
+    let profile = tome_lib::egress::seatbelt::seatbelt_profile(&dir, port, &home);
 
     // 3. spawn a login zsh under sandbox-exec with the pane's proxy env.
     let pty_system = native_pty_system();

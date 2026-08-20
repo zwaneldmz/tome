@@ -164,7 +164,7 @@ fn build_env(
     env::RunnerEnv {
         can_open_file: Arc::new(|_p: &Path| true),
         build_agent_env: Arc::new(
-            move |pane_id: String, gapped: bool, _inner_argv: Vec<String>| {
+            move |pane_id: String, gapped: bool, _inner_argv: Vec<String>, _cwd: PathBuf| {
                 build_calls.lock().unwrap().push((pane_id.clone(), gapped));
                 // Mirrors the one branch of the real builder that matters
                 // here: no gap, no sandbox wrap — without it a test could
@@ -725,10 +725,13 @@ async fn marks_the_failure_skips_its_descendants_and_leaves_a_sibling_branch_alo
 async fn keeps_scheduling_when_a_node_fails_before_its_process_ever_exists() {
     let root = workspace();
     let mut e = build_env(&Recorders::default(), HashMap::new(), None, true);
-    e.build_agent_env = Arc::new(|_pane_id: String, _gapped: bool, _argv: Vec<String>| {
-        Box::pin(async move { Err::<env::BuiltEnv, String>("proxy port exhausted".to_string()) })
-            as env::BoxFuture<Result<env::BuiltEnv, String>>
-    });
+    e.build_agent_env = Arc::new(
+        |_pane_id: String, _gapped: bool, _argv: Vec<String>, _cwd: PathBuf| {
+            Box::pin(
+                async move { Err::<env::BuiltEnv, String>("proxy port exhausted".to_string()) },
+            ) as env::BoxFuture<Result<env::BuiltEnv, String>>
+        },
+    );
     e.spawn = Arc::new(|_req| panic!("nothing may be spawned without an environment"));
     let path = write_flow(&root, &flow_doc("no-env", &["n1", "n2"], &[("n1", "n2")]));
     let runs = new_runs();
@@ -884,7 +887,7 @@ async fn never_spawns_into_a_run_cancelled_while_its_egress_was_still_coming_up(
     let gate2 = gate.clone();
     let e = env::RunnerEnv {
         can_open_file: Arc::new(|_p| true),
-        build_agent_env: Arc::new(move |_pane_id, _gapped, _argv| {
+        build_agent_env: Arc::new(move |_pane_id, _gapped, _argv, _cwd: PathBuf| {
             let gate = gate2.clone();
             Box::pin(async move {
                 gate.notified().await;

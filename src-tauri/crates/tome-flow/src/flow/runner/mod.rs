@@ -747,7 +747,14 @@ async fn launch(runs: &Arc<Runner>, env: &RunnerEnv, run_id: &str, node_id: &str
         )
     };
 
-    let built = match (env.build_agent_env)(pane_id.clone(), gapped, inner_argv.clone()).await {
+    let built = match (env.build_agent_env)(
+        pane_id.clone(),
+        gapped,
+        inner_argv.clone(),
+        root.clone(),
+    )
+    .await
+    {
         Ok(b) => b,
         Err(msg) => {
             // Best-effort — a log this run cannot safely write to must

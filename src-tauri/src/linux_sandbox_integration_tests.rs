@@ -247,6 +247,13 @@ struct SandboxFixture {
     proxy: Arc<PaneProxy>,
     argv: Vec<String>,
     config_dir: tempfile::TempDir,
+    /// The sandboxed node's workspace root — the one writable path the
+    /// curated allow-list grants, used by the write-confinement tests.
+    workspace: tempfile::TempDir,
+    /// The hermetic home the allow-set's `~/.ssh`, `~/.npm`, `~/.docker`,
+    /// etc. roots are resolved under — used by the docker-socket test to
+    /// plant a fake socket at `~/.docker/run/docker.sock`.
+    home: tempfile::TempDir,
     #[allow(dead_code)] // kept alive for the fixture's lifetime — dropping removes the tempdir
     runtime_dir: tempfile::TempDir,
     blocked: Arc<Mutex<Vec<BlockedEvent>>>,
@@ -276,6 +283,8 @@ async fn build_fixture(
     }
     let runtime_dir = tempfile::tempdir().expect("runtime tempdir");
     let config_dir = tempfile::tempdir().expect("config tempdir");
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    let home_dir = tempfile::tempdir().expect("home tempdir");
     let sock_path = runtime_dir.path().join(format!("pane-{pane_id}.sock"));
     ensure_pane_socket_dir(runtime_dir.path()).expect("ensure pane socket dir");
 
@@ -288,6 +297,17 @@ async fn build_fixture(
     .expect("spawn PaneProxy");
     let proxy = Arc::new(proxy);
 
+    // The curated allow-list the bwrap mount set derives from — the SAME
+    // roots the rung-2 Landlock path uses (one allow-list, two mechanisms).
+    // A hermetic temp home (not the real $HOME) so the test sandbox never
+    // accidentally mounts the host user's own ~/.ssh, ~/.npm, etc.
+    let (allow_read, allow_write) = default_landlock_allow_set(
+        workspace.path(),
+        home_dir.path(),
+        None,
+        &[PathBuf::from("/usr/bin"), PathBuf::from("/bin")],
+    );
+
     let spec = GappedSpawnSpec {
         pane_id: pane_id.to_string(),
         proxy_port: proxy.port(),
@@ -296,10 +316,8 @@ async fn build_fixture(
         shim_path: resolve_tome_shim_bin(),
         inner_argv,
         headless: true, // no interactive terminal need for any of these tests
-        // Rung 1 (bwrap) ignores the Landlock allow-set — `--tmpfs` over
-        // the config dir is bwrap's own file confinement. Empty is fine.
-        allow_read: Vec::new(),
-        allow_write: Vec::new(),
+        allow_read,
+        allow_write,
     };
     let argv = build_bwrap_argv(&spec);
 
@@ -307,6 +325,8 @@ async fn build_fixture(
         proxy,
         argv,
         config_dir,
+        workspace,
+        home: home_dir,
         runtime_dir,
         blocked,
     })
@@ -852,6 +872,127 @@ fn pgrep_matches(pattern: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+// ==== Docker-escape hardening: rung-1 (bwrap) curated-mount confinement ====
+//
+// The curated mount set (`egress::linux::build_bwrap_mounts`) must deny a
+// gapped pane the same things rung-2's Landlock allow-list denies: the
+// Docker socket is unreachable, host files outside the allow-list are not
+// writable, and the workspace + /tmp stay writable (no over-restriction).
+// These run the rung-1 mechanism (bwrap) with the SAME curated allow-list
+// `build_fixture` now derives from `default_landlock_allow_set`.
+
+#[tokio::test]
+#[ignore = "requires a real Linux netns + bwrap — see .github/workflows/linux-sandbox.yml"]
+async fn rung1_cannot_reach_the_docker_socket() {
+    let Some(fixture) = build_fixture(
+        "rung1-docker",
+        vec!["127.0.0.1".to_string()],
+        vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "cat \"$TOME_DOCKER_SOCK\" >/dev/null 2>&1 && echo REACHABLE || echo DENIED"
+                .to_string(),
+        ],
+    )
+    .await
+    else {
+        return;
+    };
+
+    // Plant a fake socket at `~/.docker/run/docker.sock` under the fixture's
+    // hermetic home — the exact path the allow-list must NOT include (see
+    // `default_landlock_allow_set`'s Docker-escape note). Because `.docker`
+    // is absent from the allow-list, the curated mounts never expose it.
+    let sock_dir = fixture.home.path().join(".docker/run");
+    std::fs::create_dir_all(&sock_dir).expect("create fake .docker/run");
+    let sock = sock_dir.join("docker.sock");
+    std::fs::write(&sock, b"not-a-real-socket").expect("write fake docker.sock");
+
+    let child = fixture.spawn(&[("TOME_DOCKER_SOCK", sock.to_str().unwrap())]);
+    let out = run_to_completion(child, TEST_TIMEOUT).await;
+    assert!(!out.timed_out, "the docker-socket probe should not hang");
+    assert_eq!(
+        out.stdout.trim(),
+        "DENIED",
+        "a rung-1 pane must not reach the Docker socket, stderr: {}",
+        out.stderr
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires a real Linux netns + bwrap — see .github/workflows/linux-sandbox.yml"]
+async fn rung1_cannot_write_a_host_file_outside_the_allow_set() {
+    let Some(fixture) = build_fixture(
+        "rung1-write-outside",
+        vec!["127.0.0.1".to_string()],
+        vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "echo OVERWRITE > \"$TOME_OUTSIDE_FILE\" 2>/dev/null && echo WROTE || echo DENIED"
+                .to_string(),
+        ],
+    )
+    .await
+    else {
+        return;
+    };
+
+    // A host file OUTSIDE the allow-list (its own tempdir, not the
+    // fixture's workspace/home) — the sandbox must neither see nor modify it.
+    let outside = tempfile::tempdir().expect("outside tempdir");
+    let target = outside.path().join("secret.txt");
+    std::fs::write(&target, "ORIGINAL").expect("write host marker");
+
+    let child = fixture.spawn(&[("TOME_OUTSIDE_FILE", target.to_str().unwrap())]);
+    let out = run_to_completion(child, TEST_TIMEOUT).await;
+    assert!(!out.timed_out, "the outside-write probe should not hang");
+    assert_eq!(
+        out.stdout.trim(),
+        "DENIED",
+        "a rung-1 pane must not write outside the allow-set, stderr: {}",
+        out.stderr
+    );
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap_or_default(),
+        "ORIGINAL",
+        "the host file must be untouched"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires a real Linux netns + bwrap — see .github/workflows/linux-sandbox.yml"]
+async fn rung1_can_still_write_the_workspace() {
+    let Some(fixture) = build_fixture(
+        "rung1-write-workspace",
+        vec!["127.0.0.1".to_string()],
+        vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            "echo ok > \"$TOME_WS_FILE\"".to_string(),
+        ],
+    )
+    .await
+    else {
+        return;
+    };
+
+    let ws_file = fixture.workspace.path().join("out.txt");
+    let child = fixture.spawn(&[("TOME_WS_FILE", ws_file.to_str().unwrap())]);
+    let out = run_to_completion(child, TEST_TIMEOUT).await;
+    assert!(!out.timed_out, "the workspace-write probe should not hang");
+    assert_eq!(
+        out.code,
+        Some(0),
+        "a rung-1 pane must be able to write its workspace, stderr: {}",
+        out.stderr
+    );
+    assert_eq!(
+        std::fs::read_to_string(&ws_file).unwrap_or_default().trim(),
+        "ok",
+        "the workspace write must have landed on the host"
+    );
 }
 
 // ==== F-02: rung-2 (self-unshare) Landlock file confinement ====

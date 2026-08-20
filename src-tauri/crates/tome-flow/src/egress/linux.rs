@@ -166,14 +166,15 @@ cannot enforce the egress for a gapped pane. Install bubblewrap — e.g. \
 /// "which pane is this," useful to a future integrator for logging/
 /// diagnostics even where it never lands in a shell argv.
 ///
-/// `allow_read`/`allow_write` are the Landlock allow-set for rung 2
-/// (F-02 — the pentest's Linux file-confinement finding): the roots a
-/// self-unshared pane may read (broadly) and write (narrowly) beneath.
-/// Emitted by [`build_self_unshare_argv`] as repeatable `--allow-read`/
-/// `--allow-write` flags and enforced by `tome-shim` via Landlock; the
-/// app config dir appears in NEITHER set, which is what hides the store
-/// and `egress-auth.json` from the pane. Rung 1 (bwrap) ignores both
-/// fields — `--tmpfs` already replaces the config dir there.
+/// `allow_read`/`allow_write` are the shared allow-set for BOTH sandbox
+/// rungs (F-02 — the pentest's Linux file-confinement finding): the roots
+/// a gapped pane may read (broadly) and write (narrowly) beneath. Rung 2
+/// ([`build_self_unshare_argv`]) emits them as repeatable `--allow-read`/
+/// `--allow-write` flags enforced by `tome-shim` via Landlock; rung 1
+/// ([`build_bwrap_argv`] via [`build_bwrap_mounts`]) consumes the SAME
+/// roots as its bwrap mount set — one allow-list, two mechanisms. The app
+/// config dir appears in NEITHER set, which is what hides the store and
+/// `egress-auth.json` from the pane on both rungs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GappedSpawnSpec {
     pub pane_id: String,
@@ -222,30 +223,112 @@ pub struct GappedSpawnSpec {
 
 // ---- rung 1: bwrap ----
 
-/// Assembles the exact `bwrap` argv THE DESIGN specifies for a gapped
-/// pane. Pure string/`Vec` construction — no shell is ever involved in
-/// running the result (a future integrator execs `argv[0]` with `argv[1..]`
-/// directly, for example, via `portable_pty::CommandBuilder`, the same way
+/// System roots that are always present on any Linux install this app runs
+/// on, and therefore bound with a hard `--ro-bind` (fail loudly rather than
+/// silently skip if the host is broken). Every OTHER read root — the
+/// merged-usr compat dirs (`/bin`→`/usr/bin`, `/lib`, `/lib64`, …) and the
+/// login shell's harvested PATH entries — may be absent or symlinked, so
+/// those use `--ro-bind-try` (skip if missing) instead.
+const HARD_RO_BIND_ROOTS: &[&str] = &["/usr", "/etc"];
+
+/// Roots that get a dedicated bwrap mount rather than a plain `--bind`/
+/// `--ro-bind` of the host path (fresh procfs/devtmpfs/tmpfs, never the
+/// host's own). Matches the paths `default_landlock_allow_set` lists.
+const SPECIAL_ROOTS: &[&str] = &["/proc", "/sys", "/dev", "/tmp", "/run"];
+
+fn is_special_root(p: &Path) -> bool {
+    SPECIAL_ROOTS.iter().any(|s| p == Path::new(s))
+}
+
+/// Assembles the mount section of the rung-1 bwrap argv: a curated
+/// allow-list derived from `spec.allow_read`/`allow_write` (the SAME roots
+/// rung-2 enforces via Landlock — one allow-list, two mechanisms). This
+/// replaces the old `--dev-bind / /`, which exposed the entire host
+/// read-write and let a gapped pane reach the Docker socket.
+///
+/// Order is load-bearing (later mounts overlay earlier ones): special
+/// mounts first, then read-only binds, then read-write binds, then the
+/// proxy-socket bind and the config-dir tmpfs last.
+pub fn build_bwrap_mounts(spec: &GappedSpawnSpec) -> Vec<String> {
+    let mut m: Vec<String> = vec![
+        "--proc".into(),
+        "/proc".into(),
+        "--dev".into(),
+        "/dev".into(),
+        "--ro-bind-try".into(),
+        "/sys".into(),
+        "/sys".into(),
+        "--tmpfs".into(),
+        "/tmp".into(),
+        "--tmpfs".into(),
+        "/run".into(),
+    ];
+
+    let mut ro: Vec<PathBuf> = Vec::new();
+    let mut rw: Vec<PathBuf> = Vec::new();
+    for p in &spec.allow_read {
+        if !is_special_root(p) && !spec.allow_write.contains(p) {
+            ro.push(p.clone());
+        }
+    }
+    for p in &spec.allow_write {
+        if !is_special_root(p) {
+            rw.push(p.clone());
+        }
+    }
+
+    for p in &ro {
+        let flag = if HARD_RO_BIND_ROOTS.iter().any(|s| p == Path::new(s)) {
+            "--ro-bind"
+        } else {
+            "--ro-bind-try"
+        };
+        m.push(flag.to_string());
+        m.push(p.display().to_string());
+        m.push(p.display().to_string());
+    }
+    // Write roots use `--bind-try`: the workspace and brain vault are
+    // created by the caller before spawn so they bind for real, but the
+    // optional user dirs/files (~/.npm, ~/.cargo, ~/.claude.json, …) may
+    // not exist yet on a fresh machine — a hard `--bind` would abort the
+    // whole sandbox on the first missing one.
+    for p in &rw {
+        m.push("--bind-try".to_string());
+        m.push(p.display().to_string());
+        m.push(p.display().to_string());
+    }
+
+    m.push("--bind".to_string());
+    m.push(spec.host_socket_path.display().to_string());
+    m.push(CONTAINER_PROXY_SOCK_PATH.to_string());
+    m.push("--tmpfs".to_string());
+    m.push(spec.app_config_dir.display().to_string());
+    m
+}
+
+/// Assembles the `bwrap` argv for a gapped pane. Pure string/`Vec`
+/// construction — no shell is ever involved in running the result (a
+/// future integrator execs `argv[0]` with `argv[1..]` directly, for
+/// example, via `portable_pty::CommandBuilder`, the same way
 /// `ipc::pty::build_pty_command` already wraps `sandbox-exec` on macOS —
 /// see that function's doc comment for the parallel), so no element here
 /// is ever shell-quoted or needs to be: a path containing a space is just
 /// one `Vec` element, not a token boundary.
 ///
-/// Flag order matches THE DESIGN's own invocation left to right, plus
-/// this module's one deviation (`--tmpfs /run`, see its call-site comment
-/// below): `--unshare-user --unshare-net --die-with-parent
-/// [--new-session] --cap-add cap_net_admin --dev-bind / / --tmpfs /run
-/// --bind <host> <container> --tmpfs <config-dir> -- <shim> --port <P>
-/// --sock <container> -- <inner...>`. The relative order of
-/// `--unshare-user`/`--unshare-net`/`--die-with-parent`/`--cap-add`/
-/// (`--new-session`) does not matter to bwrap itself (none of them are
-/// filesystem operations, which ARE order-sensitive — `--dev-bind / /`
-/// must precede the narrower `--tmpfs`/`--bind` ops so those apply ON
-/// TOP of the whole-root bind, not the other way around, and `--tmpfs
-/// /run` must precede the `/run/tome/proxy.sock` bind so the socket's
-/// destination parent exists — and is mkdir-able — when the bind is
-/// set up); a fixed order is still pinned by this module's own tests
-/// below purely so a future edit that reorders them is a visible,
+/// The mount section is a curated allow-list — see [`build_bwrap_mounts`]
+/// — derived from the SAME `allow_read`/`allow_write` roots rung 2
+/// enforces via Landlock (one allow-list, two mechanisms). This replaces
+/// the old `--dev-bind / /`, which mounted the whole host read-write and
+/// let a gapped pane reach the Docker socket. Flag order:
+/// `--unshare-user --unshare-net --die-with-parent [--new-session]
+/// --cap-add cap_net_admin <mounts> -- <shim> --port <P> --sock
+/// <container> -- <inner...>`. The non-mount flags' relative order does
+/// not matter to bwrap (none are filesystem operations); the mount order
+/// DOES matter and is owned entirely by [`build_bwrap_mounts`] (special
+/// mounts first, then read-only binds, then read-write binds, then the
+/// proxy-socket bind and config-dir tmpfs last — later mounts overlay
+/// earlier ones). A fixed flag order is still pinned by this module's own
+/// tests below purely so a future edit that reorders them is a visible,
 /// deliberate diff rather than a silent one.
 ///
 /// ### `--new-session` and `headless`
@@ -276,36 +359,7 @@ pub fn build_bwrap_argv(spec: &GappedSpawnSpec) -> Vec<String> {
     }
     argv.push("--cap-add".to_string());
     argv.push("cap_net_admin".to_string());
-    argv.push("--dev-bind".to_string());
-    argv.push("/".to_string());
-    argv.push("/".to_string());
-    // A fresh, world-writable tmpfs over /run, BEFORE the proxy-socket
-    // bind below. Not in THE DESIGN's literal bwrap line — flagged as a
-    // deviation, and load-bearing: this process is UNPRIVILEGED, so the
-    // uid_map bwrap writes maps the caller's real uid (not root), and the
-    // sandboxed setup phase runs without CAP_DAC_OVERRIDE (bwrap clears
-    // the whole bounding set except --cap-add'd caps; cap_net_admin is
-    // for the shim's loopback ioctl, not filesystem access). The bind's
-    // destination parent /run/tome must then be CREATED inside the
-    // namespace — but the --dev-bind'd host /run is root-owned 0755, so
-    // mkdir fails EACCES ("bwrap: Can't mkdir parents for
-    // /run/tome/proxy.sock: Permission denied") — reproduced and
-    // strace-verified against bwrap 0.9.0 as an unprivileged user, and
-    // the exact failure the linux-sandbox CI job's first real run hit.
-    // Root callers never saw it (root maps to root; CAP_DAC_OVERRIDE).
-    // A tmpfs /run is created fresh (and owned by the mapped uid) on
-    // every invocation, so /run/tome under it is mkdir-able. It also
-    // hides whatever else lived in the host's /run from the sandboxed
-    // process — a small confinement bonus, not a regression: nothing a
-    // gapped pane legitimately needs lives in /run (its proxy socket is
-    // the one thing, and the very next op binds it back in).
-    argv.push("--tmpfs".to_string());
-    argv.push("/run".to_string());
-    argv.push("--bind".to_string());
-    argv.push(spec.host_socket_path.display().to_string());
-    argv.push(CONTAINER_PROXY_SOCK_PATH.to_string());
-    argv.push("--tmpfs".to_string());
-    argv.push(spec.app_config_dir.display().to_string());
+    argv.extend(build_bwrap_mounts(spec));
     argv.push("--".to_string());
     argv.push(spec.shim_path.display().to_string());
     argv.push("--port".to_string());
@@ -328,7 +382,8 @@ pub fn auth_file_path(app_config_dir: &Path) -> PathBuf {
     app_config_dir.join(AUTH_FILE_NAME)
 }
 
-/// The Landlock allow-set a rung-2 pane spawns with (F-02). Landlock is an
+/// The shared allow-set both Linux sandbox rungs spawn with: rung-1 bwrap
+/// mounts plus rung-2 Landlock (F-02). Landlock is an
 /// allow-list LSM: a ruleset HANDLES a set of access rights, then grants
 /// them per-path via `PathBeneath` rules, and handled-but-ungranted rights
 /// are denied — there is no "deny this one subtree" rule. So the safe
@@ -343,9 +398,10 @@ pub fn auth_file_path(app_config_dir: &Path) -> PathBuf {
 /// breaks agent CLIs worse than an honestly-absent one, so the allow set
 /// here is the documented first cut, and the shim FAILS OPEN (egress-only,
 /// stderr NOTE) when Landlock itself is unavailable rather than refusing
-/// the pane. Known, documented limitations of this set: `~/.claude.json`
-/// (claude's home-root config file) and `~/.ssh` are NOT writable/readable
-/// — a pane that needs either uses an ungapped spawn. CI integration tests
+/// the pane. `~/.docker` and the Docker socket (`$XDG_RUNTIME_DIR/docker.sock`
+/// for rootless) are deliberately excluded from BOTH sets, which
+/// transitively blocks the `docker run -v /:/host` escape without a
+/// per-file rule. CI integration tests
 /// (`linux_sandbox_integration_tests.rs`) assert the three load-bearing
 /// properties: auth file unreadable, config dir unwritable, workspace +
 /// `/tmp` still writable.
@@ -386,6 +442,23 @@ pub fn default_landlock_allow_set(
     // Agent config dirs — the same three the design doc names. Also
     // ~/.cache, which every real agent CLI writes through.
     for rel in [".claude", ".cache", ".config/opencode", ".config/pi"] {
+        let path = home.join(rel);
+        allow_read.push(path.clone());
+        allow_write.push(path);
+    }
+    // Docker-escape hardening: a small, curated set of common tool roots
+    // that MUST NOT include any container-runtime socket path. The Docker
+    // socket (~/.docker/..., rootless $XDG_RUNTIME_DIR/docker.sock) is
+    // deliberately absent from BOTH sets, which transitively blocks the
+    // `docker run -v /:/host` escape without a per-file rule.
+    for rel in [".ssh", ".npm", ".cargo", ".local/share", ".config/gh"] {
+        let path = home.join(rel);
+        allow_read.push(path.clone());
+        allow_write.push(path);
+    }
+    // Single-file entries directly under home (PathBeneath on a file grants
+    // that file specifically; no need to allowlist home wholesale).
+    for rel in [".claude.json", ".gitconfig", ".npmrc"] {
         let path = home.join(rel);
         allow_read.push(path.clone());
         allow_write.push(path);
@@ -790,9 +863,22 @@ mod tests {
             allow_read: vec![
                 PathBuf::from("/usr"),
                 PathBuf::from("/etc"),
+                PathBuf::from("/bin"),
+                PathBuf::from("/lib"),
+                PathBuf::from("/opt"),
+                PathBuf::from("/proc"),
+                PathBuf::from("/sys"),
+                PathBuf::from("/dev"),
+                PathBuf::from("/tmp"),
                 PathBuf::from("/home/tester/proj"),
+                PathBuf::from("/home/tester/.claude"),
             ],
-            allow_write: vec![PathBuf::from("/home/tester/proj"), PathBuf::from("/tmp")],
+            allow_write: vec![
+                PathBuf::from("/tmp"),
+                PathBuf::from("/dev"),
+                PathBuf::from("/home/tester/proj"),
+                PathBuf::from("/home/tester/.claude"),
+            ],
         }
     }
 
@@ -810,11 +896,38 @@ mod tests {
                 "--die-with-parent",
                 "--cap-add",
                 "cap_net_admin",
-                "--dev-bind",
-                "/",
-                "/",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--ro-bind-try",
+                "/sys",
+                "/sys",
+                "--tmpfs",
+                "/tmp",
                 "--tmpfs",
                 "/run",
+                "--ro-bind",
+                "/usr",
+                "/usr",
+                "--ro-bind",
+                "/etc",
+                "/etc",
+                "--ro-bind-try",
+                "/bin",
+                "/bin",
+                "--ro-bind-try",
+                "/lib",
+                "/lib",
+                "--ro-bind-try",
+                "/opt",
+                "/opt",
+                "--bind-try",
+                "/home/tester/proj",
+                "/home/tester/proj",
+                "--bind-try",
+                "/home/tester/.claude",
+                "/home/tester/.claude",
                 "--bind",
                 "/run/user/1000/tome/pane-pty-42.sock",
                 "/run/tome/proxy.sock",
@@ -851,11 +964,38 @@ mod tests {
                 "--new-session",
                 "--cap-add",
                 "cap_net_admin",
-                "--dev-bind",
-                "/",
-                "/",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--ro-bind-try",
+                "/sys",
+                "/sys",
+                "--tmpfs",
+                "/tmp",
                 "--tmpfs",
                 "/run",
+                "--ro-bind",
+                "/usr",
+                "/usr",
+                "--ro-bind",
+                "/etc",
+                "/etc",
+                "--ro-bind-try",
+                "/bin",
+                "/bin",
+                "--ro-bind-try",
+                "/lib",
+                "/lib",
+                "--ro-bind-try",
+                "/opt",
+                "/opt",
+                "--bind-try",
+                "/home/tester/proj",
+                "/home/tester/proj",
+                "--bind-try",
+                "/home/tester/.claude",
+                "/home/tester/.claude",
                 "--bind",
                 "/run/user/1000/tome/pane-pty-42.sock",
                 "/run/tome/proxy.sock",
@@ -886,22 +1026,25 @@ mod tests {
     }
 
     #[test]
-    fn build_bwrap_argv_dev_binds_root_before_the_narrower_bind_and_tmpfs() {
-        // Filesystem-operation ordering is load-bearing for bwrap itself
-        // (later operations on/under an already-bound path layer on top of
-        // it) — pin it explicitly, not just via the one big exact-sequence
-        // test above, so a refactor that reorders these specifically fails
-        // loudly here even if the big pin is ever updated to match a bad
-        // reorder.
+    fn build_bwrap_argv_has_no_dev_bind_root_and_builds_a_mounts_section() {
+        // The old whole-root `--dev-bind / /` must be gone — no --dev-bind
+        // flag and no literal `/` dev-bind pair — and the curated mount
+        // section (build_bwrap_mounts) must be present in its place.
         let argv = build_bwrap_argv(&sample_spec());
-        let dev_bind = argv.iter().position(|a| a == "--dev-bind").unwrap();
-        let bind = argv.iter().position(|a| a == "--bind").unwrap();
-        let tmpfs = argv.iter().position(|a| a == "--tmpfs").unwrap();
         assert!(
-            dev_bind < bind,
-            "--dev-bind / / must precede the narrower --bind"
+            !argv.contains(&"--dev-bind".to_string()),
+            "the old --dev-bind must be gone from the argv"
         );
-        assert!(dev_bind < tmpfs, "--dev-bind / / must precede --tmpfs");
+        let mounts = build_bwrap_mounts(&sample_spec());
+        assert!(
+            !mounts.is_empty(),
+            "build_bwrap_mounts must produce a non-empty mount section"
+        );
+        let first_mount = mounts.first().unwrap().clone();
+        assert!(
+            argv.windows(2).any(|w| w[0] == first_mount),
+            "the mounts section produced by build_bwrap_mounts must appear in the argv"
+        );
     }
 
     #[test]
@@ -952,7 +1095,10 @@ mod tests {
     #[test]
     fn build_bwrap_argv_uses_the_same_fixed_container_path_for_both_bind_and_sock() {
         let argv = build_bwrap_argv(&sample_spec());
-        let bind_idx = argv.iter().position(|a| a == "--bind").unwrap();
+        // The proxy-socket bind is the LAST `--bind` (write-root binds and
+        // the socket bind both use `--bind`; the socket bind is emitted
+        // last inside build_bwrap_mounts).
+        let bind_idx = argv.iter().rposition(|a| a == "--bind").unwrap();
         let sock_idx = argv.iter().position(|a| a == "--sock").unwrap();
         assert_eq!(argv[bind_idx + 2], CONTAINER_PROXY_SOCK_PATH);
         assert_eq!(argv[sock_idx + 1], CONTAINER_PROXY_SOCK_PATH);
@@ -971,9 +1117,94 @@ mod tests {
         spec.pane_id = pane_id.to_string();
         spec.host_socket_path = sock.clone();
         let argv = build_bwrap_argv(&spec);
-        let bind_idx = argv.iter().position(|a| a == "--bind").unwrap();
+        // The socket bind is the LAST `--bind` (see the comment in
+        // build_bwrap_argv_uses_the_same_fixed_container_path_for_both_bind_and_sock).
+        let bind_idx = argv.iter().rposition(|a| a == "--bind").unwrap();
         assert_eq!(argv[bind_idx + 1], sock.display().to_string());
         assert!(argv[bind_idx + 1].contains("pane-flow-node-7.sock"));
+    }
+
+    // ==== build_bwrap_mounts ====
+
+    #[test]
+    fn build_bwrap_mounts_emits_no_dev_bind_and_never_binds_the_config_dir_or_docker() {
+        let mounts = build_bwrap_mounts(&sample_spec());
+        assert!(
+            !mounts.contains(&"--dev-bind".to_string()),
+            "the curated mount set must not dev-bind anything"
+        );
+
+        // The app config dir must appear ONLY as the argument after a
+        // --tmpfs (never as a --bind source or destination).
+        let config = sample_spec().app_config_dir.display().to_string();
+        for (i, tok) in mounts.iter().enumerate() {
+            if tok == &config {
+                assert_eq!(
+                    mounts.get(i.wrapping_sub(1)).map(|s| s.as_str()),
+                    Some("--tmpfs"),
+                    "config dir {config} must only follow a --tmpfs, found at index {i}"
+                );
+            }
+        }
+
+        // No token may reference the Docker socket or ~/.docker.
+        for tok in &mounts {
+            assert!(
+                !tok.contains("docker.sock") && !tok.contains(".docker"),
+                "mount token {tok} must not reference Docker"
+            );
+        }
+    }
+
+    #[test]
+    fn build_bwrap_mounts_uses_ro_bind_try_for_merged_usr_roots() {
+        let mounts = build_bwrap_mounts(&sample_spec());
+        for root in ["/bin", "/lib", "/opt"] {
+            let idx = mounts.iter().position(|t| t == root).unwrap();
+            assert_eq!(
+                mounts[idx - 1],
+                "--ro-bind-try",
+                "{root} must use --ro-bind-try"
+            );
+        }
+        for root in ["/usr", "/etc"] {
+            let idx = mounts.iter().position(|t| t == root).unwrap();
+            assert_eq!(mounts[idx - 1], "--ro-bind", "{root} must use --ro-bind");
+        }
+    }
+
+    #[test]
+    fn build_bwrap_mounts_maps_tmp_dev_proc_sys_to_special_mounts() {
+        let mounts = build_bwrap_mounts(&sample_spec());
+
+        // /tmp and /dev must NOT appear as plain --bind/--ro-bind pairs —
+        // they are handled by --tmpfs and --dev respectively.
+        for root in ["/tmp", "/dev"] {
+            let idx = mounts.iter().position(|t| t == root).unwrap();
+            let prev = &mounts[idx - 1];
+            assert!(
+                prev != "--bind" && prev != "--bind-try" && prev != "--ro-bind",
+                "{root} must be a special mount, but is preceded by {prev}"
+            );
+        }
+
+        // The special mounts must appear at the head, in order.
+        assert_eq!(
+            &mounts[..11],
+            &[
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--ro-bind-try",
+                "/sys",
+                "/sys",
+                "--tmpfs",
+                "/tmp",
+                "--tmpfs",
+                "/run",
+            ]
+        );
     }
 
     // ==== build_self_unshare_argv ====
@@ -999,11 +1230,31 @@ mod tests {
                 "--allow-read",
                 "/etc",
                 "--allow-read",
+                "/bin",
+                "--allow-read",
+                "/lib",
+                "--allow-read",
+                "/opt",
+                "--allow-read",
+                "/proc",
+                "--allow-read",
+                "/sys",
+                "--allow-read",
+                "/dev",
+                "--allow-read",
+                "/tmp",
+                "--allow-read",
                 "/home/tester/proj",
-                "--allow-write",
-                "/home/tester/proj",
+                "--allow-read",
+                "/home/tester/.claude",
                 "--allow-write",
                 "/tmp",
+                "--allow-write",
+                "/dev",
+                "--allow-write",
+                "/home/tester/proj",
+                "--allow-write",
+                "/home/tester/.claude",
                 "--",
                 "zsh",
                 "-l",
@@ -1102,6 +1353,28 @@ mod tests {
         assert!(allow_read.contains(&PathBuf::from("/home/tester/.cache")));
         assert!(allow_read.contains(&PathBuf::from("/home/tester/.local/bin")));
 
+        // The curated safe-dir block: every entry is readable AND writable.
+        for safe_dir in [
+            ".ssh",
+            ".npm",
+            ".cargo",
+            ".local/share",
+            ".config/gh",
+            ".claude.json",
+            ".gitconfig",
+            ".npmrc",
+        ] {
+            let path = home.join(safe_dir);
+            assert!(
+                allow_read.contains(&path),
+                "{safe_dir} must be read-allowed"
+            );
+            assert!(
+                allow_write.contains(&path),
+                "{safe_dir} must be write-allowed"
+            );
+        }
+
         assert!(allow_write.contains(&cwd));
         assert!(allow_write.contains(&brain));
         assert!(allow_write.contains(&PathBuf::from("/tmp")));
@@ -1117,6 +1390,12 @@ mod tests {
         assert!(!allow_write.contains(&config));
         assert!(!allow_read.contains(&home));
         assert!(!allow_write.contains(&home));
+
+        // Docker-escape hardening: the docker config/socket root must not
+        // appear in either set, transitively denying the socket.
+        let docker = PathBuf::from("/home/tester/.docker");
+        assert!(!allow_read.contains(&docker));
+        assert!(!allow_write.contains(&docker));
     }
 
     #[test]
