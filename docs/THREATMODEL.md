@@ -134,6 +134,14 @@ it never silently strips them. The pane reaches it only over a Unix socket
 `app_data_dir`; the seatbelt `docker.sock` denies and the Linux `~/.docker`
 exclusion stay in force, so the gateway is the pane's only container route.
 
+Bind-source checking is component-aware, rejects `..`/`.` traversal
+components outright, and — when the source exists — resolves symlinks and
+re-checks the real path against the resolved roots (a symlink planted in
+the pane-writable workspace must not smuggle an outside target through).
+Known residual: a symlink swapped in *after* the check is a TOCTOU the
+gateway cannot close, because the daemon resolves the path again at mount
+time; the exposure window is the create→start gap of a single request.
+
 ### 5. Unlock widens the proxy, never the sandbox
 
 Unlocking a pane flips its per-pane proxy from "providers allowlist" to

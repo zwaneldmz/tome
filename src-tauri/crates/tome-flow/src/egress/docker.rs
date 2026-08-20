@@ -239,7 +239,32 @@ impl DockerPolicy {
         }
         let p = Path::new(src);
         if p.is_absolute() {
-            let allowed = self.allowed_mount_roots.iter().any(|r| p.starts_with(r));
+            // `starts_with` is component-aware but purely lexical: a `..`
+            // inside an allowed root ("workspace/../../etc") still prefix-
+            // matches, and the daemon resolves the real path at mount time.
+            // Reject traversal components outright.
+            use std::path::Component;
+            if p.components()
+                .any(|c| matches!(c, Component::ParentDir | Component::CurDir))
+            {
+                return Err(DockerDenied {
+                    reason: format!("host bind mount {src} contains path traversal"),
+                });
+            }
+            let allowed = self.allowed_mount_roots.iter().any(|r| {
+                // When the source exists, its resolved form must stay inside
+                // the resolved root — a symlink planted in the (pane-writable)
+                // workspace must not smuggle an outside target past the check.
+                // A missing source keeps the lexical verdict (the daemon
+                // creates missing bind dirs). ponytail: a symlink swapped in
+                // AFTER this check is a TOCTOU hole the gateway cannot close —
+                // the daemon resolves at mount time; noted in THREATMODEL.
+                p.starts_with(r)
+                    && match (std::fs::canonicalize(p), std::fs::canonicalize(r)) {
+                        (Ok(cp), Ok(cr)) => cp.starts_with(&cr),
+                        _ => true,
+                    }
+            });
             if !allowed {
                 return Err(DockerDenied {
                     reason: format!("host bind mount {src} is outside the allowed roots"),
@@ -775,6 +800,61 @@ mod tests {
     #[test]
     fn denies_relative_host_bind_mount() {
         assert_denied(&policy(), json!({ "Binds": ["./data:/data"] }), "relative");
+    }
+
+    #[test]
+    fn denies_traversal_that_lexically_prefix_matches_an_allowed_root() {
+        assert_denied(
+            &policy(),
+            json!({ "Binds": ["/Users/test/workspace/../../../etc:/host-etc"] }),
+            "traversal",
+        );
+        assert_denied(
+            &policy(),
+            json!({ "Binds": ["/Users/test/workspace/./..:/x"] }),
+            "traversal",
+        );
+        assert_denied(
+            &policy(),
+            json!({ "Mounts": [{ "Type": "bind",
+                "Source": "/Users/test/workspace/../secrets", "Target": "/s" }] }),
+            "traversal",
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn denies_symlink_inside_workspace_pointing_outside() {
+        let outside = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let link = workspace.path().join("link");
+        std::os::unix::fs::symlink(outside.path(), &link).unwrap();
+        let p = DockerPolicy {
+            allowed_mount_roots: vec![workspace.path().to_path_buf()],
+        };
+        assert_denied(
+            &p,
+            json!({ "Binds": [format!("{}:/data", link.display())] }),
+            "outside",
+        );
+        // A real subdir of the workspace still mounts fine.
+        let ok = workspace.path().join("app");
+        std::fs::create_dir(&ok).unwrap();
+        check(&p, json!({ "Binds": [format!("{}:/app", ok.display())] })).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn allows_workspace_whose_own_path_goes_through_a_symlink() {
+        // macOS tempdirs live under /var -> /private/var; the allowed root
+        // and the bind source resolve consistently, so this must not deny.
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("proj");
+        std::fs::create_dir(&sub).unwrap();
+        let p = DockerPolicy {
+            allowed_mount_roots: vec![dir.path().to_path_buf()],
+        };
+        check(&p, json!({ "Binds": [format!("{}:/proj", sub.display())] })).unwrap();
     }
 
     #[test]
