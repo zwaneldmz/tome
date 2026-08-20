@@ -241,6 +241,9 @@ async fn build_production_agent_env(
             pane_id: pane_id.to_string(),
             proxy_port: proxy.port(),
             host_socket_path: sock_path,
+            // Sandboxed Docker is a per-pane (interactive) capability; the
+            // headless flow-runner path does not grant it yet.
+            docker_gateway_socket: None,
             app_config_dir: dir,
             shim_path,
             inner_argv,

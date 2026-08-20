@@ -892,6 +892,16 @@ export async function preferencesModal() {
       tome.conductor.allowRun(v)
     }
   )
+  toggleRow(
+    security,
+    'Allow sandboxed Docker',
+    'a filtered gateway, never the real daemon socket — default off',
+    () => prefs.dockerGateway,
+    (v) => {
+      prefs.dockerGateway = v
+      tome.store.set('docker-gateway', v)
+    }
+  )
   const enroll = el('button', 'ag-btn ghost', 'Enroll authenticator (2FA)…')
   enroll.type = 'button'
   enroll.addEventListener('click', () => {

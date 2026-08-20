@@ -111,6 +111,15 @@ pub struct AppState {
     /// documented as a judgment call in this slice's task report.
     pub proxies: Mutex<HashMap<String, Arc<egress::proxy::PaneProxy>>>,
 
+    /// Live per-pane filtered Docker gateways, keyed by pane id — the
+    /// opt-in "safe Docker" route for gapped panes (see
+    /// `egress::docker`'s module doc comment). `Arc`-wrapped for the same
+    /// reason as `proxies` above. A pane with sandboxed Docker enabled has
+    /// an entry here whose socket path is handed to the pane as
+    /// `DOCKER_HOST`; a pane without it has none, so there is no socket for
+    /// it to reach. Tore down alongside the proxy on pane close.
+    pub docker_gateways: Mutex<HashMap<String, Arc<egress::docker::DockerGateway>>>,
+
     /// One scheduled auto-relock task per currently-`Open` pane, keyed by
     /// pane id — the Rust analog of `egress.js`'s per-pane `st.timer`
     /// (`setTimeout(() => relockPane(paneId), minutes * 60_000)`), which
@@ -224,6 +233,7 @@ impl AppState {
             popout_approved: Mutex::new(std::collections::HashSet::new()),
             egress: egress::EgressState::new(),
             proxies: Mutex::new(HashMap::new()),
+            docker_gateways: Mutex::new(HashMap::new()),
             relock_timers: Mutex::new(HashMap::new()),
             relock_timer_generation: std::sync::atomic::AtomicU64::new(0),
             auth: Mutex::new(None),

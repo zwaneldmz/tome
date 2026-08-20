@@ -312,6 +312,7 @@ async fn build_fixture(
         pane_id: pane_id.to_string(),
         proxy_port: proxy.port(),
         host_socket_path: sock_path,
+        docker_gateway_socket: None,
         app_config_dir: config_dir.path().to_path_buf(),
         shim_path: resolve_tome_shim_bin(),
         inner_argv,

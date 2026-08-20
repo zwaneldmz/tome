@@ -284,6 +284,9 @@ async fn build_agent_env(
             headless: true,
             allow_read,
             allow_write,
+            // Sandboxed Docker is interactive-pane-only for now (see
+            // src-tauri/src/flow_env.rs) — headless nodes get no gateway.
+            docker_gateway_socket: None,
         };
         let argv = match &strategy {
             tome_flow::egress::linux::SandboxStrategy::Bwrap => {

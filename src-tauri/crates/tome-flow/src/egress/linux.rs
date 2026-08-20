@@ -123,6 +123,13 @@ pub const BWRAP_BIN: &str = "bwrap";
 /// module doc comment's "fallback ladder" section for why.
 pub const CONTAINER_PROXY_SOCK_PATH: &str = "/run/tome/proxy.sock";
 
+/// The fixed in-namespace path [`build_bwrap_mounts`] bind-mounts the pane's
+/// filtered Docker gateway socket to, so the pane's `DOCKER_HOST` can be a
+/// stable `unix:///run/tome/docker-gw.sock` regardless of the host's real
+/// path. Sibling of [`CONTAINER_PROXY_SOCK_PATH`]; only ever set when the
+/// pane has sandboxed Docker enabled.
+pub const CONTAINER_DOCKER_SOCK_PATH: &str = "/run/tome/docker-gw.sock";
+
 /// Directory name nested under `$XDG_RUNTIME_DIR` (or the fallback root)
 /// that holds every pane's loopback-bridge unix socket. See
 /// [`pane_socket_path`].
@@ -188,6 +195,15 @@ pub struct GappedSpawnSpec {
     /// [`build_self_unshare_argv`] passes it through unchanged (no mount
     /// namespace to remap it into).
     pub host_socket_path: PathBuf,
+    /// The pane's filtered Docker gateway socket, at its REAL host path —
+    /// `None` when sandboxed Docker is not enabled for this pane.
+    /// [`build_bwrap_mounts`] bind-mounts it to
+    /// [`CONTAINER_DOCKER_SOCK_PATH`] inside the namespace (so the pane's
+    /// `DOCKER_HOST=unix:///run/tome/docker-gw.sock` resolves);
+    /// [`build_self_unshare_argv`] adds it to the Landlock allow-set so the
+    /// socket is reachable at its host path. The REAL Docker daemon socket
+    /// is NEVER one of these — it stays excluded, exactly as before.
+    pub docker_gateway_socket: Option<PathBuf>,
     /// The app config directory to deny the sandboxed process write (and,
     /// via [`auth_file_path`], the auth file read) access to —
     /// [`build_bwrap_argv`] replaces it with a fresh tmpfs;
@@ -317,6 +333,15 @@ pub fn build_bwrap_mounts(spec: &GappedSpawnSpec) -> Vec<String> {
     m.push("--bind".to_string());
     m.push(spec.host_socket_path.display().to_string());
     m.push(CONTAINER_PROXY_SOCK_PATH.to_string());
+    // Sandboxed Docker: bind-mount the pane's filtered gateway socket to a
+    // fixed in-namespace path so `DOCKER_HOST=unix:///run/tome/docker-gw.sock`
+    // resolves. The REAL daemon socket is never in this mount set — it stays
+    // excluded, so `docker` in the pane can only ever reach the gateway.
+    if let Some(docker_sock) = &spec.docker_gateway_socket {
+        m.push("--bind".to_string());
+        m.push(docker_sock.display().to_string());
+        m.push(CONTAINER_DOCKER_SOCK_PATH.to_string());
+    }
     m.push("--tmpfs".to_string());
     m.push(spec.app_config_dir.display().to_string());
     m
@@ -542,6 +567,16 @@ pub fn build_self_unshare_argv(spec: &GappedSpawnSpec) -> Vec<String> {
     for path in &spec.allow_write {
         argv.push("--allow-write".to_string());
         argv.push(path.display().to_string());
+    }
+    // Sandboxed Docker: the pane reaches the gateway socket at its REAL host
+    // path on this rung (no mount namespace to remap it into), so the socket
+    // must be in the Landlock allow-set. The real daemon socket is never
+    // added — it stays excluded, exactly as before.
+    if let Some(docker_sock) = &spec.docker_gateway_socket {
+        argv.push("--allow-read".to_string());
+        argv.push(docker_sock.display().to_string());
+        argv.push("--allow-write".to_string());
+        argv.push(docker_sock.display().to_string());
     }
     argv.push("--".to_string());
     argv.extend(spec.inner_argv.iter().cloned());
@@ -872,6 +907,7 @@ mod tests {
             pane_id: "pty-42".to_string(),
             proxy_port: 54321,
             host_socket_path: PathBuf::from("/run/user/1000/tome/pane-pty-42.sock"),
+            docker_gateway_socket: None,
             app_config_dir: PathBuf::from("/home/tester/.config/tome"),
             shim_path: PathBuf::from("/opt/tome/bin/tome-shim"),
             inner_argv: s(&["zsh", "-l", "-c", "claude"]),

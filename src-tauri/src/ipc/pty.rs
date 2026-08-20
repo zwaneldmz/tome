@@ -89,7 +89,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::agent_spawn::{self, AgentEntry};
 use crate::ipc::auth::ceil_seconds;
-use crate::ipc::egress::{close_pane_and_proxy, create_gapped_pane_proxy};
+use crate::ipc::egress::{close_pane_and_proxy, create_docker_gateway, create_gapped_pane_proxy};
 use crate::{
     agent_env, brain, custom_agents, egress, eventlog, events, lock_gate, login_env, pty_authority,
     state::AppState, store,
@@ -122,6 +122,11 @@ pub struct PtyCreateOpts {
     pub ws: Option<String>,
     pub model: Option<String>,
     pub auth: Option<Value>,
+    /// Per-pane "sandboxed Docker" toggle (spawn-time, like `egress`). The
+    /// renderer may ask for it, but it is only honored when the global
+    /// `docker-gateway` store key is also on AND the pane is gapped — an
+    /// ungapped pane already has full host access and needs no gateway.
+    pub docker: Option<bool>,
 }
 
 /// How a gapped pane's command line gets wrapped, once its `PaneProxy` is
@@ -555,6 +560,20 @@ pub async fn pty_create(
     let effective_gapped =
         pty_authority::resolve_gapping(opts.egress.unwrap_or(false), policy_default);
 
+    // Sandboxed Docker (opt-in, default OFF — the opposite of `egress-default`,
+    // which gaps by default): honored only when the global `docker-gateway`
+    // store key is explicitly `true` AND the pane is gapped AND the pane
+    // asked for it. An ungapped pane already has full host access (including
+    // the real Docker socket), so it never needs the filtered gateway.
+    let docker_gateway_store = {
+        let docker_dir = dir.clone();
+        tokio::task::spawn_blocking(move || store::get(&docker_dir, "docker-gateway", locked))
+            .await
+            .map_err(|e| e.to_string())?
+    };
+    let effective_docker =
+        effective_gapped && docker_gateway_store == json!(true) && opts.docker.unwrap_or(false);
+
     // ---- TOME-001 re-auth ceremony (before resolving cwd — matches
     // createPty's own order) ----
     if !effective_gapped {
@@ -626,6 +645,11 @@ pub async fn pty_create(
     // fail-closed refusal — see this module's doc comment ----
     let mut proxy_port: Option<u16> = None;
     let mut sandbox: Option<SandboxWrap> = None;
+    let mut docker_socket: Option<PathBuf> = None;
+    // The socket path as the PANE will see it in `DOCKER_HOST`. Differs from
+    // `docker_socket` (the host path) only on the bwrap rung, where the
+    // gateway socket is bind-mounted to a fixed in-namespace path.
+    let mut docker_env_socket: Option<PathBuf> = None;
     if effective_gapped {
         let host_os = if cfg!(target_os = "macos") {
             HostOs::MacOs
@@ -634,6 +658,13 @@ pub async fn pty_create(
         } else {
             HostOs::Other
         };
+        // Sandboxed Docker: best-effort (see `create_docker_gateway`'s doc
+        // comment) — created once here so BOTH the macOS env and the Linux
+        // bind-mount can reference its socket path.
+        if effective_docker {
+            let mount_roots = state.open_folders.read().unwrap().clone();
+            docker_socket = create_docker_gateway(&app, &state, &opts.id, mount_roots).await;
+        }
         // F-01: the seatbelt profile must name THIS pane's proxy port (the
         // old `localhost:*` carve-out let a gapped pane reach every
         // host-local service directly), and the port is kernel-assigned at
@@ -658,12 +689,16 @@ pub async fn pty_create(
                     cmd: cmd.to_string(),
                     args,
                 });
+                // macOS: no bind-mount remap — the pane reaches the gateway
+                // at its real host path.
+                docker_env_socket = docker_socket.clone();
             }
             GappedSpawnDecision::Linux(strategy) => {
                 // Rung 3: refuse loudly with an actionable message BEFORE
                 // touching anything — no proxy created, nothing to tear
                 // down. Never a silent unenforced spawn (TOME-001).
                 if let egress::linux::SandboxStrategy::Refuse { reason } = &strategy {
+                    close_pane_and_proxy(&app, &state, &opts.id);
                     events::append(
                         &app,
                         eventlog::make_event(
@@ -681,6 +716,15 @@ pub async fn pty_create(
                 }
 
                 // Rung 1 (bwrap) or rung 2 (self-unshare): real enforcement.
+                // The pane sees the gateway socket at the bind-mounted
+                // in-namespace path under bwrap, and at its real host path
+                // under self-unshare (no mount namespace to remap it into).
+                docker_env_socket = match strategy {
+                    egress::linux::SandboxStrategy::Bwrap => {
+                        Some(PathBuf::from(egress::linux::CONTAINER_DOCKER_SOCK_PATH))
+                    }
+                    _ => docker_socket.clone(),
+                };
                 // The loopback bridge's unix socket path — bind-mounted
                 // (bwrap) or reached at its real host path (self-unshare;
                 // no mount namespace to remap it into, see
@@ -748,6 +792,7 @@ pub async fn pty_create(
                     pane_id: opts.id.clone(),
                     proxy_port: proxy.port(),
                     host_socket_path: sock_path,
+                    docker_gateway_socket: docker_socket.clone(),
                     app_config_dir: dir.clone(),
                     shim_path,
                     inner_argv,
@@ -782,6 +827,7 @@ pub async fn pty_create(
                 sandbox = Some(SandboxWrap::Full { argv });
             }
             GappedSpawnDecision::RefuseUnsupportedOs => {
+                close_pane_and_proxy(&app, &state, &opts.id);
                 events::append(
                     &app,
                     eventlog::make_event(
@@ -831,6 +877,7 @@ pub async fn pty_create(
         brain_path,
         core_vault_root,
         proxy_port,
+        docker_gateway_socket: docker_env_socket,
     };
     let env = pane_env(&process_env, &login.path, &extras);
 
@@ -1370,6 +1417,7 @@ mod tests {
             pane_id: "pty-1".to_string(),
             proxy_port: 54321,
             host_socket_path: PathBuf::from("/run/user/1000/tome/pane-pty-1.sock"),
+            docker_gateway_socket: None,
             app_config_dir: PathBuf::from("/home/tester/.config/tome"),
             shim_path: PathBuf::from("/opt/tome/tome-shim"),
             inner_argv: vec![

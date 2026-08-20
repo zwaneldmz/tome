@@ -5,7 +5,15 @@
 export const wsState = { ws: { workspaces: [], active: -1 }, activeRoot: null }
 
 // egress / conductor preferences (persisted via the store)
-export const prefs = { egressDefault: true, conductorRun: false }
+export const prefs = {
+  egressDefault: true,
+  conductorRun: false,
+  // Sandboxed Docker: the global master (persisted) and the per-pane
+  // spawn-mode (session-only — whether the NEXT agent pane asks for the
+  // filtered gateway). Both must be on for a pane to get DOCKER_HOST.
+  dockerGateway: false,
+  dockerPanes: false,
+}
 
 // live egress state mirrored from main
 export const agState = {

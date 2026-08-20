@@ -118,7 +118,23 @@ both rungs: the auth file unreadable, the config dir unwritable, the
 workspace + `/tmp` still writable, and (rung 1) the Docker socket
 unreachable and host files outside the allow-set unwritable.
 
-### 4. Unlock widens the proxy, never the sandbox
+### 4. Sandboxed Docker goes through a filtered gateway, never the daemon socket
+
+The raw Docker socket is a container-runtime escape (see invariant 3), so
+"safe Docker" is an opt-in that routes the pane to a **filtered gateway**
+(`src-tauri/crates/tome-flow/src/egress/docker.rs`) instead of re-granting
+the socket. Off by default; enabled only when the global `docker-gateway`
+store key is on AND the pane is gapped AND the pane asked for it at spawn.
+The gateway owns the real daemon connection and refuses the host-escape
+primitives (privileged, `host` network/pid/ipc/uts/userns modes, dangerous
+capabilities, host bind mounts outside the workspace roots, device access,
+and unconfined security profiles) with a `403` + a `docker:denied` event —
+it never silently strips them. The pane reaches it only over a Unix socket
+(`DOCKER_HOST=unix://<gateway>`), whose path is `0700`-parented and outside
+`app_data_dir`; the seatbelt `docker.sock` denies and the Linux `~/.docker`
+exclusion stay in force, so the gateway is the pane's only container route.
+
+### 5. Unlock widens the proxy, never the sandbox
 
 Unlocking a pane flips its per-pane proxy from "providers allowlist" to
 "open" (`src-tauri/crates/tome-flow/src/egress/mod.rs`'s `PaneMode`,
@@ -140,7 +156,7 @@ pane-alive + host-allowed at CONNECT-completion time (TOME-002), so a tunnel
 that was only ever allowed because the pane was in `Open` mode can't finish
 handshaking after a relock and pipe forever.
 
-### 5. The scrollback → model → tool-call confused-deputy loop
+### 6. The scrollback → model → tool-call confused-deputy loop
 
 The conductor reads terminal scrollback (`read_terminal`) and the model's
 tool calls act on the workspace (`type_in_terminal`, `open_pane`,
@@ -164,7 +180,7 @@ case:
 - The tool loop is bounded (`MAX_TURNS = 8`,
   `src-tauri/src/conductor/chat.rs`).
 
-### 6. `TOME_SHOT` dev bypass
+### 7. `TOME_SHOT` dev bypass
 
 `TOME_SHOT` (screenshot/demo mode) bypasses the lock gate and opens a
 representative set of panes for development screenshots. It exists for
@@ -176,7 +192,7 @@ parameter rather than reading the env itself. Until that is independently
 verified end-to-end, treat `TOME_SHOT` as a full auth bypass and never ship
 it set.
 
-### 7. `xlsx` is fetched from the SheetJS CDN, not the npm registry
+### 8. `xlsx` is fetched from the SheetJS CDN, not the npm registry
 
 `package.json` pins `xlsx` to `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`
 because SheetJS stopped publishing to the npm registry after 0.18.5; the CDN
@@ -185,7 +201,7 @@ lockfile pins the tarball's integrity hash, so the bytes are verified at
 install. Do not "fix" this to an npm-registry version — those are stale or
 third-party repacks.
 
-### 8. Custom agents widen the spawn allowlist by user consent — the backend still owns the command line
+### 9. Custom agents widen the spawn allowlist by user consent — the backend still owns the command line
 
 Users may declare their own agent CLIs (Preferences → Agents, store key
 `custom-agents`) and spawn them as pane kinds. This deliberately widens the
@@ -219,7 +235,7 @@ entries:
   is lock-gated. The write can therefore queue a vetted-shape entry for
   later, never execute one.
 
-### 9. The speech-model download is a fixed, user-triggered fetch from the main process
+### 10. The speech-model download is a fixed, user-triggered fetch from the main process
 
 The whisper.cpp fallback's one-click model download (`stt:downloadModel`,
 `src-tauri/src/ipc/stt.rs` → `src-tauri/src/stt.rs`'s `download_model`)
