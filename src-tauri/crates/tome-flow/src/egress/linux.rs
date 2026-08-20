@@ -298,6 +298,15 @@ pub fn build_bwrap_mounts(spec: &GappedSpawnSpec) -> Vec<String> {
         m.push(p.display().to_string());
     }
 
+    // The shim is exec'd INSIDE the namespace (bwrap execs argv[0] after
+    // its mounts are set up), and its parent dir (the target/ bundle or the
+    // app's bin dir) is not otherwise part of the allow-list — bind just
+    // the binary, read-only, so it is reachable at its own path. Without
+    // this a gapped pane can't even start the sandbox (execvp ENOENT).
+    m.push("--ro-bind".to_string());
+    m.push(spec.shim_path.display().to_string());
+    m.push(spec.shim_path.display().to_string());
+
     m.push("--bind".to_string());
     m.push(spec.host_socket_path.display().to_string());
     m.push(CONTAINER_PROXY_SOCK_PATH.to_string());
@@ -928,6 +937,9 @@ mod tests {
                 "--bind-try",
                 "/home/tester/.claude",
                 "/home/tester/.claude",
+                "--ro-bind",
+                "/opt/tome/bin/tome-shim",
+                "/opt/tome/bin/tome-shim",
                 "--bind",
                 "/run/user/1000/tome/pane-pty-42.sock",
                 "/run/tome/proxy.sock",
@@ -996,6 +1008,9 @@ mod tests {
                 "--bind-try",
                 "/home/tester/.claude",
                 "/home/tester/.claude",
+                "--ro-bind",
+                "/opt/tome/bin/tome-shim",
+                "/opt/tome/bin/tome-shim",
                 "--bind",
                 "/run/user/1000/tome/pane-pty-42.sock",
                 "/run/tome/proxy.sock",
@@ -1205,6 +1220,26 @@ mod tests {
                 "/run",
             ]
         );
+    }
+
+    #[test]
+    fn build_bwrap_mounts_ro_binds_the_shim_binary() {
+        // The shim is exec'd INSIDE the namespace, so its own path must be
+        // reachable even when its parent dir (target/, the app's bin dir)
+        // is not part of the allow-list.
+        let spec = sample_spec();
+        let mounts = build_bwrap_mounts(&spec);
+        let idx = mounts
+            .iter()
+            .position(|t| t == &spec.shim_path.display().to_string())
+            .expect("the shim path must appear in the mount set");
+        assert_eq!(
+            mounts[idx - 1],
+            "--ro-bind",
+            "the shim binary must be --ro-bind'd, not {0}",
+            mounts[idx - 1]
+        );
+        assert_eq!(mounts[idx + 1], mounts[idx]);
     }
 
     // ==== build_self_unshare_argv ====
