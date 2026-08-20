@@ -1007,7 +1007,7 @@ async fn run_json_is_rewritten_on_every_transition_and_matches_the_final_snapsho
     let runs = new_runs();
     let result = start_run(runs.clone(), e, path).await;
     let id = result["id"].as_str().unwrap().to_string();
-    let run = settled(&runs, &id, 8000).await;
+    let mut run = settled(&runs, &id, 8000).await;
 
     let file = PathBuf::from(run["dir"].as_str().unwrap()).join("run.json");
     let mut on_disk = Value::Null;
@@ -1015,7 +1015,12 @@ async fn run_json_is_rewritten_on_every_transition_and_matches_the_final_snapsho
         if let Ok(text) = std::fs::read_to_string(&file) {
             if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
                 on_disk = parsed;
-                if on_disk["status"] != json!("running") {
+                // Product promotion runs after the run settles and rewrites
+                // run.json once more, so re-read the snapshot every poll —
+                // the one settled() returned goes stale (`products: null`
+                // in memory vs `[]` on disk) and the compare races.
+                run = settled(&runs, &id, 8000).await;
+                if on_disk["status"] != json!("running") && on_disk == run {
                     break;
                 }
             }
