@@ -232,8 +232,8 @@ pub struct GappedSpawnSpec {
 const HARD_RO_BIND_ROOTS: &[&str] = &["/usr", "/etc"];
 
 /// Roots that get a dedicated bwrap mount rather than a plain `--bind`/
-/// `--ro-bind` of the host path (fresh procfs/devtmpfs/tmpfs, never the
-/// host's own). Matches the paths `default_landlock_allow_set` lists.
+/// `--ro-bind` of the host path. Matches the paths
+/// `default_landlock_allow_set` lists.
 const SPECIAL_ROOTS: &[&str] = &["/proc", "/sys", "/dev", "/tmp", "/run"];
 
 fn is_special_root(p: &Path) -> bool {
@@ -253,7 +253,14 @@ pub fn build_bwrap_mounts(spec: &GappedSpawnSpec) -> Vec<String> {
     let mut m: Vec<String> = vec![
         "--proc".into(),
         "/proc".into(),
-        "--dev".into(),
+        // Bind the HOST's /dev (recursive) rather than `--dev /dev`: bwrap's
+        // `--dev` mounts a fresh devtmpfs which forces `opt_needs_devpts` and a
+        // SECOND user namespace; the netns then belongs to the first userns and
+        // the shim loses cap_net_admin for the loopback ioctl ("failed to bring
+        // lo up: Operation not permitted"). This matches what the old
+        // `--dev-bind / /` gave for /dev.
+        "--dev-bind".into(),
+        "/dev".into(),
         "/dev".into(),
         "--ro-bind-try".into(),
         "/sys".into(),
@@ -907,7 +914,8 @@ mod tests {
                 "cap_net_admin",
                 "--proc",
                 "/proc",
-                "--dev",
+                "--dev-bind",
+                "/dev",
                 "/dev",
                 "--ro-bind-try",
                 "/sys",
@@ -978,7 +986,8 @@ mod tests {
                 "cap_net_admin",
                 "--proc",
                 "/proc",
-                "--dev",
+                "--dev-bind",
+                "/dev",
                 "/dev",
                 "--ro-bind-try",
                 "/sys",
@@ -1042,13 +1051,15 @@ mod tests {
 
     #[test]
     fn build_bwrap_argv_has_no_dev_bind_root_and_builds_a_mounts_section() {
-        // The old whole-root `--dev-bind / /` must be gone — no --dev-bind
-        // flag and no literal `/` dev-bind pair — and the curated mount
-        // section (build_bwrap_mounts) must be present in its place.
+        // The old whole-root `--dev-bind / /` must be gone — no
+        // `--dev-bind` immediately followed by a literal `/` — and the
+        // curated mount section (build_bwrap_mounts) must be present in its
+        // place. `--dev-bind /dev /dev` (the shim's minimal device set) is
+        // still allowed.
         let argv = build_bwrap_argv(&sample_spec());
         assert!(
-            !argv.contains(&"--dev-bind".to_string()),
-            "the old --dev-bind must be gone from the argv"
+            !argv.windows(2).any(|w| w[0] == "--dev-bind" && w[1] == "/"),
+            "the old whole-root --dev-bind / / must be gone from the argv"
         );
         let mounts = build_bwrap_mounts(&sample_spec());
         assert!(
@@ -1142,12 +1153,22 @@ mod tests {
     // ==== build_bwrap_mounts ====
 
     #[test]
-    fn build_bwrap_mounts_emits_no_dev_bind_and_never_binds_the_config_dir_or_docker() {
+    fn build_bwrap_mounts_does_not_dev_bind_the_whole_root_and_never_binds_the_config_dir_or_docker(
+    ) {
         let mounts = build_bwrap_mounts(&sample_spec());
-        assert!(
-            !mounts.contains(&"--dev-bind".to_string()),
-            "the curated mount set must not dev-bind anything"
-        );
+
+        // `--dev-bind` may appear only for /dev (the shim's minimal device
+        // set), never for the whole root (`--dev-bind / /`) — that is the
+        // exact host-exposing operation this curated set replaces.
+        for (i, tok) in mounts.iter().enumerate() {
+            if tok == "--dev-bind" {
+                assert_ne!(
+                    mounts.get(i + 1).map(|s| s.as_str()),
+                    Some("/"),
+                    "the mount set must not dev-bind the whole root"
+                );
+            }
+        }
 
         // The app config dir must appear ONLY as the argument after a
         // --tmpfs (never as a --bind source or destination).
@@ -1205,11 +1226,12 @@ mod tests {
 
         // The special mounts must appear at the head, in order.
         assert_eq!(
-            &mounts[..11],
+            &mounts[..12],
             &[
                 "--proc",
                 "/proc",
-                "--dev",
+                "--dev-bind",
+                "/dev",
                 "/dev",
                 "--ro-bind-try",
                 "/sys",

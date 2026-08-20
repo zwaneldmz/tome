@@ -676,7 +676,22 @@ async fn app_config_dir_is_hidden_by_the_bwrap_tmpfs() {
             ),
         ],
         headless: true,
-        allow_read: Vec::new(),
+        // The system roots the shim's own dynamic loader (and `/bin/sh`)
+        // resolve through — without these the curated mounts leave the
+        // shim's ELF interpreter unreachable and bwrap execvp fails ENOENT.
+        allow_read: vec![
+            PathBuf::from("/usr"),
+            PathBuf::from("/etc"),
+            PathBuf::from("/bin"),
+            PathBuf::from("/lib"),
+            PathBuf::from("/lib64"),
+            PathBuf::from("/opt"),
+            PathBuf::from("/sbin"),
+            PathBuf::from("/proc"),
+            PathBuf::from("/sys"),
+            PathBuf::from("/dev"),
+            PathBuf::from("/tmp"),
+        ],
         allow_write: Vec::new(),
     };
     let argv = build_bwrap_argv(&spec);
