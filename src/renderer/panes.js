@@ -727,12 +727,16 @@ export function addTerminal(kind, target) {
 // the returned panel to read back .group so subsequent nodes in the same run
 // stack as tabs alongside the first). `saved` carries the persisted id/title
 // when recreating a pane from a stored layout.
-export function spawnTerminal({ kind, cwd, egress, wsName, saved, target, model }) {
+export function spawnTerminal({ kind, cwd, egress, wsName, saved, target, model, docker }) {
   const id = `pty-${++counters.seq}`
   cwd = cwd || paneCwd()
   const name = cwd.split('/').pop() || cwd
   const isAgent = kind !== 'terminal'
   const gapped = egress !== undefined ? !!egress : isAgent && prefs.egressDefault
+  // Sandboxed Docker is only ever meaningful for a gapped pane (an ungapped
+  // pane already has full host access) and only when both the global master
+  // and the per-pane spawn mode are on.
+  const dockerOn = isAgent && gapped && prefs.dockerGateway && (docker ?? prefs.dockerPanes)
   return dock.addPanel({
     id,
     component: 'terminal',
@@ -744,7 +748,15 @@ export function spawnTerminal({ kind, cwd, egress, wsName, saved, target, model 
     // otherwise silently restore an agent on the wrong model. Written only
     // when set, so a persisted layout carries no key for the default case —
     // absent is the schema's spelling of "the CLI's own default".
-    params: { ptyId: id, kind, cwd, egress: gapped, ws: wsName ?? activeWorkspace()?.name, ...(model ? { model } : {}) },
+    params: {
+      ptyId: id,
+      kind,
+      cwd,
+      egress: gapped,
+      ws: wsName ?? activeWorkspace()?.name,
+      ...(model ? { model } : {}),
+      ...(dockerOn ? { docker: true } : {}),
+    },
   })
 }
 

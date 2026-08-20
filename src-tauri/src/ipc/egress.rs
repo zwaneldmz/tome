@@ -218,6 +218,67 @@ pub(crate) async fn create_gapped_pane_proxy<E: EgressEnv>(
     Ok(proxy)
 }
 
+/// Spawns a pane's filtered Docker gateway when sandboxed Docker is enabled,
+/// returning the socket path to hand to the pane as `DOCKER_HOST`. Resolves
+/// the host daemon socket itself (`egress::docker::resolve_daemon_socket`),
+/// creates the gateway socket's `0700` parent dir, binds the gateway, and
+/// registers it in `AppState.docker_gateways`. Returns `None` — and the pane
+/// simply spawns WITHOUT Docker — when no daemon is reachable or the gateway
+/// fails to bind; sandboxed Docker is a best-effort opt-in, never a spawn
+/// failure.
+///
+/// `allowed_mount_roots` is the `egress::docker::DockerPolicy` mount
+/// allow-list: the open workspace roots (so `-v $PWD:/app` style binds
+/// resolve) — the caller supplies them from `state.open_folders`.
+pub(crate) async fn create_docker_gateway(
+    app: &AppHandle,
+    state: &AppState,
+    pane_id: &str,
+    allowed_mount_roots: Vec<PathBuf>,
+) -> Option<PathBuf> {
+    let daemon = crate::egress::docker::resolve_daemon_socket()?;
+    let socket_path = crate::egress::docker::gateway_socket_path(pane_id);
+    let parent = socket_path.parent()?;
+    if std::fs::create_dir_all(parent).is_err() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+    }
+    let deny_app = app.clone();
+    let deny_pane_id = pane_id.to_string();
+    let on_deny = move |denied: crate::egress::docker::DockerDenied| {
+        let reason = denied.reason;
+        let _ = deny_app.emit(
+            "docker:denied",
+            json!({"paneId": deny_pane_id.clone(), "reason": reason.clone()}),
+        );
+        events::log_event(
+            &deny_app,
+            "docker:denied",
+            vec![
+                ("paneId", json!(deny_pane_id.clone())),
+                ("reason", json!(reason)),
+            ],
+        );
+    };
+    let policy = crate::egress::docker::DockerPolicy {
+        allowed_mount_roots,
+    };
+    let gateway =
+        crate::egress::docker::DockerGateway::spawn(socket_path.clone(), daemon, policy, on_deny)
+            .await
+            .ok()?;
+    state
+        .docker_gateways
+        .lock()
+        .expect("AppState.docker_gateways lock poisoned")
+        .insert(pane_id.to_string(), std::sync::Arc::new(gateway));
+    Some(socket_path)
+}
+
 /// Tears down one pane's live proxy, cancels any scheduled auto-relock
 /// timer, and drops its `EgressState` record — mirrors `closePane`
 /// (idempotent: a second call, or a call for a pane that was never
@@ -247,6 +308,14 @@ pub(crate) fn close_pane_and_proxy<E: EgressEnv>(env: &E, state: &AppState, pane
         .remove(pane_id)
     {
         proxy.shutdown();
+    }
+    if let Some(gateway) = state
+        .docker_gateways
+        .lock()
+        .expect("AppState.docker_gateways lock poisoned")
+        .remove(pane_id)
+    {
+        gateway.shutdown();
     }
     if state.egress.close_pane(pane_id) {
         push_state_event(env, state);

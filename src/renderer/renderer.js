@@ -75,6 +75,9 @@ mark('module evaluation start')
   await loadEditorPrefs() // before restoreLayout, so reopened editors get them
   const agPref = await tome.store.get('egress-default')
   if (agPref !== null) prefs.egressDefault = !!agPref
+  if (await tome.store.get('docker-gateway')) {
+    prefs.dockerGateway = true
+  }
   if (await tome.store.get('conductor-run')) {
     prefs.conductorRun = true
     tome.conductor.allowRun(true)

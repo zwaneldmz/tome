@@ -94,6 +94,9 @@ export class TerminalPanel {
           // Undefined for every pane but a flow node that pinned one; main
           // treats absent as "the agent CLI's own default".
           model: params.model,
+          // Sandboxed Docker: only ever present when both the global master
+          // and the per-pane spawn mode were on at spawn time.
+          docker: params.docker,
           auth,
         })
       } catch (err) {

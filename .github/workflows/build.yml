@@ -35,6 +35,14 @@ jobs:
         run: bun run lint
       - name: Tests (vitest floor — crypto, guards, confinement)
         run: bun run test
+      # Playwright E2E over the Vite renderer with a mocked `window.tome`
+      # bridge — tagged feature suites (@docker, @panes, @preferences, …).
+      # Fast and CI-portable: no Tauri binary, no display server. Run a
+      # single feature locally with `bun run test:e2e -- --grep @docker`.
+      - name: Playwright E2E (tagged feature suites)
+        run: |
+          bunx playwright install --with-deps chromium
+          bun run test:e2e
       - name: Build (gates on a broken renderer import)
         run: bun run build
       # Renderer smoke check: the bundle built and every module import

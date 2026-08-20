@@ -44,6 +44,7 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Exact-match keys `build_agent_base_env` copies through unconditionally.
 pub const AGENT_ENV_ALLOWLIST: &[&str] = &[
@@ -141,6 +142,15 @@ pub struct AgentEnvExtras {
     /// original returns alongside `env` — out of scope for a pure env-map
     /// builder, and not ported here.)
     pub proxy_port: Option<u16>,
+    /// The pane's filtered Docker gateway socket, when sandboxed Docker is
+    /// enabled for this pane — `None` otherwise (and never set for an
+    /// ungapped pane, which already has full host access). When `Some`, the
+    /// env carries `DOCKER_HOST=unix://<path>` pointing at the gateway
+    /// (never at the real daemon socket), plus `DOCKER_BUILDKIT=0` to force
+    /// the legacy builder the gateway can mediate, and an empty
+    /// `DOCKER_CONTEXT` so the CLI's default context can't route around the
+    /// gateway socket.
+    pub docker_gateway_socket: Option<PathBuf>,
 }
 
 const PROXY_VAR_NAMES: &[&str] = &[
@@ -186,6 +196,14 @@ pub fn compose_agent_env(
         }
         env.insert("NO_PROXY".to_string(), "localhost,127.0.0.1".to_string());
         env.insert("no_proxy".to_string(), "localhost,127.0.0.1".to_string());
+    }
+    if let Some(sock) = &extras.docker_gateway_socket {
+        env.insert(
+            "DOCKER_HOST".to_string(),
+            format!("unix://{}", sock.display()),
+        );
+        env.insert("DOCKER_BUILDKIT".to_string(), "0".to_string());
+        env.insert("DOCKER_CONTEXT".to_string(), String::new());
     }
     env
 }
@@ -479,6 +497,31 @@ mod tests {
         assert_eq!(
             gapped.get("no_proxy"),
             Some(&"localhost,127.0.0.1".to_string())
+        );
+    }
+
+    #[test]
+    fn sets_docker_host_only_when_a_gateway_socket_is_present() {
+        let none = compose_agent_env(&base_process_env(), &AgentEnvExtras::default());
+        assert!(!none.contains_key("DOCKER_HOST"));
+        assert!(!none.contains_key("DOCKER_BUILDKIT"));
+
+        let with_docker = compose_agent_env(
+            &base_process_env(),
+            &AgentEnvExtras {
+                docker_gateway_socket: Some(PathBuf::from("/tmp/gw.sock")),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            with_docker.get("DOCKER_HOST"),
+            Some(&"unix:///tmp/gw.sock".to_string())
+        );
+        assert_eq!(with_docker.get("DOCKER_BUILDKIT"), Some(&"0".to_string()));
+        assert_eq!(
+            with_docker.get("DOCKER_CONTEXT"),
+            Some(&String::new()),
+            "an empty DOCKER_CONTEXT must override the CLI's default context"
         );
     }
 

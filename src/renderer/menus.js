@@ -372,6 +372,19 @@ export async function populateAddMenu(menu, target) {
     },
   })
   menuItem(menu, {
+    label: 'sandboxed docker',
+    hint: prefs.dockerPanes ? 'on' : 'off',
+    active: prefs.dockerPanes,
+    disabled: !prefs.dockerGateway,
+    onClick: () => {
+      prefs.dockerPanes = !prefs.dockerPanes
+      if (prefs.dockerPanes && !prefs.dockerGateway) {
+        toast('enable sandboxed Docker in Preferences → Security first', 'err')
+        prefs.dockerPanes = false
+      }
+    },
+  })
+  menuItem(menu, {
     label: 'assistant may run commands',
     hint: prefs.conductorRun ? 'on' : 'off',
     active: prefs.conductorRun,

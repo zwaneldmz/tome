@@ -312,6 +312,7 @@ async fn build_fixture(
         pane_id: pane_id.to_string(),
         proxy_port: proxy.port(),
         host_socket_path: sock_path,
+        docker_gateway_socket: None,
         app_config_dir: config_dir.path().to_path_buf(),
         shim_path: resolve_tome_shim_bin(),
         inner_argv,
@@ -663,6 +664,7 @@ async fn app_config_dir_is_hidden_by_the_bwrap_tmpfs() {
     // than plumbing the path through build_fixture's own signature.
     let spec = GappedSpawnSpec {
         pane_id: "tmpfs-hide-2".to_string(),
+        docker_gateway_socket: None,
         proxy_port: fixture.proxy.port(),
         host_socket_path: fixture.runtime_dir.path().join("pane-tmpfs-hide.sock"),
         app_config_dir: fixture.config_dir.path().to_path_buf(),
@@ -1053,6 +1055,7 @@ async fn run_rung2(
 
     let spec = GappedSpawnSpec {
         pane_id: "rung2-landlock".to_string(),
+        docker_gateway_socket: None,
         proxy_port: 18080, // bound in the fresh netns; nothing connects to it in these tests
         host_socket_path: runtime_dir.path().join("pane-rung2-landlock.sock"),
         app_config_dir: config_dir.to_path_buf(),
