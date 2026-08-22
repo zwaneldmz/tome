@@ -389,13 +389,9 @@ async fn attempt_dns_resolution() -> Attempt {
         return finish(NAME, THREAT, blocked, detail);
     }
     if cfg!(target_os = "linux") {
-        let Some(_) = linux_preflight() else {
-            return Attempt::skip(
-                NAME,
-                THREAT,
-                linux_preflight().expect("fixture refused; preflight must carry the reason"),
-            );
-        };
+        if let Err(a) = require_linux(NAME, THREAT) {
+            return a;
+        }
         let Some(fx) = build_linux_fixture(vec!["127.0.0.1".to_string()]).await else {
             return Attempt::skip(
                 NAME,
@@ -457,13 +453,9 @@ async fn attempt_ssh_egress() -> Attempt {
         return finish(NAME, THREAT, blocked, detail);
     }
     if cfg!(target_os = "linux") {
-        let Some(_) = linux_preflight() else {
-            return Attempt::skip(
-                NAME,
-                THREAT,
-                linux_preflight().expect("fixture refused; preflight must carry the reason"),
-            );
-        };
+        if let Err(a) = require_linux(NAME, THREAT) {
+            return a;
+        }
         let Some(fx) = build_linux_fixture(vec!["127.0.0.1".to_string()]).await else {
             return Attempt::skip(
                 NAME,
