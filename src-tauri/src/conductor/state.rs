@@ -96,6 +96,13 @@ pub struct Conductor {
     /// that a real owner exists; see `ipc::chat::chat_send`'s doc comment
     /// for the before/after.
     inflight: Mutex<HashMap<String, CancellationToken>>,
+    /// The ACTIVE workspace root the renderer synced via `conductor:cwd` —
+    /// the folder the assistant's workspace-relative tools (graph queries,
+    /// `run_agent`, flow reads/drafts) should operate at. `None` = not
+    /// synced yet; every consumer falls back to the first open folder
+    /// (the pre-sync behavior), so an un-synced renderer degrades to the
+    /// old default instead of breaking.
+    cwd: Mutex<Option<String>>,
 }
 
 impl Conductor {
@@ -109,6 +116,7 @@ impl Conductor {
             allow_run: AtomicBool::new(false),
             agent_ids: Mutex::new(AGENTS.iter().map(|s| s.to_string()).collect()),
             inflight: Mutex::new(HashMap::new()),
+            cwd: Mutex::new(None),
         }
     }
 
@@ -219,6 +227,21 @@ impl Conductor {
     /// `setAllowRun(v)` — `conductor:allowRun`.
     pub fn set_allow_run(&self, v: bool) {
         self.allow_run.store(v, Ordering::SeqCst);
+    }
+
+    /// `conductor:cwd` — the active workspace root, or `None` to fall back
+    /// to the first open folder. Callers validate confinement BEFORE this;
+    /// this is dumb storage.
+    pub fn set_cwd(&self, root: Option<String>) {
+        *self.cwd.lock().expect("Conductor.cwd lock poisoned") = root;
+    }
+
+    /// The synced active root (`None` until the renderer's first sync).
+    pub fn cwd(&self) -> Option<String> {
+        self.cwd
+            .lock()
+            .expect("Conductor.cwd lock poisoned")
+            .clone()
     }
 
     pub fn allow_run(&self) -> bool {

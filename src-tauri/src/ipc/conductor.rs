@@ -49,3 +49,39 @@ pub async fn conductor_allow_read(
     state.conductor.set_read_consent(&pane_id, allowed);
     Ok(json!({}))
 }
+
+/// `conductor:cwd` (`{ root }`) — the renderer's ACTIVE workspace root.
+/// The conductor's workspace-relative tools (graph queries, `run_agent`,
+/// flow reads/drafts) operate at the root you are LOOKING at, not the first
+/// folder of the first workspace. `root: null` clears it (falls back to the
+/// first open folder). The root must be one of the open, synced workspace
+/// folders — a path outside confinement is refused, never stored.
+#[tauri::command]
+pub async fn conductor_set_root(
+    state: State<'_, AppState>,
+    root: Option<String>,
+) -> Result<Value, String> {
+    lock_gate::guard(&state, "conductor:cwd")?;
+    let Some(root) = root else {
+        state.conductor.set_cwd(None);
+        return Ok(json!({}));
+    };
+    let root = root.trim().to_string();
+    if root.is_empty() {
+        state.conductor.set_cwd(None);
+        return Ok(json!({}));
+    }
+    // Confinement: only an OPEN, SYNCED workspace folder may become the
+    // assistant's root — the renderer is free text, and a path outside the
+    // open folders must never steer tool cwd (the same rule read_file's
+    // resolver applies).
+    match crate::confine::confined_real_path(&state, std::path::Path::new(&root)) {
+        Ok(confined) => {
+            state
+                .conductor
+                .set_cwd(Some(confined.to_string_lossy().into_owned()));
+            Ok(json!({}))
+        }
+        Err(reason) => Err(format!("conductor:cwd: {reason}")),
+    }
+}

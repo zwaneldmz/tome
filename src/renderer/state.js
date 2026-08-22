@@ -13,6 +13,11 @@ export const prefs = {
   // filtered gateway). Both must be on for a pane to get DOCKER_HOST.
   dockerGateway: false,
   dockerPanes: false,
+  // Containment-only mode (P2.1): a CEILING, not a default. Removes the
+  // unsandboxed spawn entry from the ＋ menu (see spawn-policy.js), and the
+  // backend refuses unsandboxed spawns at the IPC layer regardless — this
+  // flag only mirrors the stored pref for the UI.
+  containmentOnly: false,
 }
 
 // live egress state mirrored from main

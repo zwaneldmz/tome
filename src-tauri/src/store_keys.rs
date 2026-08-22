@@ -48,6 +48,14 @@ pub const RESERVED_KEYS: &[&str] = &[
     "export-destinations",
     "flow-schedules",
     "remote-sources",
+    // Main-owned chat files (plan §4.3/§4.5): the user overlay
+    // (chat-providers.json) may only be written through chat_provider_set/
+    // chat_provider_delete (a `store_set` on it could redirect a built-in
+    // row), and the vault fallback file (chat-secrets.json) holds keys in
+    // plaintext — it must never be readable back through store:get, even
+    // when the keyring is unavailable.
+    "chat-providers",
+    "chat-secrets",
 ];
 
 /// The only store key any pre-auth UI actually reads: the renderer boots
@@ -55,6 +63,35 @@ pub const RESERVED_KEYS: &[&str] = &[
 /// right palette. Keep this to exactly what's empirically read before
 /// login — widening it re-opens whatever key gets added next.
 pub const LOCKSCREEN_STORE_KEYS: &[&str] = &["theme"];
+
+/// The store keys whose stored values name a filesystem path root that
+/// main resolves (P5.4 audit of every `tome.store.set`/`store::get` call
+/// site in the tree): `core-vault` — the user-picked core-vault directory
+/// (`menus.js` sets it; `ipc::pty`/`ipc::brain` resolve it) — is the only
+/// one. `workspaces` holds folder lists, but those are re-reported
+/// through `ws_sync` into `AppState.open_folders` before any confinement
+/// decision admits them, so they need no entry here. Everything else main
+/// reads is an id, a policy toggle, or a UI preference (`chat-provider`,
+/// `chat-model`, `egress-default`, `docker-gateway`, `conductor-run`,
+/// `custom-agents`, `stt-engine`, `voice-*`, `theme`, `editor`, `mentor`,
+/// `sidebar-*`, `term-font-size`, `layout-*`, `plan-tracker-pos`,
+/// `agents-disabled`, `chat-log-*`, `onboarded-v1`) — none name a path.
+/// A NEW key that names a path must be added here AND to
+/// [`CONFINED_STORE_ROOTS`]: the test below fails CI if this list ever
+/// outgrows the confinement set.
+pub const PATH_BEARING_STORE_KEYS: &[&str] = &["core-vault"];
+
+/// The subset of [`PATH_BEARING_STORE_KEYS`] that joins the
+/// `tome://`/`doc:read` confinement set (`confine::store_named_roots_core`
+/// resolves these alongside the open workspace folders and the brain
+/// vault). P5.4: `core-vault` was the improvement-review leftover — a
+/// promoted note or PDF inside the core vault 403'd from `tome://`/
+/// `doc:readBytes` while every workspace/brain-vault file served fine.
+/// Every member must be a shape-valid, unreserved store key that the lock
+/// gate denies pre-login (so a locked app serves no core-vault files) —
+/// the tests below pin all three, and confine.rs's suite pins that each
+/// member actually resolves into a confinement root.
+pub const CONFINED_STORE_ROOTS: &[&str] = &["core-vault"];
 
 /// Port of the JS `KEY_SHAPE` regex `/^[a-z0-9][a-z0-9-]*$/`: plain slugs
 /// only (a lowercase-letter-or-digit first character, then any run of
@@ -213,6 +250,43 @@ mod tests {
             assert!(
                 is_store_key_allowed(key, true),
                 "{key} should pass while locked"
+            );
+        }
+    }
+
+    #[test]
+    fn confinement_set_covers_every_path_bearing_store_key() {
+        // P5.4: the confinement set must name every store key whose value
+        // names a path root — a new such key that forgets its
+        // CONFINED_STORE_ROOTS entry fails CI here instead of silently
+        // 403ing every file under its root through tome:///doc:read.
+        for key in PATH_BEARING_STORE_KEYS {
+            assert!(
+                CONFINED_STORE_ROOTS.contains(key),
+                "{key} names a path root but is missing from the confinement set"
+            );
+        }
+    }
+
+    #[test]
+    fn confined_store_roots_are_shape_valid_unreserved_policy_keys() {
+        // Each confinement-set member must be a real store key main can
+        // read while unlocked — and MUST be denied while locked, or a
+        // locked app would serve core-vault files (store::get enforces
+        // the same gate the resolver relies on).
+        for key in CONFINED_STORE_ROOTS.iter().copied() {
+            assert!(is_key_shape_valid(key), "{key} must be shape-valid");
+            assert!(
+                !is_reserved_key(key),
+                "{key} must not be a reserved filename"
+            );
+            assert!(
+                is_store_key_allowed(key, false),
+                "{key} must be readable while unlocked"
+            );
+            assert!(
+                !is_store_key_allowed(key, true),
+                "{key} must be denied while locked"
             );
         }
     }

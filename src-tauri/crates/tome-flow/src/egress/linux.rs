@@ -863,6 +863,28 @@ pub fn pane_socket_path_from_env(pane_id: &str) -> Option<PathBuf> {
     pane_socket_path(xdg.as_deref(), &std::env::temp_dir(), pane_id)
 }
 
+/// The per-pane Landlock confirmation marker's path: the pane's loopback
+/// socket path with its extension swapped for `.landlock`. Written by
+/// `tome-shim` on the rung-2 (self-unshare) spawn — it opens the file
+/// BEFORE applying its Landlock ruleset, then writes `"ok"` through that
+/// already-open descriptor only if the ruleset actually took effect
+/// (Landlock restricts path resolution at open(2) time, not writes to
+/// already-open files) — and polled by the host (`ipc::pty::pty_create`'s
+/// spawn watcher), which upgrades the pane's reported
+/// [`ConfinementLevel`](super::ConfinementLevel) from `NetworkOnly` to
+/// `Full` on `"ok"` and never otherwise. The host truncates the file at
+/// spawn (before the shim runs) so a stale `"ok"` from an earlier session
+/// can never be misread as this pane's confirmation. See the P1.2
+/// rung-2-honesty note in this crate's `egress/mod.rs`.
+///
+/// `tome-shim` (a separate crate, deliberately dependency-free) derives
+/// the same path inline — `args.sock.with_extension("landlock")` — with a
+/// comment pointing back here; the two derivations are pinned against
+/// each other by `tome`'s own cross-crate argv contract test.
+pub fn landlock_marker_path(host_socket_path: &Path) -> PathBuf {
+    host_socket_path.with_extension("landlock")
+}
+
 /// Creates (if needed) and locks down `dir` to `0700` — THE DESIGN's "0700
 /// dir" requirement for the directory holding every pane's socket.
 /// `#[cfg(unix)]` (not `target_os = "linux"`): unix permission bits are a
@@ -1819,6 +1841,14 @@ mod tests {
     // ==== pane_socket_path ====
 
     #[test]
+    fn landlock_marker_path_swaps_the_socket_extension_keeping_the_pane_dir() {
+        let sock = PathBuf::from("/run/user/1000/tome/pane-pty-1.sock");
+        assert_eq!(
+            landlock_marker_path(&sock),
+            PathBuf::from("/run/user/1000/tome/pane-pty-1.landlock")
+        );
+    }
+
     fn pane_socket_path_uses_xdg_runtime_dir_when_given() {
         let p = pane_socket_path(Some("/run/user/1000"), &PathBuf::from("/tmp"), "pty-1").unwrap();
         assert_eq!(p, PathBuf::from("/run/user/1000/tome/pane-pty-1.sock"));

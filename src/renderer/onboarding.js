@@ -49,7 +49,33 @@ export async function showOnboarding() {
     mic: null, // 'ok' | 'fail'
     dirty: false, // anything entered/chosen → Esc asks before skipping
   }
-  const m = modalShell(`Set up Tome — ${STEPS[0]}`)
+  // Escape decisions register BEFORE modalShell's own document-level
+  // Esc-close (registered inside modalShell() below): capture-phase
+  // keydown listeners on the document run in registration order, so this
+  // handler — registered first — can veto the close for the two cases
+  // where Esc means something else here (un-confirm, or confirm the skip).
+  // The assignment targets below (footer/render/skip) don't exist yet; they
+  // are filled in as the wizard builds, before any key can reach here.
+  const stateRef = { confirming: false }
+  let escTargets = null
+  const onEsc = (e) => {
+    if (e.key !== 'Escape') return
+    if (stateRef.confirming) {
+      e.stopImmediatePropagation()
+      stateRef.confirming = false
+      escTargets?.footer.classList.remove('hidden')
+      escTargets?.render()
+      return
+    }
+    if (state.dirty) {
+      e.stopImmediatePropagation()
+      escTargets?.skip()
+    }
+  }
+  document.addEventListener('keydown', onEsc, true)
+  const m = modalShell(`Set up Tome — ${STEPS[0]}`, () =>
+    document.removeEventListener('keydown', onEsc, true)
+  )
   m.err.remove() // steps report inline, never through the error line
   const box = m.body.parentElement
   box.classList.add('ob-box')
@@ -111,13 +137,13 @@ export async function showOnboarding() {
     m.close()
   }
   const next = () => {
-    if (state.confirming) return
+    if (stateRef.confirming) return
     if (state.step === STEPS.length - 1) return finish()
     state.step++
     render()
   }
   const back = () => {
-    if (state.confirming || state.step === 0) return
+    if (stateRef.confirming || state.step === 0) return
     state.step--
     render()
   }
@@ -125,9 +151,9 @@ export async function showOnboarding() {
   // and modalShell keeps one overlay at a time — the wizard would be gone
   // even if the user changed their mind.
   const skip = () => {
-    if (state.confirming || state.step === 0 || state.step === STEPS.length - 1) return
+    if (stateRef.confirming || state.step === 0 || state.step === STEPS.length - 1) return
     if (!state.dirty) return finish()
-    state.confirming = true
+    stateRef.confirming = true
     m.body.textContent = ''
     footer.classList.add('hidden')
     note('Skip setup? Your choices so far will be lost.')
@@ -137,7 +163,7 @@ export async function showOnboarding() {
     const no = el('button', 'ag-btn ghost', 'Keep going')
     no.type = 'button'
     no.addEventListener('click', () => {
-      state.confirming = false
+      stateRef.confirming = false
       footer.classList.remove('hidden')
       render()
     })
@@ -147,20 +173,14 @@ export async function showOnboarding() {
   nextBtn.addEventListener('click', next)
   backBtn.addEventListener('click', back)
   skipBtn.addEventListener('click', skip)
-  // →/Enter = next, ← = back; Escape stays on modalShell (closes like the
-  // scrim) unless something was entered, where it becomes the skip confirm.
-  // Capture phase: this must see Escape before modalShell's close handler.
+  // Arrow/Enter navigation stays on the overlay (no conflict with
+  // modalShell's Esc handling — that lives on the document now); the
+  // Escape branches moved up to onEsc, registered before modalShell.
+  escTargets = { footer, render, skip }
   overlay.addEventListener(
     'keydown',
     (e) => {
-      if (state.confirming) {
-        if (e.key === 'Escape') {
-          e.preventDefault()
-          e.stopPropagation()
-          state.confirming = false
-          footer.classList.remove('hidden')
-          render()
-        }
+      if (stateRef.confirming) {
         return
       }
       if (e.key === 'ArrowRight' || (e.key === 'Enter' && e.target.tagName !== 'BUTTON')) {
@@ -169,10 +189,6 @@ export async function showOnboarding() {
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
         back()
-      } else if (e.key === 'Escape' && state.dirty) {
-        e.preventDefault()
-        e.stopPropagation()
-        skip()
       }
     },
     true
@@ -269,19 +285,32 @@ export async function showOnboarding() {
     const stale = () => state.step !== myStep
     Promise.resolve(providersP)
       .then(async (info) => {
-        // chat:providers returns { providers, active } — main's active is the
-        // stored pick validated against the provider table, so it is the
-        // correct initial selection (and what a skipped step keeps).
+        // chat:providers returns { providers, active, effective } — main's
+        // active is the stored pick validated against the registry, so it
+        // is the correct initial selection (and what a skipped step keeps).
         const providers = info?.providers || []
         if (!providers.length) {
           if (!stale()) note('No assistant providers configured — the assistant keeps its shell default.')
           return
         }
         if (stale()) return
-        note('Pick the model the assistant pane talks to. ● means its API key was found in your login shell.')
+        note('Pick the model the assistant pane talks to. ● means a key is known — paste one inline if it is not.')
         const group = el('div', 'ob-providers')
         group.setAttribute('role', 'radiogroup')
         group.setAttribute('aria-label', 'Assistant provider')
+
+        // Inline key field on the SELECTED row: pasted keys are the fix
+        // for Finder-launched apps that never see the login shell, so the
+        // wizard must not send the user back to export-vars-and-restart.
+        const keyRow = el('div', 'ob-keyrow')
+        const keyIn = el('input', 'ob-keyin')
+        keyIn.type = 'password'
+        keyIn.placeholder = 'paste API key for the selected provider'
+        keyIn.setAttribute('aria-label', 'API key')
+        const keySave = el('button', 'ag-btn ghost', 'Save key')
+        keySave.type = 'button'
+        keyRow.append(keyIn, keySave)
+
         const paint = (selectedId) => {
           for (const s of group.children) {
             const sel = s.dataset.pid === selectedId
@@ -294,15 +323,12 @@ export async function showOnboarding() {
           b.type = 'button'
           b.dataset.pid = p.id
           b.setAttribute('role', 'radio')
-          b.title = p.keyEnv
-            ? p.keySet
-              ? `${p.keyEnv} found in your login shell`
-              : `${p.keyEnv} not found — set it and restart Tome`
-            : p.keySet
-              ? 'custom provider configured in Settings'
-              : 'custom provider not configured — set it in Settings'
+          const hasKey = !!p.keyOrigin
+          b.title = hasKey
+            ? `key from ${p.keyOrigin.kind === 'shell' || p.keyOrigin.kind === 'env' ? `${p.keyOrigin.kind}: ${p.keyOrigin.name}` : p.keyOrigin.kind}`
+            : 'no key yet — paste one below'
           b.append(
-            el('span', 'ob-dot-avail ' + (p.keySet ? 'ok' : 'off'), p.keySet ? '●' : '○'),
+            el('span', 'ob-dot-avail ' + (hasKey ? 'ok' : 'off'), hasKey ? '●' : '○'),
             el('span', 'ob-agent-name', p.label || p.id),
             el('span', 'ob-provider-model', p.model)
           )
@@ -310,12 +336,35 @@ export async function showOnboarding() {
             state.provider = p.id
             state.dirty = true
             tome.store.set('chat-provider', p.id)
+            keySave.dataset.pid = p.id
             paint(p.id)
           })
           group.appendChild(b)
         }
+        keySave.addEventListener('click', async () => {
+          const id = keySave.dataset.pid || state.provider || info.active
+          if (!id) return toast('pick a provider first')
+          try {
+            await tome.chat.keySet(id, keyIn.value.trim())
+            keyIn.value = ''
+            toast('key saved', 'ok')
+            // Refresh dots so ● reflects the paste immediately.
+            const again = await tome.chat.providers()
+            const row = again?.providers?.find((p) => p.id === id)
+            const dot = group.querySelector(`[data-pid="${id}"] .ob-dot-avail`)
+            if (dot && row?.keyOrigin) {
+              dot.textContent = '●'
+              dot.classList.remove('off')
+              dot.classList.add('ok')
+            }
+          } catch (err) {
+            toast(err.message)
+          }
+        })
         m.body.appendChild(group)
+        m.body.appendChild(keyRow)
         paint(state.provider || info.active)
+        keySave.dataset.pid = state.provider || info.active || providers[0].id
       })
       .catch(
         () => !stale() && note('Could not load providers — the assistant keeps its current settings.')

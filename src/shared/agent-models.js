@@ -20,12 +20,11 @@
 // pi resolve models from a dynamic provider catalog (whatever the user has
 // configured), so there is no fixed set to vet against — they ship
 // deliberately empty in v1, and an empty list is exactly what hides that
-// select in the node editor. Filling a list in is all it takes to turn a kind
-// on later — with one caveat: an alias that isn't bare [a-z0-9-] (opencode/pi
-// catalogs are provider/model shaped) also needs SAFE_MODEL widened in
-// src/main/lib/agent-spawn.js, or every pin on it is silently dropped at
-// spawn. The self-check in test/agent-spawn.test.js catches the mismatch the
-// moment a list grows such an entry.
+// select in the node editor. main's Rust vetting (tome-flow agent_spawn.rs)
+// accepts the `provider/model` shape for these kinds (format-vetted:
+// [a-z0-9-]+/[a-z0-9._-]+), so a pane or headless run can pin one even
+// though the node editor's fixed-list select stays hidden until a list is
+// filled in here.
 export const AGENT_MODELS = {
   claude: { models: ['sonnet', 'opus', 'haiku', 'fable'] },
   opencode: { models: [] },

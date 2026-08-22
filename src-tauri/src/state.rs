@@ -218,6 +218,22 @@ pub struct AppState {
     /// runs, and again after the quit handler's `Option::take` cancels it —
     /// a second quit-path call finds nothing left to abort.
     pub schedule_ticker: Mutex<Option<AbortHandle>>,
+
+    /// The chat-key vault snapshot (plan §4.3): provider id → key, plus
+    /// which store the blob came from. Loaded once at boot by
+    /// `lib.rs::boot_auth_and_egress` (the effective unlock point — this
+    /// build has no re-lock), and replaced after every `chat_key_set`.
+    /// Reads are a `RwLock` snapshot on the chat path — the vault itself is
+    /// never touched on `chat_send` (keyring I/O stays off the hot path).
+    pub chat_keys: RwLock<(HashMap<String, String>, crate::chat::vault::Kind)>,
+    /// Per-provider last-send auth failure (delta 2), keyed by provider
+    /// id: `chat_send` records a 401-class failure against the row it
+    /// actually used, and clears it when a send against that row starts.
+    /// `chat_providers` reports it so the card can say "last send rejected
+    /// — update or remove the key" (Cursor's fail-at-request-time model).
+    /// In-memory only — a stale rejection note surviving a restart would
+    /// be a lie about the session's own activity.
+    pub chat_last_error: Mutex<HashMap<String, String>>,
 }
 
 impl AppState {
@@ -241,6 +257,8 @@ impl AppState {
             conductor: std::sync::Arc::new(conductor::Conductor::new()),
             mentor: crate::mentor::Mentor::new(),
             schedule_ticker: Mutex::new(None),
+            chat_keys: RwLock::new((HashMap::new(), crate::chat::vault::Kind::File)),
+            chat_last_error: Mutex::new(HashMap::new()),
         }
     }
 }

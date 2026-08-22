@@ -5,8 +5,9 @@ import { renderMarkdown } from '../markdown.js'
 import { chats } from '../regs.js'
 import { activeWorkspace } from '../workspaces.js'
 import { encodeWav } from '../../shared/wav.js'
-import { loadHistory, persistHistory, flushHistory } from '../chat-history.js'
+import { loadHistory, persistHistory, flushHistory, openChatHistory } from '../chat-history.js'
 import { shouldAbortOnDispose } from '../chat-lifecycle.js'
+import { providerLineText, needsProviderPick } from '../chat-gate.js'
 import { voiceActive } from '../voice.js'
 import { isVerbose, mentorState } from '../mentor.js'
 
@@ -15,6 +16,10 @@ export class ChatPanel {
     this.element = document.createElement('div')
     this.element.className = 'panel-chat'
     this.element.innerHTML = `
+      <div class="chat-header">
+        <button type="button" class="chat-provider-line" title="Which provider the next message goes to — click to change" aria-label="Assistant provider">…</button>
+        <button type="button" class="chat-history-btn" title="Search past conversations" aria-label="Search chat history">⌕</button>
+      </div>
       <div class="chat-log"></div>
       <form class="chat-form">
         <button type="button" class="chat-brain-toggle" title="Inject workspace brain context" aria-label="Inject workspace brain context" aria-pressed="false">◈ brain</button>
@@ -49,6 +54,10 @@ export class ChatPanel {
     })
     this.stopBtn = this.element.querySelector('.chat-stop')
     this.stopBtn.addEventListener('click', () => tome.chat.abort(this.chatId))
+    this.historyBtn = this.element.querySelector('.chat-history-btn')
+    this.historyBtn.addEventListener('click', () =>
+      openChatHistory((id) => this.loadConversation(id))
+    )
     this.micBtn = this.element.querySelector('.chat-mic')
     this.micBtn.addEventListener('click', () => (this.rec ? this.stopRec() : this.startRec()))
     this.element.addEventListener('keydown', (e) => {
@@ -61,6 +70,13 @@ export class ChatPanel {
       e.preventDefault()
       this.send()
     })
+    // The effective provider, shown where the user is looking when the
+    // bytes' destination matters (delta 7). Clicking deep-links into
+    // Settings → Assistant; the dynamic import avoids a static cycle
+    // (preferences.js imports panels/terminal.js and panels/editor.js).
+    this.providerLine = this.element.querySelector('.chat-provider-line')
+    this.providerLine.addEventListener('click', () => this.openPicker())
+    this.refreshProviderLine()
     this.input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
@@ -80,6 +96,9 @@ export class ChatPanel {
     const msgs = await loadHistory(this.chatId)
     if (!msgs.length) return
     this.history = msgs
+    this.renderTranscript(msgs)
+  }
+  renderTranscript(msgs) {
     for (const m of msgs) {
       if (m.role === 'user') {
         this.bubble('me', m.content)
@@ -91,6 +110,29 @@ export class ChatPanel {
         renderMarkdown(body, m.content)
       }
     }
+  }
+  // Re-anchor this pane to a PAST conversation picked in the history
+  // search: future turns append to that conversation's log, and events for
+  // its id now route here. Refuses mid-reply (a switch would orphan the
+  // in-flight turn's deltas).
+  async loadConversation(id) {
+    if (this.busy) {
+      toast('wait for the reply to finish first')
+      return
+    }
+    const msgs = await loadHistory(id)
+    if (!msgs.length) {
+      toast('that conversation is empty', 'err')
+      return
+    }
+    chats.delete(this.chatId)
+    this.chatId = id
+    this.history = msgs
+    chats.set(this.chatId, this)
+    this.log.replaceChildren()
+    this.renderTranscript(msgs)
+    this.persistHistory()
+    this.log.scrollTop = this.log.scrollHeight
   }
   persistHistory() {
     persistHistory(this.chatId, this.history)
@@ -222,12 +264,47 @@ export class ChatPanel {
       this.micBtn.classList.remove('busy')
     }
   }
-  send() {
+  // The one-line answer to "where will my next message go", painted from
+  // the same resolution the send path uses — a UI-vs-backend divergence is
+  // visible the moment it exists. P3.1: the never-picked state shows
+  // "No provider — pick one" (not a reason string), so the header names
+  // the consent gap while the picker is one click away.
+  async refreshProviderLine() {
+    const info = await tome.chat.providers().catch(() => null)
+    const e = info?.effective
+    this.providerLine.textContent = providerLineText(info)
+    this.providerLine.classList.toggle('chat-provider-warn', !e)
+  }
+
+  openPicker() {
+    return import('../preferences.js').then((m) =>
+      m.preferencesModal({ section: 'assistant' })
+    )
+  }
+
+  // The consent gate (launch hardening P3.1): with no provider picked, a
+  // send must not become ANY request — open the picker instead of letting
+  // the backend refuse after the fact. The backend refusal stays (defense
+  // in depth, and it covers voice.js's own send path); the picker just
+  // beats an error bubble as the first-run experience. The draft stays in
+  // the composer, so the pick costs nothing.
+  async pickIfNone() {
+    const info = await tome.chat.providers().catch(() => null)
+    if (!needsProviderPick(info)) return false
+    this.refreshProviderLine()
+    await this.openPicker()
+    toast('Pick an assistant provider — nothing is sent until you do.')
+    return true
+  }
+
+  async send() {
     const text = this.input.value.trim()
     // `busy` also covers a voice-session turn in flight (voice.js sets it):
     // typed messages only join the shared history while voice is idle.
     if (!text || this.busy) return
+    if (await this.pickIfNone()) return
     this.busy = true
+    this.refreshProviderLine()
     this.stopBtn.classList.remove('hidden')
     this.input.value = ''
     this.bubble('me', text)
@@ -281,6 +358,25 @@ export class ChatPanel {
     if (this.wait) this.current.appendChild(this.wait)
     this.segText = ''
   }
+  // A headless agent the assistant started changed state: update its chip IN
+  // PLACE (one chip per agent run, not a new bubble per started/done/failed).
+  // Dataset-matched by iteration rather than a CSS-escape'd selector — the
+  // kind is vetted [a-z0-9-] upstream, but not needing the escape at all
+  // keeps the lookup honest by construction.
+  agentNote(kind, status) {
+    const label = `⚙ run_agent · ${kind} — ${status}`
+    for (const el of this.log.querySelectorAll('.msg.tool[data-agent]')) {
+      if (el.dataset.agent === kind) {
+        el.textContent = label
+        return
+      }
+    }
+    const node = this.bubble('tool', label)
+    node.dataset.agent = kind
+    this.aiBubble()
+    if (this.wait) this.current.appendChild(this.wait)
+    this.segText = ''
+  }
   finish(error, aborted) {
     this.busy = false
     this.stopBtn.classList.add('hidden')
@@ -302,7 +398,12 @@ export class ChatPanel {
         this.input.focus()
       }
     } else {
-      this.history.push({ role: 'assistant', content: this.currentText })
+      // The unguarded empty-assistant push: a turn whose reply was only
+      // tool calls (no text) must not persist an empty assistant message —
+      // the anthropic wire 400s on empty text blocks next turn.
+      if (this.currentText) {
+        this.history.push({ role: 'assistant', content: this.currentText })
+      }
       if (this.speak && this.currentText) {
         speechSynthesis.cancel()
         speechSynthesis.speak(new SpeechSynthesisUtterance(this.currentText.slice(0, 1500)))

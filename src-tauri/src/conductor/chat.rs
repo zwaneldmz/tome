@@ -39,8 +39,13 @@ use super::state::Conductor;
 use super::tools;
 use crate::chat::sse::ChatError;
 
-/// `for (let turn = 0; turn < 8; turn++)` — verbatim.
-const MAX_TURNS: usize = 8;
+/// `for (let turn = 0; turn < 8; turn++)` — verbatim in the JS original;
+/// deliberately bumped to 12 for orchestration: a `run_agent` delegation
+/// consumes one tool turn, so an assistant coordinating several agents and
+/// reporting back needs more headroom than the port's 8. The token budget
+/// (below) still bounds total spend, so the bump costs nothing when turns
+/// are cheap.
+const MAX_TURNS: usize = 12;
 /// `TOKEN_BUDGET` — verbatim.
 const TOKEN_BUDGET: u64 = 400_000;
 
@@ -153,7 +158,21 @@ async fn run_loop(
                 "chat:tool",
                 json!({ "id": id, "tool": tool_name, "hint": hint }),
             );
+            let started = std::time::Instant::now();
             let out = tools::run_tool(c, env, &tool_name, &input, id).await;
+            let ok = !tools::is_tool_failure(&out);
+            // The plan tracker's step-completion event: same shape as
+            // `chat:tool`, plus the honest outcome and wall-clock ms.
+            (env.send)(
+                "chat:tool-done",
+                json!({
+                    "id": id,
+                    "tool": tool_name,
+                    "hint": hint,
+                    "ok": ok,
+                    "ms": started.elapsed().as_millis() as u64,
+                }),
+            );
             // Audit the ACTION only: tool name, chat, outcome, and the same
             // hint the chat:tool event carries. Tool input/output never
             // goes in the log — typed text may contain secrets.
@@ -162,7 +181,7 @@ async fn run_loop(
                 vec![
                     ("tool".to_string(), json!(tool_name)),
                     ("chatId".to_string(), json!(id)),
-                    ("ok".to_string(), json!(true)),
+                    ("ok".to_string(), json!(ok)),
                     ("hint".to_string(), json!(hint)),
                 ],
             );

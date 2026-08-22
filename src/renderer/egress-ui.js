@@ -15,15 +15,22 @@ export function stripRender(paneId) {
   if (!strip) return
   const st = agState.panes[paneId]
   const label = strip.querySelector('.ag-label')
+  // P1.2 rung-2 honesty: the backend reports the pane's OS-confinement
+  // level per spawn; a network-only pane (Linux self-unshare rung whose
+  // Landlock file confinement failed open) keeps that caveat VISIBLE on
+  // the strip — never hidden in a tooltip, never silently "contained".
+  const confinementNote =
+    st?.confinement === 'network-only' ? ' · network-contained only' : ''
   if (!st || st.mode === 'providers') {
     strip.classList.remove('open')
-    label.textContent = '⛨ model APIs only — click to allow internet'
+    label.textContent = '⛨ model APIs only — click to allow internet' + confinementNote
   } else {
     strip.classList.add('open')
     const left = Math.max(0, st.expiresAt - Date.now())
     const m = Math.floor(left / 60000)
     const s = String(Math.floor((left % 60000) / 1000)).padStart(2, '0')
-    label.textContent = `⛉ internet open · relocks in ${m}:${s} — click to relock`
+    label.textContent =
+      `⛉ internet open · relocks in ${m}:${s} — click to relock` + confinementNote
   }
   // the tally only lives on the strip while the pane is providers-only
   if (st?.mode === 'open') setBlockedCount(paneId, 0)

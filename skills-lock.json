@@ -60,6 +60,12 @@
       "sourceType": "github",
       "skillPath": "mattpocock/to-questionnaire/SKILL.md",
       "computedHash": "8e7f9ed8d7b2e66babf1a54aee9b94319bf38c32619cffe78819df6518ead5fc"
+    },
+    "graphify": {
+      "source": "Graphify-Labs/graphify",
+      "sourceType": "github",
+      "skillPath": "skills/graphify/SKILL.md",
+      "computedHash": "96380a1e2194a25ac7932eaf3c07b3b103d864d73157cbf8cdc5b748348352dc"
     }
   }
 }

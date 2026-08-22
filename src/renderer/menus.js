@@ -3,7 +3,8 @@
 import { tome, toast, el, notifLog } from './util.js'
 import { prefs, wsState } from './state.js'
 import { activeWorkspace, saveWs, renderWsChip } from './workspaces.js'
-import { addTerminal, addChat, addBrain, addEvents, addRuns, addReport, openFile, createFlowFile } from './panes.js'
+import { addTerminal, addChat, addBrain, addGraphify, addEvents, addRuns, addReport, openFile, createFlowFile } from './panes.js'
+import { spawnPolicy } from './spawn-policy.js'
 import { confirmModal, promptModal } from './modals.js'
 import { renderStatusbar } from './statusbar.js'
 import { renderTree, createFileIn, createFolderIn } from './tree.js'
@@ -335,13 +336,17 @@ wireMenu('ws-chip', 'ws-menu', (menu) => {
 export async function populateAddMenu(menu, target) {
   menu.innerHTML = ''
   const agents = await tome.agents.list()
+  // Containment-only is a CEILING (P2.1): the unsandboxed Terminal row
+  // disappears and agents are forced gapped — the pure rules live in
+  // spawn-policy.js (vitest-pinned), this builder only applies them.
+  const policy = spawnPolicy(prefs)
   // The wizard's Agents step (and Settings → Agents) can deselect a CLI:
   // it stays installed, it just leaves this menu. pty:create in main still
   // accepts the kind — deselection is a UI convenience, not a sandbox rule.
   const disabled = new Set((await tome.store.get('agents-disabled')) || [])
   for (const a of agents.filter((a) => !a.custom && !disabled.has(a.name))) {
     menuItem(menu, {
-      label: (prefs.egressDefault ? '⛨ ' : '') + a.name,
+      label: (policy.agentsGapped ? '⛨ ' : '') + a.name,
       hint: a.available ? (target ? 'as a tab' : 'agent') : 'not installed',
       disabled: !a.available,
       onClick: () => addTerminal(a.name, target),
@@ -355,22 +360,24 @@ export async function populateAddMenu(menu, target) {
     menuLabel(menu, 'Custom agents')
     for (const a of customs) {
       menuItem(menu, {
-        label: (prefs.egressDefault ? '⛨ ' : '') + (a.label || a.name),
+        label: (policy.agentsGapped ? '⛨ ' : '') + (a.label || a.name),
         hint: a.available ? (target ? 'as a tab' : 'agent') : 'not installed',
         disabled: !a.available,
         onClick: () => addTerminal(a.name, target),
       })
     }
   }
-  menuItem(menu, {
-    label: 'spawn agents contained',
-    hint: prefs.egressDefault ? 'on' : 'off',
-    active: prefs.egressDefault,
-    onClick: () => {
-      prefs.egressDefault = !prefs.egressDefault
-      tome.store.set('egress-default', prefs.egressDefault)
-    },
-  })
+  if (policy.showEgressDefaultToggle) {
+    menuItem(menu, {
+      label: 'spawn agents contained',
+      hint: prefs.egressDefault ? 'on' : 'off',
+      active: prefs.egressDefault,
+      onClick: () => {
+        prefs.egressDefault = !prefs.egressDefault
+        tome.store.set('egress-default', prefs.egressDefault)
+      },
+    })
+  }
   menuItem(menu, {
     label: 'sandboxed docker',
     hint: prefs.dockerPanes ? 'on' : 'off',
@@ -396,12 +403,20 @@ export async function populateAddMenu(menu, target) {
   })
   menuRule(menu)
   menuItem(menu, { label: 'Assistant chat', hint: 'API', onClick: () => addChat(target) })
-  menuItem(menu, { label: 'Terminal', hint: 'zsh', onClick: () => addTerminal('terminal', target) })
+  if (policy.showUnsandboxedTerminal) {
+    menuItem(menu, { label: 'Terminal', hint: 'zsh', onClick: () => addTerminal('terminal', target) })
+  }
   menuItem(menu, {
     label: 'Brain',
     hint: activeWorkspace() ? 'vault' : 'needs a workspace',
     disabled: !activeWorkspace(),
     onClick: () => addBrain(target),
+  })
+  menuItem(menu, {
+    label: 'Code graph',
+    hint: wsState.activeRoot ? 'graphify' : 'needs a workspace',
+    disabled: !wsState.activeRoot,
+    onClick: () => addGraphify(target),
   })
   menuItem(menu, {
     label: 'Open file…',

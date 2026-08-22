@@ -163,6 +163,17 @@ pub(crate) fn push_state_event<E: EgressEnv>(env: &E, state: &AppState) {
 /// this function ever runs — `PaneProxy::spawn`'s `UnixListener::bind`
 /// needs the directory to already exist.
 ///
+/// `confinement` is the pane's honest starting OS-confinement level
+/// (P1.2 rung-2 honesty) — registered on the `EgressState` record the
+/// `egress:state` push below exposes to the renderer's strip. The caller
+/// KNOWS which mechanism it just wrapped the pane in: macOS seatbelt and
+/// Linux bwrap both report [`crate::egress::ConfinementLevel::Full`]; the
+/// Linux self-unshare rung starts at
+/// [`crate::egress::ConfinementLevel::NetworkOnly`] because its Landlock
+/// file confinement fails open, and is upgraded to `Full` only once the
+/// shim's `.landlock` marker confirms the ruleset applied (see
+/// `egress::linux::landlock_marker_path` and `ipc::pty`'s spawn watcher).
+///
 /// `pub(crate)`: `ipc::pty::pty_create` is the only caller (its own doc
 /// comment covers exactly when this path is taken vs. refused).
 pub(crate) async fn create_gapped_pane_proxy<E: EgressEnv>(
@@ -170,6 +181,7 @@ pub(crate) async fn create_gapped_pane_proxy<E: EgressEnv>(
     state: &AppState,
     pane_id: &str,
     unix_socket_path: Option<PathBuf>,
+    confinement: crate::egress::ConfinementLevel,
 ) -> std::io::Result<std::sync::Arc<crate::egress::proxy::PaneProxy>> {
     let initial_allowed = effective_allow_patterns(state);
     let blocked_env = env.clone();
@@ -213,7 +225,7 @@ pub(crate) async fn create_gapped_pane_proxy<E: EgressEnv>(
         .lock()
         .expect("AppState.proxies lock poisoned")
         .insert(pane_id.to_string(), proxy.clone());
-    state.egress.register_pane(pane_id);
+    state.egress.register_pane(pane_id, confinement);
     push_state_event(env, state);
     Ok(proxy)
 }
@@ -316,6 +328,20 @@ pub(crate) fn close_pane_and_proxy<E: EgressEnv>(env: &E, state: &AppState, pane
         .remove(pane_id)
     {
         gateway.shutdown();
+    }
+    // P1.2 rung-2 marker hygiene: the shim leaves `<pane-socket>.landlock`
+    // behind after a self-unshare spawn. Removing it here (best-effort —
+    // missing on macOS/bwrap, and a failed remove is a no-op) plus the
+    // host's spawn-time truncate keeps a stale "ok" from a previous
+    // session from ever being misread as THIS pane's Landlock
+    // confirmation. Linux-only because only the Linux rungs ever write
+    // one; `pane_socket_path_from_env` is the same helper `pty_create`
+    // used to derive the path in the first place.
+    #[cfg(target_os = "linux")]
+    if let Some(marker) = crate::egress::linux::pane_socket_path_from_env(pane_id)
+        .map(|p| crate::egress::linux::landlock_marker_path(&p))
+    {
+        let _ = std::fs::remove_file(marker);
     }
     if state.egress.close_pane(pane_id) {
         push_state_event(env, state);
@@ -746,7 +772,9 @@ mod tests {
     #[tokio::test]
     async fn schedule_unlock_widens_both_egress_state_and_the_live_proxy() {
         let env = TestEnv::new();
-        env.state.egress.register_pane("pty-1");
+        env.state
+            .egress
+            .register_pane("pty-1", crate::egress::ConfinementLevel::Full);
         let proxy = Arc::new(
             crate::egress::proxy::PaneProxy::spawn(vec![], None, |_| {})
                 .await
@@ -793,7 +821,9 @@ mod tests {
     #[tokio::test]
     async fn relock_now_narrows_both_egress_state_and_the_live_proxy() {
         let env = TestEnv::new();
-        env.state.egress.register_pane("pty-1");
+        env.state
+            .egress
+            .register_pane("pty-1", crate::egress::ConfinementLevel::Full);
         let proxy = Arc::new(
             crate::egress::proxy::PaneProxy::spawn(vec![], None, |_| {})
                 .await
@@ -825,13 +855,24 @@ mod tests {
     #[tokio::test]
     async fn create_gapped_pane_proxy_registers_a_live_proxy_reachable_on_its_reported_port() {
         let env = TestEnv::new();
-        let proxy = create_gapped_pane_proxy(&env, &env.state, "pty-1", None)
-            .await
-            .unwrap();
+        let proxy = create_gapped_pane_proxy(
+            &env,
+            &env.state,
+            "pty-1",
+            None,
+            crate::egress::ConfinementLevel::Full,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             env.state.egress.pane_mode("pty-1"),
             Some(crate::egress::PaneMode::Providers)
+        );
+        assert_eq!(
+            env.state.egress.pane_confinement("pty-1"),
+            Some(crate::egress::ConfinementLevel::Full),
+            "the registered pane must carry the confinement level the caller passed"
         );
         assert!(env.state.proxies.lock().unwrap().contains_key("pty-1"));
         assert!(tokio::net::TcpStream::connect(("127.0.0.1", proxy.port()))
@@ -861,9 +902,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let sock_path = dir.path().join("pane-pty-1.sock");
 
-        let proxy = create_gapped_pane_proxy(&env, &env.state, "pty-1", Some(sock_path.clone()))
-            .await
-            .unwrap();
+        let proxy = create_gapped_pane_proxy(
+            &env,
+            &env.state,
+            "pty-1",
+            Some(sock_path.clone()),
+            crate::egress::ConfinementLevel::Full,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(proxy.unix_path(), Some(&sock_path));
         assert!(sock_path.exists());
@@ -877,9 +924,15 @@ mod tests {
     #[tokio::test]
     async fn close_pane_and_proxy_tears_down_the_live_proxy_and_cancels_its_timer() {
         let env = TestEnv::new();
-        let proxy = create_gapped_pane_proxy(&env, &env.state, "pty-1", None)
-            .await
-            .unwrap();
+        let proxy = create_gapped_pane_proxy(
+            &env,
+            &env.state,
+            "pty-1",
+            None,
+            crate::egress::ConfinementLevel::Full,
+        )
+        .await
+        .unwrap();
         let port = proxy.port();
         drop(proxy); // this fn's own Arc, not AppState.proxies' — the map below still holds one
         schedule_unlock(&env, &env.state, "pty-1", 15); // arms a (long) real timer
@@ -933,7 +986,9 @@ mod tests {
         // drives `claim_timer_if_current` — the EXACT primitive both the
         // real timer task and this test call — directly.
         let env = TestEnv::new();
-        env.state.egress.register_pane("pty-1");
+        env.state
+            .egress
+            .register_pane("pty-1", crate::egress::ConfinementLevel::Full);
 
         schedule_unlock(&env, &env.state, "pty-1", 15);
         let stale_generation = env

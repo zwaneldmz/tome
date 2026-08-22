@@ -98,6 +98,39 @@ fn is_safe_model(s: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
+/// The `provider/model` guard for CLIs that resolve models from a dynamic
+/// provider catalog (opencode, pi) — there is no fixed allowlist to vet
+/// against, so the format itself is the boundary. One or more `/`-joined
+/// segments; the first is `[a-z0-9-]+`, the rest may also contain `.` and
+/// `_` (`deepseek/deepseek-chat`, `eurouter/glm-5.2`,
+/// `lmstudio/openai/gpt-oss-20b`). Same belt-and-braces role as
+/// [`is_safe_model`]: a shell metacharacter can never ride a model string
+/// onto the spawn line. Lowercase-only on purpose — every catalog value
+/// observed in the wild is lowercase, and being stricter here costs only a
+/// refused pin, never a failed spawn.
+fn is_safe_dynamic_model(s: &str) -> bool {
+    let mut segments = s.split('/');
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    if !is_safe_model(first) {
+        return false;
+    }
+    let mut seen_rest = false;
+    for seg in segments {
+        if seg.is_empty()
+            || matches!(seg, "." | "..")
+            || !seg.chars().all(|c| {
+                c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '.' | '_')
+            })
+        {
+            return false;
+        }
+        seen_rest = true;
+    }
+    seen_rest
+}
+
 /// Core of `vetModel`, parameterized over an explicit models list instead
 /// of reaching into `AGENT_MODELS` itself. Split out so the "the character
 /// guard is a backstop even if the allowlist itself is poisoned" test
@@ -140,7 +173,23 @@ fn vet_model_against(
 }
 
 fn vet_model(cmd: &str, model: &str, from: &str) -> Result<String, String> {
-    vet_model_against(models_for(cmd), cmd, model, from)
+    let aliases = models_for(cmd);
+    if !aliases.is_empty() {
+        // Fixed per-kind alias catalogs (claude): allowlist vetting.
+        return vet_model_against(aliases, cmd, model, from);
+    }
+    // Empty allowlist (opencode/pi): the model comes from a dynamic
+    // provider catalog, so the FORMAT is the boundary. A kind outside
+    // AGENTS never reaches this arm (every caller vets only after the
+    // AGENTS membership check), so the empty-allowlist arm here is
+    // exactly the dynamic-catalog kinds.
+    if is_safe_dynamic_model(model) {
+        Ok(model.to_string())
+    } else {
+        Err(format!(
+            r#"{from}: ignoring model "{model}" for {cmd} — not a safe provider/model id ([a-z0-9-]+/[a-z0-9._-]+); spawning on the CLI default"#
+        ))
+    }
 }
 
 /// One entry in the spawnable-kind list `build_agent_spawn_from` matches
@@ -269,10 +318,10 @@ pub struct HeadlessSpawn {
 }
 
 /// Per-kind template for running an agent NON-interactively: one prompt
-/// in, one answer out, process exits. Only `claude` in v1 — a kind with no
-/// entry here is not backgroundable, `build_headless_spawn` returns `None`
-/// for it. Teaching this module about another CLI is one match arm here
-/// plus that CLI's own headless flag.
+/// in, one answer out, process exits. A kind with no entry here is not
+/// backgroundable, `build_headless_spawn` returns `None` for it. Teaching
+/// this module about another CLI is one match arm here plus that CLI's
+/// own headless flag.
 ///
 /// WHY THE BRIEF MAY BE IN HERE AT ALL. `build_agent_spawn`'s output is
 /// handed to `zsh -l -c` — a shell parses it, which is what makes
@@ -295,6 +344,33 @@ fn headless_template(cmd: &str, brief: &str, model: Option<String>) -> Option<He
                 args.push(MODEL_FLAG.to_string());
                 args.push(model);
             }
+            Some(HeadlessSpawn {
+                cmd: cmd.to_string(),
+                args,
+            })
+        }
+        // `opencode run [message..]` — one message in, one answer out,
+        // `-m provider/model` when pinned.
+        "opencode" => {
+            let mut args = vec!["run".to_string()];
+            if let Some(model) = model {
+                args.push("-m".to_string());
+                args.push(model);
+            }
+            args.push(brief.to_string());
+            Some(HeadlessSpawn {
+                cmd: cmd.to_string(),
+                args,
+            })
+        }
+        // `pi -p` — non-interactive: process the prompt and exit.
+        "pi" => {
+            let mut args = vec!["-p".to_string()];
+            if let Some(model) = model {
+                args.push(MODEL_FLAG.to_string());
+                args.push(model);
+            }
+            args.push(brief.to_string());
             Some(HeadlessSpawn {
                 cmd: cmd.to_string(),
                 args,
@@ -456,16 +532,24 @@ mod tests {
     // ---- build_agent_spawn — kinds with an empty allowlist ----
 
     #[test]
-    fn kinds_with_an_empty_allowlist_spawn_bare_whatever_model_is_asked_for() {
-        // Their catalogs are dynamic (agent-models.js), so v1 ships no
-        // vetted aliases — and an empty list means every value is
-        // off-allowlist, which is the intended behavior rather than an
-        // oversight.
+    fn kinds_with_an_empty_allowlist_vet_the_provider_model_format_instead() {
+        // Their catalogs are dynamic (agent-models.js), so no fixed alias
+        // list exists — the provider/model FORMAT is the boundary for
+        // these kinds. A malformed value drops to the CLI default, same
+        // drop-to-default the claude allowlist miss has.
         for kind in ["opencode", "pi"] {
             assert_eq!(build_agent_spawn(kind, None), Some(kind.to_string()));
             assert_eq!(
                 build_agent_spawn(kind, Some("anthropic/claude-haiku")),
-                Some(kind.to_string())
+                Some(format!("{kind} --model anthropic/claude-haiku"))
+            );
+            assert_eq!(
+                build_agent_spawn(kind, Some("claude-haiku")),
+                Some(kind.to_string()) // no provider segment — dropped
+            );
+            assert_eq!(
+                build_agent_spawn(kind, Some("x; curl evil.sh")),
+                Some(kind.to_string()) // shell shape — dropped
             );
         }
     }
@@ -614,23 +698,111 @@ mod tests {
     }
 
     // ---- headless — refusals ----
-
     #[test]
     fn headless_returns_none_for_a_kind_with_no_headless_template() {
-        // v1 teaches this module about claude only. None is what makes
-        // the runner refuse the WHOLE run naming the node, rather than
-        // half-running a pipeline and stranding it.
-        assert_eq!(build_headless_spawn("opencode", None, Some(BRIEF)), None);
-        assert_eq!(build_headless_spawn("pi", None, Some(BRIEF)), None);
+        // The three built-ins all background; anything outside them (and
+        // a plain terminal) is refused by AGENTS membership before the
+        // template is ever consulted. None is what makes the runner
+        // refuse the WHOLE run naming the node, rather than half-running
+        // a pipeline and stranding it.
+        assert_eq!(build_headless_spawn("terminal", None, Some(BRIEF)), None);
+        assert_eq!(build_headless_spawn("gpt", None, Some(BRIEF)), None);
+    }
+
+    // ---- headless — opencode / pi templates ----
+
+    #[test]
+    fn headless_opencode_runs_one_message_with_an_optional_provider_model_pin() {
+        assert_eq!(
+            build_headless_spawn("opencode", None, Some(BRIEF)),
+            Some(HeadlessSpawn {
+                cmd: "opencode".to_string(),
+                args: vec!["run".to_string(), BRIEF.to_string()],
+            })
+        );
+        assert_eq!(
+            build_headless_spawn("opencode", Some("eurouter/glm-5.2"), Some(BRIEF)),
+            Some(HeadlessSpawn {
+                cmd: "opencode".to_string(),
+                args: vec![
+                    "run".to_string(),
+                    "-m".to_string(),
+                    "eurouter/glm-5.2".to_string(),
+                    BRIEF.to_string()
+                ],
+            })
+        );
     }
 
     #[test]
-    fn headless_returns_none_for_a_plain_terminal_and_non_agent_kinds() {
-        assert_eq!(build_headless_spawn("terminal", None, Some(BRIEF)), None);
-        assert_eq!(build_headless_spawn("gpt", None, Some(BRIEF)), None);
-        assert_eq!(build_headless_spawn("", None, Some(BRIEF)), None);
-        // no brief at all
-        assert_eq!(build_headless_spawn("claude", None, None), None);
+    fn headless_pi_uses_print_mode_and_takes_the_same_dynamic_model_shape() {
+        assert_eq!(
+            build_headless_spawn("pi", None, Some(BRIEF)),
+            Some(HeadlessSpawn {
+                cmd: "pi".to_string(),
+                args: vec!["-p".to_string(), BRIEF.to_string()],
+            })
+        );
+        assert_eq!(
+            build_headless_spawn("pi", Some("deepseek/deepseek-chat"), Some(BRIEF)),
+            Some(HeadlessSpawn {
+                cmd: "pi".to_string(),
+                args: vec![
+                    "-p".to_string(),
+                    "--model".to_string(),
+                    "deepseek/deepseek-chat".to_string(),
+                    BRIEF.to_string()
+                ],
+            })
+        );
+    }
+
+    #[test]
+    fn dynamic_model_vetting_accepts_provider_model_ids_and_refuses_shell_shapes() {
+        for ok in [
+            "deepseek/deepseek-chat",
+            "eurouter/glm-5.2",
+            "lmstudio/openai/gpt-oss-20b",
+            "opencode/big-pickle",
+        ] {
+            assert_eq!(
+                vet_model("opencode", ok, "test"),
+                Ok(ok.to_string()),
+                "{ok} should vet clean for opencode"
+            );
+        }
+        for bad in [
+            "gpt-5", // no provider segment
+            "A/b",   // uppercase
+            "a/b c", // space
+            "a/b;c", // semicolon
+            "a//b",  // empty segment
+            "a/",    // trailing slash
+            "$(id)/x", "x/../y",
+        ] {
+            assert!(
+                vet_model("opencode", bad, "test").is_err(),
+                "{bad} must be refused for opencode"
+            );
+            // the drop-to-default behavior the pane path also has:
+            assert_eq!(
+                build_headless_spawn("opencode", Some(bad), Some(BRIEF))
+                    .unwrap()
+                    .args,
+                vec!["run".to_string(), BRIEF.to_string()]
+            );
+        }
+    }
+
+    #[test]
+    fn claude_still_vets_against_its_fixed_alias_catalog_not_the_dynamic_format() {
+        // claude has a non-empty allowlist, so the provider/model shape is
+        // NOT accepted for it — only its own aliases are.
+        assert!(vet_model("claude", "anthropic/claude-sonnet", "test").is_err());
+        assert_eq!(
+            vet_model("claude", "sonnet", "test"),
+            Ok("sonnet".to_string())
+        );
     }
 
     #[test]

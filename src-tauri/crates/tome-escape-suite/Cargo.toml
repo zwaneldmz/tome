@@ -1,0 +1,19 @@
+[package]
+name = "tome-escape-suite"
+version = "0.1.0"
+edition = "2021"
+description = "In-house dynamic sandbox escape suite (P5.3): spawns real contained panes — macOS seatbelt (sandbox-exec under the production SBPL profile) and Linux bubblewrap + tome-shim — and attempts the THREATMODEL escape list, asserting every attempt is blocked. CI-gated on both OSes."
+
+[[bin]]
+name = "tome-escape-suite"
+path = "src/main.rs"
+
+[dependencies]
+# The production egress code under test: the seatbelt profile builder, the
+# bwrap/self-unshare argv assembly, the allowlist compiler/validator, and
+# the per-pane proxy. The suite drives THESE, never re-implemented copies —
+# the same crate `ipc::pty::pty_create` calls at spawn time.
+tome-flow = { path = "../tome-flow" }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+tempfile = "3"

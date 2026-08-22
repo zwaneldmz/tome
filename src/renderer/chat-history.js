@@ -2,7 +2,8 @@
 // session (voice.js). Extracted from ChatPanel so both writers agree on the
 // store key shape, the cap, and the debounce — the voice session and a chat
 // pane opened with chatId 'chat-voice' read and write the SAME log.
-import { tome } from './util.js'
+import { tome, el } from './util.js'
+import { modalShell } from './modals.js'
 
 // Transcripts persist to the main-process JSON store so a chat pane restored
 // from a saved layout comes back with its conversation. Writes are debounced
@@ -60,3 +61,62 @@ export function flushHistory(chatId, history) {
   if (typeof chatId !== 'string' || !chatId || !history.length) return
   tome.store.set(historyKey(chatId), history.slice(-HISTORY_CAP)).catch(() => {})
 }
+
+// ---- the searchable archive ----------------
+//
+// A workspace startup starts the assistant FRESH (a new chatId per restored
+// pane), so past conversations live only in the store. This modal lists and
+// searches them (backend-side, case-insensitive, over user+assistant text)
+// and hands a picked conversation back to the pane through `onPick` — the
+// pane re-anchors itself to that chatId, so continuing it appends to the
+// right log.
+export function openChatHistory(onPick) {
+  const m = modalShell('Chat history')
+  m.body.parentElement.classList.add('hist-box')
+
+  const search = el('input', 'hist-search')
+  search.type = 'search'
+  search.placeholder = 'Search conversations…'
+  search.setAttribute('aria-label', 'Search conversations')
+  search.spellcheck = false
+  const list = el('div', 'hist-list')
+  m.body.append(search, list)
+
+  let seq = 0
+  const paint = (entries, emptyText) => {
+    list.replaceChildren()
+    if (!entries.length) {
+      list.appendChild(el('div', 'hist-empty', emptyText))
+      return
+    }
+    for (const e of entries) {
+      const row = el('button', 'hist-row')
+      row.type = 'button'
+      row.append(el('span', 'hist-snippet', e.snippet), el('span', 'hist-meta', `${e.count} msgs`))
+      row.addEventListener('click', () => {
+        m.close()
+        onPick(e.id)
+      })
+      list.appendChild(row)
+    }
+  }
+
+  // debounced live search: only the trailing keystroke round-trips
+  const run = () => {
+    const my = ++seq
+    tome.chat
+      .historyList(search.value.trim())
+      .then((entries) => {
+        if (my !== seq) return
+        paint(entries, search.value.trim() ? 'no conversations match' : 'no conversations yet — the assistant keeps them as you chat')
+      })
+      .catch(() => {
+        if (my !== seq) return
+        paint([], 'could not read history')
+      })
+  }
+  search.addEventListener('input', run)
+  run()
+  search.focus()
+}
+

@@ -97,6 +97,8 @@ export class TerminalPanel {
           // Sandboxed Docker: only ever present when both the global master
           // and the per-pane spawn mode were on at spawn time.
           docker: params.docker,
+          // One-shot initial command (terminal kind only).
+          cmd: params.cmd,
           auth,
         })
       } catch (err) {

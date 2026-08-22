@@ -8,6 +8,6 @@ export default defineConfig({
   test: {
     // e2e/ holds Playwright specs — vitest's default include pattern would
     // sweep them up and fail at import ("test.describe() called here").
-    exclude: ['**/node_modules/**', '**/.claude/**', 'e2e/**'],
+    exclude: ['**/node_modules/**', '**/.claude/**', '**/.worktrees/**', 'e2e/**'],
   },
 })

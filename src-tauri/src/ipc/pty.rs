@@ -127,6 +127,13 @@ pub struct PtyCreateOpts {
     /// `docker-gateway` store key is also on AND the pane is gapped — an
     /// ungapped pane already has full host access and needs no gateway.
     pub docker: Option<bool>,
+    /// Initial command for a plain `terminal` pane — spliced into the
+    /// login shell as `-c <cmd>`, the same slot an agent CLI's command
+    /// line uses, so the sandbox/gap wrapping is identical either way.
+    /// Agent kinds ignore it (their command line comes from the agent
+    /// builder, never the renderer). The opencode `providers login` flow
+    /// in Settings is the one feature using it today.
+    pub cmd: Option<String>,
 }
 
 /// How a gapped pane's command line gets wrapped, once its `PaneProxy` is
@@ -414,6 +421,66 @@ fn shim_path_in(dir: &Path, target_triple: Option<&str>) -> PathBuf {
     }
 }
 
+/// P1.1 (launch hardening, fail closed): `app_data_dir` must resolve to
+/// ITSELF before any contained pane spawns. SBPL `subpath` rules match the
+/// path `sandbox-exec` canonicalizes the operation's target to — through
+/// symlinks (see `egress::seatbelt`'s module doc comment, "Canonical-path
+/// caveat", verified live against `sandbox-exec`) — so a config directory
+/// reached through a symlinked ancestor would silently escape the
+/// profile's config-dir confinement (and the Linux rungs' config-dir
+/// tmpfs/Landlock exclusion, which name the spelled path the same way).
+/// Enforced HERE, at the one caller that hands `app_data_dir` to the
+/// confinement builders: a contained spawn with a symlinked config dir is
+/// refused with an error naming the problem, never launched into a
+/// profile that looks confined and isn't.
+///
+/// `std::fs::canonicalize` requires the directory to exist — boot creates
+/// it (`lib.rs::boot_auth_and_egress`'s `create_dir_all`), so a missing
+/// dir here is already an abnormal state; failing closed with an honest
+/// message is the right answer for that too, not a silent proceed.
+fn verify_real_app_data_dir(app_data_dir: &Path) -> Result<(), String> {
+    match std::fs::canonicalize(app_data_dir) {
+        Ok(real) if real == app_data_dir => Ok(()),
+        Ok(real) => Err(format!(
+            "contained pane refused: Tome's config directory {} is reached \
+             through a symlink (it resolves to {}). Sandbox rules match the real \
+             path, so a symlinked config directory would silently escape file \
+             confinement. Point Tome's data directory at a real path (no \
+             symlinked ancestors) and try again.",
+            app_data_dir.display(),
+            real.display(),
+        )),
+        Err(e) => Err(format!(
+            "contained pane refused: could not verify that Tome's config directory \
+             {} is a real path with no symlinked ancestors: {e}",
+            app_data_dir.display(),
+        )),
+    }
+}
+
+/// P2.1 (launch hardening): the containment-only ceiling's pure decision
+/// core. When the pref is on, an ungapped spawn — agent OR plain terminal —
+/// is refused with a message naming the mode; a gapped spawn passes. Split
+/// out of `pty_create`'s body because the real decision is a two-boolean
+/// predicate worth unit-testing without a live `AppHandle`/store (this
+/// crate enables no tauri `test` feature, so nothing outside a running app
+/// can construct one — see `ipc::egress::EgressEnv`'s own doc comment for
+/// the same seam's rationale).
+///
+/// The renderer is a threat-model actor: its menu removal (spawn-policy.js)
+/// is convenience, THIS check is the wall — it runs at the IPC layer, after
+/// the store read, before anything spawns.
+fn containment_only_refuses(containment_only: bool, gapped: bool) -> Option<&'static str> {
+    if containment_only && !gapped {
+        Some(
+            "containment-only mode is on — unsandboxed pane spawns are disabled. \
+             Turn it off in Preferences → Security to spawn unsandboxed panes.",
+        )
+    } else {
+        None
+    }
+}
+
 /// The TOME-001 re-auth ceremony's three possible outcomes — see this
 /// module's doc comment and [`evaluate_reauth`]. `pub(crate)`: reused
 /// verbatim (not duplicated) by `ipc::runs::runs_start`'s own re-auth
@@ -546,7 +613,15 @@ pub async fn pty_create(
     // (a cached, but first-call-EXPENSIVE shell-out, deliberately NOT
     // moved for exactly that reason — see the gapped Linux branch below),
     // this is a plain allowlist lookup with no cost worth guarding.
-    let agent_cmd = agent_spawn::build_agent_spawn_from(&agents, &opts.kind, opts.model.as_deref());
+    let mut agent_cmd =
+        agent_spawn::build_agent_spawn_from(&agents, &opts.kind, opts.model.as_deref());
+    if opts.kind == "terminal" {
+        agent_cmd = opts
+            .cmd
+            .as_ref()
+            .map(|c| c.trim().to_string())
+            .filter(|c| !c.is_empty());
+    }
 
     let egress_default = {
         let default_dir = dir.clone();
@@ -573,6 +648,36 @@ pub async fn pty_create(
     };
     let effective_docker =
         effective_gapped && docker_gateway_store == json!(true) && opts.docker.unwrap_or(false);
+
+    // P2.1 containment-only ceiling — enforced HERE, at the IPC layer,
+    // never in the renderer (the renderer is a threat-model actor; its menu
+    // removal is convenience, this is the actual wall). Read the store key
+    // like every other policy key; when on, ANY ungapped spawn — agent or
+    // terminal — fails closed with an error naming the mode, before the
+    // reauth ceremony could even prompt (no misleading prompt for a spawn
+    // that will never happen).
+    let containment_only = {
+        let co_dir = dir.clone();
+        tokio::task::spawn_blocking(move || store::get(&co_dir, "containment-only", locked))
+            .await
+            .map_err(|e| e.to_string())?
+    } == json!(true);
+    if let Some(reason) = containment_only_refuses(containment_only, effective_gapped) {
+        events::append(
+            &app,
+            eventlog::make_event(
+                "pty:blocked",
+                vec![
+                    ("paneId", json!(opts.id)),
+                    ("kind", json!(opts.kind)),
+                    ("gapped", json!(effective_gapped)),
+                    ("reason", json!(reason)),
+                ],
+                None,
+            ),
+        );
+        return Err(reason.to_string());
+    }
 
     // ---- TOME-001 re-auth ceremony (before resolving cwd — matches
     // createPty's own order) ----
@@ -646,11 +751,40 @@ pub async fn pty_create(
     let mut proxy_port: Option<u16> = None;
     let mut sandbox: Option<SandboxWrap> = None;
     let mut docker_socket: Option<PathBuf> = None;
+    // P1.2 rung-2 honesty: the Landlock confirmation marker this pane's
+    // shim writes `"ok"` into when its Landlock ruleset actually applied —
+    // `Some` only on the self-unshare rung (bwrap/macOS need no
+    // confirmation: their file confinement cannot fail open). Polled by
+    // the watcher spawned after a successful spawn, which upgrades the
+    // pane's reported confinement level from network-only to full ONLY on
+    // that real confirmation.
+    let mut landlock_marker: Option<PathBuf> = None;
     // The socket path as the PANE will see it in `DOCKER_HOST`. Differs from
     // `docker_socket` (the host path) only on the bwrap rung, where the
     // gateway socket is bind-mounted to a fixed in-namespace path.
     let mut docker_env_socket: Option<PathBuf> = None;
     if effective_gapped {
+        // P1.1: fail closed on a symlinked config dir BEFORE any proxy or
+        // profile work — the seatbelt/Linux confinement rules name the
+        // spelled path, so a symlinked `app_data_dir` would silently escape
+        // them (see `verify_real_app_data_dir`'s doc comment and
+        // `egress::seatbelt`'s "Canonical-path caveat").
+        if let Err(reason) = verify_real_app_data_dir(&dir) {
+            events::append(
+                &app,
+                eventlog::make_event(
+                    "pty:blocked",
+                    vec![
+                        ("paneId", json!(opts.id)),
+                        ("kind", json!(opts.kind)),
+                        ("gapped", json!(true)),
+                        ("reason", json!(reason.clone())),
+                    ],
+                    None,
+                ),
+            );
+            return Err(reason);
+        }
         let host_os = if cfg!(target_os = "macos") {
             HostOs::MacOs
         } else if cfg!(target_os = "linux") {
@@ -672,9 +806,18 @@ pub async fn pty_create(
         // built from its real port. If the spawn fails afterward, the
         // existing cleanup (`close_pane_and_proxy`) tears it down.
         if host_os == HostOs::MacOs {
-            let proxy = create_gapped_pane_proxy(&app, &state, &opts.id, None)
-                .await
-                .map_err(|e| e.to_string())?;
+            let proxy = create_gapped_pane_proxy(
+                &app,
+                &state,
+                &opts.id,
+                None,
+                // macOS always reports full confinement: seatbelt enforces
+                // BOTH the network gap and the config-dir file rules in one
+                // profile, with no fail-open rung (P1.2).
+                egress::ConfinementLevel::Full,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
             proxy_port = Some(proxy.port());
         }
         match resolve_gapped_spawn(
@@ -716,10 +859,23 @@ pub async fn pty_create(
                 }
 
                 // Rung 1 (bwrap) or rung 2 (self-unshare): real enforcement.
+                // P1.2 rung-2 honesty decides what confinement this pane can
+                // REPORT: bwrap hides the config dir behind a tmpfs — full.
+                // The self-unshare rung's Landlock file confinement FAILS
+                // OPEN (no Landlock → config dir stays readable), so it
+                // starts at network-only and is upgraded only on the shim's
+                // `.landlock` marker (see `landlock_marker` above). `Refuse`
+                // was already returned above, so the `_` arm is really
+                // "SelfUnshare or impossible", same reasoning as
+                // `docker_env_socket`'s own `_` arm below.
+                let confinement_level = match strategy {
+                    egress::linux::SandboxStrategy::Bwrap => egress::ConfinementLevel::Full,
+                    _ => egress::ConfinementLevel::NetworkOnly,
+                };
                 // The pane sees the gateway socket at the bind-mounted
                 // in-namespace path under bwrap, and at its real host path
                 // under self-unshare (no mount namespace to remap it into).
-                docker_env_socket = match strategy {
+                docker_env_socket = match &strategy {
                     egress::linux::SandboxStrategy::Bwrap => {
                         Some(PathBuf::from(egress::linux::CONTAINER_DOCKER_SOCK_PATH))
                     }
@@ -739,10 +895,28 @@ pub async fn pty_create(
                 }
                 let shim_path = resolve_shim_path()?;
 
-                let proxy =
-                    create_gapped_pane_proxy(&app, &state, &opts.id, Some(sock_path.clone()))
-                        .await
-                        .map_err(|e| e.to_string())?;
+                // P1.2: on the self-unshare rung, truncate the shim's
+                // `.landlock` marker HERE — before the spawn — so the
+                // watcher after it can never misread a stale "ok" left by a
+                // previous session's pane with the same id (pane ids restart
+                // at `pty-1` every boot). Remove-then-create, so even a
+                // crashed prior session's file cannot survive.
+                if matches!(strategy, egress::linux::SandboxStrategy::SelfUnshare) {
+                    let marker = egress::linux::landlock_marker_path(&sock_path);
+                    let _ = std::fs::remove_file(&marker);
+                    let _ = std::fs::write(&marker, b"");
+                    landlock_marker = Some(marker);
+                }
+
+                let proxy = create_gapped_pane_proxy(
+                    &app,
+                    &state,
+                    &opts.id,
+                    Some(sock_path.clone()),
+                    confinement_level,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
                 proxy_port = Some(proxy.port());
 
                 // Cached (`tokio::sync::OnceCell`) — see `login_env.rs`'s
@@ -854,11 +1028,27 @@ pub async fn pty_create(
 
     let login = login_env::login_env().await;
     let process_env: HashMap<String, String> = std::env::vars().collect();
-    let secrets = if is_agent {
+    let mut secrets = if is_agent {
         login.secrets.clone()
     } else {
         HashMap::new()
     };
+    // Kind-matched chat-key injection (plan Q1, delta 1): a pasted vault
+    // key reaches only the agent pane whose CLI consumes it — the claude
+    // CLI reads ANTHROPIC_API_KEY. Blanket injection (every pasted key in
+    // every agent pane) was rejected: one pane should see at most the one
+    // key its own CLI uses, and terminal panes none. Shell-sourced keys
+    // already flow through login.secrets above; this adds the vault rung.
+    if is_agent {
+        let vault_keys = &state
+            .chat_keys
+            .read()
+            .expect("AppState.chat_keys lock poisoned")
+            .0;
+        if let Some((env_name, key)) = chat_key_injection(&opts.kind, vault_keys) {
+            secrets.insert(env_name, key);
+        }
+    }
     // `if (ws) { env.TOME_BRAIN = await brain.ensureBrain(ws); ... }` —
     // unconditional on is_agent/gapped, matching buildAgentEnv's own order
     // (see PtyCreateOpts's doc comment on `ws`).
@@ -950,6 +1140,39 @@ pub async fn pty_create(
         &spawn_cwd.to_string_lossy(),
         effective_gapped,
     );
+    // P1.2 rung-2 honesty: the shim writes "ok" into the marker the moment
+    // its Landlock ruleset applies — if it applies at all. Poll briefly and
+    // upgrade the pane's reported confinement (the strip flips from
+    // "network-contained only" to full) ONLY on that real confirmation. On
+    // timeout — Landlock unavailable, shim crashed before writing — the
+    // pane honestly stays network-only. If the pane closed before the poll
+    // resolves, `set_pane_confinement` returns false and the upgrade is
+    // dropped silently: a dead pane must not resurrect a state entry.
+    if let Some(marker) = landlock_marker {
+        let watcher_app = app.clone();
+        let watcher_id = opts.id.clone();
+        tauri::async_runtime::spawn(async move {
+            // 10s budget: the write happens milliseconds after the shim
+            // starts; the poll just has to outlast a loaded scheduler or a
+            // slow dev build's first exec.
+            for _ in 0..100 {
+                let confirmed = std::fs::read_to_string(&marker)
+                    .map(|s| s.trim() == "ok")
+                    .unwrap_or(false);
+                if confirmed {
+                    let watcher_state = watcher_app.state::<AppState>();
+                    if watcher_state
+                        .egress
+                        .set_pane_confinement(&watcher_id, egress::ConfinementLevel::Full)
+                    {
+                        crate::ipc::egress::push_state_event(&watcher_app, &watcher_state);
+                    }
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        });
+    }
     Ok(json!({}))
 }
 
@@ -1033,6 +1256,24 @@ fn resolve_core_vault_root(core_vault_store_value: Option<&str>) -> Option<Strin
     brain::core_info(core_vault_store_value)
         .configured_root()
         .map(str::to_string)
+}
+
+/// Agent kind → (provider row id, env name the pane's CLI reads). The
+/// extensibility point for kind-matched chat-key injection (plan Q1,
+/// delta 1): widening later is a reviewed one-line array edit, not a
+/// policy rewrite. `opencode`/`pi` are deliberately absent — they carry
+/// their own auth/config systems, and silently injecting foreign keys
+/// into them was exactly the blast radius the blanket default had.
+const AGENT_PROVIDER_KEYS: &[(&str, &str, &str)] = &[("claude", "claude", "ANTHROPIC_API_KEY")];
+
+/// The pure half of kind-matched chat-key injection: given an agent kind
+/// and the vault snapshot, the `(env_name, key)` pair the pane's env
+/// gains — at most one, only for a kind with a mapping, and never an
+/// empty/whitespace key (empty is falsy at every vault rung).
+fn chat_key_injection(kind: &str, chat_keys: &HashMap<String, String>) -> Option<(String, String)> {
+    let (_, provider_id, env_name) = AGENT_PROVIDER_KEYS.iter().find(|(k, _, _)| *k == kind)?;
+    let key = chat_keys.get(*provider_id)?.clone();
+    (!key.trim().is_empty()).then(|| ((*env_name).to_string(), key))
 }
 
 /// Resolves `TOME_BRAIN`/`TOME_CORE_VAULT` for a workspace-scoped pane —
@@ -1254,6 +1495,45 @@ mod tests {
             env.iter().all(|(k, _)| k != "ANTHROPIC_API_KEY"),
             "pane_env with is_agent:false must never carry a provider credential"
         );
+    }
+
+    // ================= chat_key_injection — kind-matched vault keys
+    // (plan Q1, delta 1) =================
+
+    #[test]
+    fn chat_key_injection_gives_a_claude_pane_the_pasted_anthropic_key() {
+        let mut chat_keys = HashMap::new();
+        chat_keys.insert("claude".to_string(), "sk-ant-pasted".to_string());
+        assert_eq!(
+            chat_key_injection("claude", &chat_keys),
+            Some(("ANTHROPIC_API_KEY".to_string(), "sk-ant-pasted".to_string()))
+        );
+    }
+
+    #[test]
+    fn chat_key_injection_never_reaches_other_kinds_or_terminals() {
+        let mut chat_keys = HashMap::new();
+        chat_keys.insert("claude".to_string(), "sk-ant".to_string());
+        chat_keys.insert("glm".to_string(), "z-key".to_string());
+        // opencode and pi have no mapping — they carry their own auth;
+        // the glm key must never leak into any pane.
+        assert_eq!(chat_key_injection("opencode", &chat_keys), None);
+        assert_eq!(chat_key_injection("pi", &chat_keys), None);
+        assert_eq!(chat_key_injection("terminal", &chat_keys), None);
+        // and a claude pane sees ONLY the claude key — never glm's.
+        assert_eq!(
+            chat_key_injection("claude", &chat_keys),
+            Some(("ANTHROPIC_API_KEY".to_string(), "sk-ant".to_string()))
+        );
+    }
+
+    #[test]
+    fn chat_key_injection_treats_a_missing_or_blank_vault_key_as_no_injection() {
+        let empty = HashMap::new();
+        assert_eq!(chat_key_injection("claude", &empty), None);
+        let mut blank = HashMap::new();
+        blank.insert("claude".to_string(), "   ".to_string());
+        assert_eq!(chat_key_injection("claude", &blank), None);
     }
 
     #[test]
@@ -1620,6 +1900,95 @@ mod tests {
         assert!(cmd.get_env("USER").is_none() || std::env::var("USER").is_err());
     }
 
+    // ================= verify_real_app_data_dir — P1.1 fail-closed caller
+    // invariant (a symlinked config dir would silently escape the subpath
+    // confinement — see seatbelt.rs's "Canonical-path caveat") ============
+
+    #[test]
+    fn verify_real_app_data_dir_accepts_a_directory_that_resolves_to_itself() {
+        // Canonicalize the fixture first: on macOS `tempdir()`'s path runs
+        // through `/var` -> `/private/var`, so the literal tempdir path is
+        // already a symlinked spelling there — the ACCEPT path is "the dir
+        // resolves to itself", which the canonical form exercises exactly.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        assert_eq!(verify_real_app_data_dir(&dir), Ok(()));
+    }
+
+    #[test]
+    fn verify_real_app_data_dir_accepts_a_nested_real_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap().join("a/b");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(verify_real_app_data_dir(&dir), Ok(()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn verify_real_app_data_dir_refuses_a_symlinked_directory_naming_the_problem() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = std::fs::canonicalize(tmp.path()).unwrap().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let err = verify_real_app_data_dir(&link).unwrap_err();
+        assert!(
+            err.contains("symlink"),
+            "error must name the problem: {err}"
+        );
+        assert!(
+            err.contains("escape"),
+            "error must name the confinement escape: {err}"
+        );
+        // The real path is in the message so the user can see what to fix.
+        assert!(err.contains(real.to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn verify_real_app_data_dir_refuses_an_unverifiable_directory_fail_closed() {
+        let err =
+            verify_real_app_data_dir(Path::new("/definitely/not/here/tome-config")).unwrap_err();
+        assert!(
+            err.contains("could not verify"),
+            "a missing dir must fail closed with an honest message: {err}"
+        );
+    }
+
+    // ================= containment_only_refuses — P2.1's IPC-layer ceiling ================
+
+    #[test]
+    fn containment_only_refuses_every_ungapped_spawn_when_the_pref_is_on() {
+        // The predicate does not distinguish agent from terminal: an
+        // ungapped pty is an ungapped pty, and containment-only forbids
+        // the whole class (the IPC layer must not rely on the renderer's
+        // menu having removed the Terminal row).
+        assert!(containment_only_refuses(true, false).is_some());
+    }
+
+    #[test]
+    fn containment_only_never_refuses_a_gapped_spawn() {
+        assert_eq!(containment_only_refuses(true, true), None);
+    }
+
+    #[test]
+    fn containment_only_refuses_nothing_when_the_pref_is_off() {
+        assert_eq!(containment_only_refuses(false, false), None);
+        assert_eq!(containment_only_refuses(false, true), None);
+    }
+
+    #[test]
+    fn containment_only_refusal_message_names_the_mode_and_the_way_out() {
+        let reason = containment_only_refuses(true, false).expect("must refuse");
+        assert!(
+            reason.contains("containment-only"),
+            "the error must name the mode that blocked the spawn: {reason}"
+        );
+        assert!(
+            reason.contains("Preferences → Security"),
+            "the error must tell the user where to lift the ceiling: {reason}"
+        );
+    }
+
     // ================= evaluate_reauth — TOME-001's three-way outcome =================
 
     #[test]
@@ -1659,5 +2028,69 @@ mod tests {
     fn gapped_spawn_never_needs_the_reauth_ceremony_regardless_of_auth_config() {
         assert!(!pty_authority::unrestricted_spawn_needs_reauth(true, true));
         assert!(!pty_authority::unrestricted_spawn_needs_reauth(true, false));
+    }
+
+    // ================= P5.3 escape-suite coverage: the composed ceremony
+    // with a REAL AuthLock (the dynamic escape suite, a separate crate,
+    // cannot reach these pub(crate) items — these tests are its attempt
+    // 9's delegated assertion, and run in every CI gate via cargo test) ====
+
+    #[test]
+    fn ungapped_spawn_with_a_real_configured_factor_demands_a_verified_second_factor() {
+        // Composes the exact ceremony pty_create runs for an ungapped
+        // spawn (the TOME-001 re-auth block):
+        // unrestricted_spawn_needs_reauth gates, then evaluate_reauth
+        // turns (payload_supplied, verified) into the refusal/proceed
+        // outcome — with a REAL AuthLock so "verified" is a real scrypt
+        // check, not a mocked boolean. Passphrase-only (no TOTP), so the
+        // OS keychain protector is never consulted (it exists only for
+        // the TOTP-secret path).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut lock = crate::authlock::AuthLock::load(dir.path());
+        lock.set_passphrase("correct horse battery staple")
+            .expect("set passphrase");
+        assert!(lock.status().configured);
+
+        // An ungapped pane with a configured factor enters the ceremony.
+        assert!(pty_authority::unrestricted_spawn_needs_reauth(
+            false,
+            lock.status().configured
+        ));
+
+        // No payload at all -> refused pending credentials.
+        assert!(matches!(
+            evaluate_reauth(false, false),
+            ReauthOutcome::NeedsCredentials
+        ));
+
+        // A supplied but WRONG factor -> refused; the real verify failed.
+        assert!(!lock.verify_passphrase("wrong horse battery staple"));
+        assert!(matches!(
+            evaluate_reauth(true, false),
+            ReauthOutcome::Rejected
+        ));
+
+        // The correct factor -> the spawn proceeds.
+        assert!(lock.verify_passphrase("correct horse battery staple"));
+        assert!(matches!(
+            evaluate_reauth(true, true),
+            ReauthOutcome::Verified
+        ));
+    }
+
+    #[test]
+    fn ungapped_spawn_with_no_configured_factor_needs_no_ceremony() {
+        // The TOME-001 exception, with a REAL (fresh, unconfigured)
+        // AuthLock: there is no factor to re-prove, so an ungapped spawn
+        // proceeds — pinned here so a future edit cannot "convenience"
+        // the ceremony away for the configured case or demand it for the
+        // unconfigured one.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lock = crate::authlock::AuthLock::load(dir.path());
+        assert!(!lock.status().configured);
+        assert!(!pty_authority::unrestricted_spawn_needs_reauth(
+            false,
+            lock.status().configured
+        ));
     }
 }

@@ -20,10 +20,20 @@ export function modalShell(title, onClose, doc = document) {
   overlay.setAttribute('aria-modal', 'true')
   overlay.setAttribute('aria-label', title)
   const box = el('div', 'ag-box')
+  // Header row: title + an explicit close button (WIG: an overlay must not
+  // be closable ONLY by Escape/backdrop — a visible affordance, labelled,
+  // first in the focus trap so Tab doesn't skip the most obvious control).
+  const head = el('div', 'ag-head')
   const h = el('h3', '', title)
+  const closeBtn = el('button', 'ag-close', '✕')
+  closeBtn.type = 'button'
+  closeBtn.setAttribute('aria-label', 'Close dialog')
+  closeBtn.title = 'Close (Esc)'
+  closeBtn.addEventListener('click', () => close())
+  head.append(h, closeBtn)
   const body = el('div', 'ag-body')
   const err = el('div', 'ag-err')
-  box.append(h, body, err)
+  box.append(head, body, err)
   overlay.appendChild(box)
   doc.body.appendChild(overlay)
 
@@ -34,17 +44,26 @@ export function modalShell(title, onClose, doc = document) {
   const close = () => {
     if (closed) return
     closed = true
+    doc.removeEventListener('keydown', esc, true)
     overlay.remove()
     prevFocus?.focus()
     onClose?.()
   }
-  overlay.addEventListener('click', (e) => e.target === overlay && close())
-  overlay.addEventListener('keydown', (e) => {
+  // Escape is handled on the DOCUMENT (capture phase), not the overlay:
+  // modals that mount empty and fill their controls async (e.g. the TOTP
+  // enroll dialog) leave focus on <body>, and a keydown from <body> never
+  // bubbles through the overlay element — Escape would silently do
+  // nothing. Capture-phase document handling sees it regardless of where
+  // focus sits, which is what the "Escape closes" contract always meant.
+  const esc = (e) => {
     if (e.key === 'Escape') {
       e.preventDefault()
       close()
-      return
     }
+  }
+  doc.addEventListener('keydown', esc, true)
+  overlay.addEventListener('click', (e) => e.target === overlay && close())
+  overlay.addEventListener('keydown', (e) => {
     if (e.key === 'Tab') {
       const f = [...overlay.querySelectorAll(FOCUSABLE)].filter((n) => !n.closest('.hidden'))
       if (!f.length) return
@@ -68,6 +87,12 @@ export function modalShell(title, onClose, doc = document) {
       const i = el('input')
       i.type = type
       i.placeholder = placeholder
+      // WIG: label by aria-label (the placeholder is the only visible
+      // text), no autocomplete (key/passphrase fields must not trigger
+      // password-manager prompts), no spellcheck.
+      i.setAttribute('aria-label', placeholder)
+      i.autocomplete = 'off'
+      i.spellcheck = false
       body.appendChild(i)
       return i
     },

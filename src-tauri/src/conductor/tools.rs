@@ -1,4 +1,4 @@
-//! The conductor's 13 tools — direct port of `conductor.js`'s `TOOLS`
+//! The conductor's 17 tools — direct port of `conductor.js`'s `TOOLS`
 //! (Anthropic-shaped `input_schema` defs), `runTool` dispatch, and the two
 //! text sanitizers (`stripAnsi`/`stripControlChars`) it imports from
 //! `src/shared/terminal-text.js`. That shared module itself stays JS (the
@@ -12,7 +12,7 @@
 //! `draft_flow_tool` directly — no duplication (task brief: "consume
 //! flow::tools").
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use regex::Regex;
 use serde_json::{json, Value};
@@ -69,7 +69,7 @@ fn openable_kinds_description(agent_ids: &[String]) -> String {
     let mut kinds = vec!["terminal".to_string()];
     kinds.extend(agent_ids.iter().cloned());
     kinds.extend(
-        ["chat", "brain", "flow", "runs"]
+        ["chat", "brain", "graphify", "flow", "runs"]
             .iter()
             .map(|s| s.to_string()),
     );
@@ -90,7 +90,7 @@ fn draft_flow_description(agent_ids: &[String]) -> String {
 /// only dynamic segment.
 pub(crate) fn system_prompt_text(agent_ids: &[String]) -> String {
     format!(
-        "You are the assistant pane inside Tome, a desktop coding harness whose grid holds terminal panes, agent CLI panes ({}), editors, documents, and note vaults. You have tools to inspect and drive the workspace: list panes, read a terminal\u{2019}s recent output, type into a terminal, open new panes or files. Use them whenever the user refers to other panes (\"what is claude doing\", \"run the tests over there\", \"open a terminal\"). type_in_terminal only submits when the user has enabled auto-run; otherwise the text is left for them to press Enter on — say so when it happens. Your replies may be read aloud, so keep them focused, brief, and speakable. Plain text only — no markdown tables. When the user wants to design a workflow, act as a flow architect. Flows are graphs of agent nodes saved as .tome/flows/<name>.flow.json; you shape them with read_flow and draft_flow. Restate the goal in one sentence, then ask one question at a time — never a questionnaire. Draft early and refine as you go: once the user agrees to start, call draft_flow as soon as a shape exists, then say what you added and what you assumed. Every node needs instructions, expects, and produces; a blank contract is a question to ask, not a field to invent, so challenge vagueness and voice every warning draft_flow returns. Never overwrite a flow you did not draft in this conversation without asking. You cannot run flows: when the user approves the final shape, say it is saved and that they press Run on the flow pane.",
+        "You are the assistant pane inside Tome, a desktop coding harness whose grid holds terminal panes, agent CLI panes ({}), editors, documents, and note vaults. You have tools to inspect and drive the workspace: list panes, read a terminal\u{2019}s recent output, type into a terminal, open new panes or files. Use them whenever the user refers to other panes (\"what is claude doing\", \"run the tests over there\", \"open a terminal\"). When the workspace's code graph has been built (the Code graph pane's Build button), prefer graph_query, graph_path, and graph_explain for structure questions — where something lives, what connects to what — instead of reading many files; if graphify is missing or the graph is not built, those tools say so. type_in_terminal only submits when the user has enabled auto-run; otherwise the text is left for them to press Enter on — say so when it happens. Your replies may be read aloud, so keep them focused, brief, and speakable. Plain text only — no markdown tables. When the user wants to design a workflow, act as a flow architect. Flows are graphs of agent nodes saved as .tome/flows/<name>.flow.json; you shape them with read_flow and draft_flow. Restate the goal in one sentence, then ask one question at a time — never a questionnaire. Draft early and refine as you go: once the user agrees to start, call draft_flow as soon as a shape exists, then say what you added and what you assumed. Every node needs instructions, expects, and produces; a blank contract is a question to ask, not a field to invent, so challenge vagueness and voice every warning draft_flow returns. Never overwrite a flow you did not draft in this conversation without asking. You cannot run flows: when the user approves the final shape, say it is saved and that they press Run on the flow pane.",
         agent_kinds_text(agent_ids)
     )
 }
@@ -261,6 +261,49 @@ pub(crate) fn tool_schemas(agent_ids: &[String]) -> Vec<Value> {
             },
         }),
         json!({
+            "name": "graph_query",
+            "description": "Ask the workspace's code graph a question (BFS traversal of graphify-out/graph.json). Use it for structure questions — where something lives, what connects two things — instead of reading many files. Only works after the user has built the graph (the Code graph pane's Build button); if graphify is missing or no graph exists, the tool reports that.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "question": { "type": "string", "description": "natural-language question about the codebase structure" } },
+                "required": ["question"],
+            },
+        }),
+        json!({
+            "name": "graph_path",
+            "description": "Shortest dependency path between two nodes in the workspace's code graph (graphify-out/graph.json). Use for 'how does A reach B'.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "from": { "type": "string", "description": "source node/symbol name" },
+                    "to": { "type": "string", "description": "target node/symbol name" },
+                },
+                "required": ["from", "to"],
+            },
+        }),
+        json!({
+            "name": "graph_explain",
+            "description": "Plain-language explanation of a node (function, class, symbol) and its neighbors in the workspace's code graph (graphify-out/graph.json). Use for 'what is X and what touches it'.",
+            "input_schema": {
+                "type": "object",
+                "properties": { "symbol": { "type": "string", "description": "node/symbol name" } },
+                "required": ["symbol"],
+            },
+        }),
+        json!({
+            "name": "run_agent",
+            "description": format!("Run an agent CLI ({}) headless on a single prompt and return its output. Use this to delegate work — investigate, fix, summarize — instead of opening a visible pane: the agent runs sandboxed in the background (no network except model-provider domains) and this tool returns when it finishes (up to 10 minutes). The prompt is the agent's whole task; be specific. Optionally pin a model.", agent_kinds_text(agent_ids)),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "kind": { "type": "string", "description": "agent CLI kind (same list as open_pane)" },
+                    "prompt": { "type": "string", "description": "the task for the agent — what to do, where, and what to report back" },
+                    "model": { "type": "string", "description": "optional model pin (provider/model shape for opencode/pi)" },
+                },
+                "required": ["kind", "prompt"],
+            },
+        }),
+        json!({
             "name": "gate_question",
             "description": "Pause and ask the user comprehension questions about a test you just wrote; resumes when they answer (or skip). Required to gate implementation on understanding.",
             "input_schema": {
@@ -278,7 +321,34 @@ pub(crate) fn tool_schemas(agent_ids: &[String]) -> Vec<Value> {
 
 // ================= runTool dispatch =================
 
-/// `runTool(name, input, chatId)` — dispatches to one of the 13 impls below,
+/// Heuristic "did this tool result read as a failure?" — drives the
+/// `chat:tool-done` event's `ok` flag and the audit log's honest `ok`
+/// field (the old port logged `true` unconditionally). NOT a contract for
+/// the model — it reads the real text — just a UI red/green signal and an
+/// audit sanity line. Prefix-based and deliberately small; a new tool that
+/// fails with a novel shape needs its prefix added here, and the
+/// `is_tool_failure_*` tests below pin every prefix.
+pub(crate) fn is_tool_failure(out: &str) -> bool {
+    const PREFIXES: &[&str] = &[
+        "Refused",
+        "Unknown tool.",
+        "No workspace folder",
+        "cannot run",
+        "could not",
+        "agent timed out",
+        "run_agent needs",
+        "graph_query needs",
+        "graph_path needs",
+        "graph_explain needs",
+        "skill not found",
+        "exit ",
+        "error:",
+    ];
+    let t = out.trim_start();
+    PREFIXES.iter().any(|p| t.starts_with(p))
+}
+
+/// `runTool(name, input, chatId)` — dispatches to one of the 17 impls below,
 /// or `"Unknown tool."` for anything else. Infallible (always returns a
 /// `String`): unlike the JS original's `try { out = runTool(...) } catch`,
 /// none of these impls can panic on attacker-shaped `input` (every field
@@ -307,6 +377,10 @@ pub async fn run_tool(
         "run_command" => run_command(c, env, input).await,
         "list_skills" => list_skills(env, input),
         "read_skill" => read_skill(env, input),
+        "graph_query" => graph_query_tool(env, input).await,
+        "graph_path" => graph_path_tool(env, input).await,
+        "graph_explain" => graph_explain_tool(env, input).await,
+        "run_agent" => run_agent_tool(env, input, chat_id).await,
         "gate_question" => gate_question(env, input).await,
         _ => "Unknown tool.".to_string(),
     }
@@ -442,6 +516,16 @@ fn type_in_terminal(c: &Conductor, env: &ConductorEnv, input: &Value) -> String 
 
 fn open_pane(env: &ConductorEnv, input: &Value, chat_id: &str) -> String {
     let kind = input.get("kind").and_then(Value::as_str).unwrap_or("");
+    // P2.1 containment-only ceiling: a plain terminal is the one
+    // inherently-UNSANDBOXED pane this tool can propose (agent kinds spawn
+    // gapped under containment-only — the renderer forces it, and the IPC
+    // layer would refuse them otherwise). Refuse to even propose it rather
+    // than hand the renderer a request its own backend must reject —
+    // defense in depth; `pty_create`'s check is the real wall.
+    if kind == "terminal" && (env.containment_only)() {
+        return "Refused: containment-only mode is on — unsandboxed terminal panes are disabled."
+            .to_string();
+    }
     (env.send)("conductor:open", json!({ "kind": kind, "source": chat_id }));
     "Requested.".to_string()
 }
@@ -458,15 +542,35 @@ fn open_file(env: &ConductorEnv, input: &Value, chat_id: &str) -> String {
     "Requested.".to_string()
 }
 
+/// The workspace root the assistant's workspace-relative tools should
+/// operate at: the renderer-synced ACTIVE root when present, else the first
+/// open folder. One resolver so every tool agrees on what "the project"
+/// means.
+fn assistant_root(env: &ConductorEnv) -> Option<String> {
+    (env.cwd)().or_else(|| (env.roots)().into_iter().next())
+}
+
+/// The roots list flow tools resolve against, ACTIVE ROOT FIRST: a flow
+/// with no explicit `root` lands in the workspace you are looking at, not
+/// the first folder of the first workspace (the pre-sync default).
+fn active_first_roots(env: &ConductorEnv) -> Vec<String> {
+    let mut roots = (env.roots)();
+    if let Some(cwd) = (env.cwd)() {
+        roots.retain(|r| r != &cwd);
+        roots.insert(0, cwd);
+    }
+    roots
+}
+
 fn read_flow(env: &ConductorEnv, input: &Value) -> String {
-    let roots = (env.roots)();
+    let roots = active_first_roots(env);
     let root_arg = input.get("root").and_then(Value::as_str);
     let name = input.get("name").and_then(Value::as_str);
     flow::tools::read_flow_tool(&roots, root_arg, name)
 }
 
 fn draft_flow(env: &ConductorEnv, input: &Value, chat_id: &str) -> String {
-    let roots = (env.roots)();
+    let roots = active_first_roots(env);
     let root_arg = input.get("root").and_then(Value::as_str);
     let name = input.get("name").and_then(Value::as_str);
     let flow_val = input.get("flow").cloned();
@@ -579,4 +683,121 @@ async fn gate_question(env: &ConductorEnv, input: &Value) -> String {
     (env.gate_question)(input.clone())
         .await
         .unwrap_or_else(|e| e)
+}
+
+// ================= graph tools (graphify knowledge graph) =================
+
+/// shell-quotes one argv element for `run_command`'s `sh -c` backend —
+/// single quotes with the standard `'\''` escape, so a graph question
+/// containing quotes or semicolons can never smuggle a second command past
+/// the fixed `graphify <subcommand>` prefix. `pub(crate)` for the
+/// conductor test suite's injection assertions.
+pub(crate) fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Shared backend for `graph_query`/`graph_path`/`graph_explain`: runs the
+/// fixed `graphify <subcommand> …` argv through `env.run_command` — so
+/// confinement, timeout, and output cap are exactly run_command's — with
+/// cwd = the first open workspace folder (the only place
+/// `graphify-out/graph.json` can live). Deliberately NOT gated on
+/// "assistant may run commands": these are read-only graph lookups with a
+/// fixed argv, not arbitrary shell.
+///
+/// PATH is prefixed inline with the login-shell harvest
+/// (`crate::login_env`) because `run_command`'s `sh -c` inherits Tome's
+/// own PATH, and a GUI-launched Tome has the launchd-minimal one —
+/// `~/.local/bin/graphify` would be invisible without it. Direct-calling
+/// `login_env` here follows the same precedent `list_skills`/`read_skill`
+/// set by calling `crate::skills` directly rather than through the seam.
+async fn graph_ask(env: &ConductorEnv, args: &[&str]) -> String {
+    let Some(cwd) = assistant_root(env) else {
+        return "No workspace folder is open, so there is no graph to ask.".to_string();
+    };
+    // Audit the lookup: workspace only — the question never enters the log.
+    (env.log_event)("conductor:graphAsk", vec![("ws".to_string(), json!(cwd))]);
+    let login = crate::login_env::login_env().await;
+    let mut cmd = format!("PATH={} graphify", sh_quote(&login.path));
+    for a in args {
+        cmd.push(' ');
+        cmd.push_str(&sh_quote(a));
+    }
+    (env.run_command)(cwd.as_str(), &cmd)
+        .await
+        .unwrap_or_else(|e| e)
+}
+
+async fn graph_query_tool(env: &ConductorEnv, input: &Value) -> String {
+    let q = input.get("question").and_then(Value::as_str).unwrap_or("");
+    if q.is_empty() {
+        return "graph_query needs a non-empty question.".to_string();
+    }
+    graph_ask(env, &["query", q]).await
+}
+
+async fn graph_path_tool(env: &ConductorEnv, input: &Value) -> String {
+    let from = input.get("from").and_then(Value::as_str).unwrap_or("");
+    let to = input.get("to").and_then(Value::as_str).unwrap_or("");
+    if from.is_empty() || to.is_empty() {
+        return "graph_path needs both 'from' and 'to' node names.".to_string();
+    }
+    graph_ask(env, &["path", from, to]).await
+}
+
+async fn graph_explain_tool(env: &ConductorEnv, input: &Value) -> String {
+    let s = input.get("symbol").and_then(Value::as_str).unwrap_or("");
+    if s.is_empty() {
+        return "graph_explain needs a symbol name.".to_string();
+    }
+    graph_ask(env, &["explain", s]).await
+}
+
+// ================= run_agent (headless orchestration) =================
+
+/// `run_agent` — one headless agent run. Vets the kind against the
+/// built-in AGENTS (only those have headless templates — a custom CLI
+/// names an interactive TUI the backend cannot drive), requires a
+/// non-empty prompt, then delegates to the seam. The seam's `Err` is the
+/// tool result too (the model reads it and either reports or retries), so
+/// nothing here throws.
+async fn run_agent_tool(env: &ConductorEnv, input: &Value, chat_id: &str) -> String {
+    let kind = input.get("kind").and_then(Value::as_str).unwrap_or("");
+    let prompt = input.get("prompt").and_then(Value::as_str).unwrap_or("");
+    if kind.is_empty() || prompt.is_empty() {
+        return "run_agent needs a non-empty kind and prompt.".to_string();
+    }
+    if !crate::agent_spawn::AGENTS.contains(&kind) {
+        return format!(
+            "run_agent: '{kind}' is not a headless-capable agent kind ({}).",
+            crate::agent_spawn::AGENTS.join(", ")
+        );
+    }
+    let model = input
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(String::from);
+    let Some(cwd) = assistant_root(env) else {
+        return "No workspace folder is open, so there is nowhere to run an agent.".to_string();
+    };
+    // Audit the run: kind and chat only — the prompt never enters the log.
+    (env.log_event)(
+        "conductor:runAgent",
+        vec![
+            ("kind".to_string(), json!(kind)),
+            ("chatId".to_string(), json!(chat_id)),
+        ],
+    );
+    (env.run_agent)(
+        crate::agent_run::RunAgentRequest {
+            chat_id: chat_id.to_string(),
+            kind: kind.to_string(),
+            model,
+            prompt: prompt.to_string(),
+        },
+        PathBuf::from(cwd),
+    )
+    .await
+    .unwrap_or_else(|e| e)
 }

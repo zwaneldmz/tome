@@ -142,6 +142,23 @@ jobs:
           TOME_SHIM_BIN: ${{ github.workspace }}/src-tauri/target/release/tome-shim
         run: cargo test --workspace --locked -- --ignored --test-threads=1
 
+      # P5.3 (launch hardening): the in-house dynamic escape suite. Spawns
+      # REAL gapped panes through the production seams (build_bwrap_argv +
+      # real tome-shim + real PaneProxy, with the host proxy env a real
+      # pane gets) and attempts the THREATMODEL escape list — raw TCP
+      # egress, DNS, SSH, config-dir reads/writes, the Docker socket + the
+      # -v /:/host escape class, proxy allowlist across unlock/relock
+      # (incl. the live-tunnel relock sweep), .tome/egress.json validation
+      # rejections — asserting every attempt is blocked. A failing attempt
+      # fails this job. The macOS counterpart runs in build.yml's
+      # escape-suite-macos job (real sandbox-exec under the production
+      # seatbelt profile).
+      - name: Escape suite (P5.3) — dynamic escape attempts through the real bwrap + shim wrap
+        working-directory: src-tauri
+        env:
+          TOME_SHIM_BIN: ${{ github.workspace }}/src-tauri/target/release/tome-shim
+        run: cargo run -p tome-escape-suite --locked
+
   # F3: Fedora proof — that the crate compiles and its unit tests pass on the
   # other major Linux family (not just the Ubuntu LTS lines). Blocking (unlike
   # the old best-effort version) because it now only compiles + unit-tests:

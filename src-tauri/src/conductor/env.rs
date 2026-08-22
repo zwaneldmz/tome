@@ -24,7 +24,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::chat::providers::ResolvedProvider;
+use crate::chat::registry::ResolvedProvider;
 use crate::chat::sse::{self, ChatError, NormalizedResponse};
 use crate::{confine, skills, state::AppState};
 
@@ -58,6 +58,12 @@ pub struct ConductorEnv {
     pub write_pty: Arc<dyn Fn(&str, &str) -> bool + Send + Sync>,
     /// `getRoots()` — open workspace folders, `[]` until `ws:sync` lands.
     pub roots: Arc<dyn Fn() -> Vec<String> + Send + Sync>,
+    /// The ACTIVE workspace root the renderer synced via `conductor:cwd` —
+    /// the folder the assistant's workspace-relative tools should operate
+    /// at, preferred over `roots`' first entry (which is the first folder of
+    /// the FIRST workspace, not the one you are looking at). `None` until
+    /// the renderer's first sync.
+    pub cwd: Arc<dyn Fn() -> Option<String> + Send + Sync>,
     /// One `(system, messages, tools) -> streamed reply` call — the
     /// wire-agnostic shape `chat::sse::stream_chat` already normalizes to,
     /// with the resolved provider/betas/fallbacks baked in by
@@ -89,11 +95,28 @@ pub struct ConductorEnv {
     /// `run_command`'s backend — `(cwd, cmd) -> combined stdout+stderr`
     /// (capped, with a timeout), or an `Err` describing the failure.
     pub run_command: Arc<dyn Fn(&str, &str) -> BoxFuture<Result<String, String>> + Send + Sync>,
+    /// `run_agent`'s backend — one headless agent run (sandboxed + gapped,
+    /// bounded by the backend's own timeout), or an `Err` describing the
+    /// refusal/failure. See `crate::agent_run` for the containment story.
+    pub run_agent: Arc<
+        dyn Fn(crate::agent_run::RunAgentRequest, PathBuf) -> BoxFuture<Result<String, String>>
+            + Send
+            + Sync,
+    >,
     /// `gate_question`'s backend — registers a comprehension gate, emits
     /// `mentor:check`, and awaits the user's `mentor_answer` (or times out).
     /// Returns the serialized answer value the tool loop appends as the
     /// tool result; `Err` carries a same-shaped fallback string.
     pub gate_question: Arc<dyn Fn(Value) -> BoxFuture<Result<String, String>> + Send + Sync>,
+    /// P2.1 containment-only ceiling, as the tools see it: `true` while the
+    /// `containment-only` store key is on. `open_pane` reads this to refuse
+    /// proposing an inherently-unsandboxed pane (a plain terminal) instead
+    /// of sending the renderer a request its own backend would reject —
+    /// defense in depth; the IPC layer's `pty:create` check is the real wall.
+    /// A closure (not a boot-time bool) because the pref can flip mid-
+    /// session through the store, and `production_env` is built fresh per
+    /// `chat:send` anyway.
+    pub containment_only: Arc<dyn Fn() -> bool + Send + Sync>,
 }
 
 /// `run_command`'s timeout — the process is SIGKILLed via `kill_on_drop`
@@ -234,6 +257,10 @@ pub fn production_env(
                 folders
             })
         },
+        cwd: {
+            let app = app.clone();
+            Arc::new(move || app.state::<AppState>().conductor.cwd())
+        },
         stream_chat: Arc::new(
             move |system: Option<String>,
                   messages: Vec<Value>,
@@ -284,12 +311,41 @@ pub fn production_env(
             Box::pin(async move { run_command_impl(&cwd, &cmd).await })
                 as BoxFuture<Result<String, String>>
         }),
+        run_agent: {
+            let app = app.clone();
+            Arc::new(
+                move |req: crate::agent_run::RunAgentRequest, cwd: PathBuf| {
+                    let app = app.clone();
+                    Box::pin(
+                        async move { crate::agent_run::run_headless_agent(&app, &req, &cwd).await },
+                    ) as BoxFuture<Result<String, String>>
+                },
+            )
+        },
         gate_question: {
             let app = app.clone();
             Arc::new(move |payload: Value| {
                 let app = app.clone();
                 Box::pin(async move { gate_question_impl(&app, payload).await })
                     as BoxFuture<Result<String, String>>
+            })
+        },
+        containment_only: {
+            let app = app.clone();
+            Arc::new(move || {
+                // Same read pty_create performs for its own IPC-layer check:
+                // the store key, not any renderer-sent value. `locked` comes
+                // from AppState so a locked app still reads the key the same
+                // way (`store::get` gates on lock state per key — this key is
+                // not a lock-screen key, so a locked app reads Null and the
+                // ceiling reads off until unlock; the IPC wall has the same
+                // property, so the two can never disagree).
+                let state = app.state::<AppState>();
+                let Ok(dir) = app.path().app_data_dir() else {
+                    return false;
+                };
+                let locked = *state.locked.read().expect("AppState.locked lock poisoned");
+                crate::store::get(&dir, "containment-only", locked) == json!(true)
             })
         },
     }

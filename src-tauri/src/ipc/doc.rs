@@ -4,7 +4,9 @@
 //! histories out of this privileged process entirely. This command's job
 //! shrinks to exactly the confinement half of `src/main/index.js`'s old
 //! `doc:read` handler: resolve `path` through the same symlink-safe
-//! workspace/brain-vault check that handler ran, refuse any extension
+//! workspace/brain-vault check that handler ran — widened with the
+//! store-named core-vault root, P5.4's fix, via
+//! `confine::confined_real_path_in_store` — refuse any extension
 //! neither browser library reads, and hand back raw bytes for the renderer
 //! to parse — this file never touches mammoth/SheetJS itself, nor anything
 //! resembling their logic.
@@ -18,7 +20,7 @@
 
 use std::path::Path;
 
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::{confine, lock_gate, state::AppState};
 
@@ -111,23 +113,26 @@ fn base64_encode(bytes: &[u8]) -> String {
 ///
 /// with the parsing branches (and `docCss`) deleted — both moved to
 /// `src/renderer/doc-convert.js` — and a plain confined byte read in their
-/// place. `confine::confined_real_path` already re-resolves symlinks fresh
-/// on every call (see that function's own TOCTOU doc comment), so nothing
-/// extra is needed here for the "resolve, don't trust a cached realpath"
-/// property the original had.
+/// place. `confine::confined_real_path_in_store` (the display form, which
+/// additionally admits the store-named core vault — P5.4) already
+/// re-resolves symlinks fresh on every call (see that function's own
+/// TOCTOU doc comment), so nothing extra is needed here for the
+/// "resolve, don't trust a cached realpath" property the original had.
 #[tauri::command]
 pub async fn doc_read_bytes(
+    app: AppHandle,
     state: State<'_, AppState>,
     path: String,
 ) -> Result<serde_json::Value, String> {
     lock_gate::guard(&state, "doc:readBytes")?;
-    let real = confine::confined_real_path(&state, Path::new(&path)).map_err(|_| {
-        let synced = *state
-            .folders_synced
-            .read()
-            .expect("doc_read_bytes: AppState.folders_synced lock poisoned");
-        confinement_error("doc:readBytes", synced)
-    })?;
+    let real =
+        confine::confined_real_path_in_store(&app, &state, Path::new(&path)).map_err(|_| {
+            let synced = *state
+                .folders_synced
+                .read()
+                .expect("doc_read_bytes: AppState.folders_synced lock poisoned");
+            confinement_error("doc:readBytes", synced)
+        })?;
     let ext = extname_lower(&real);
     if !DOC_EXTENSIONS.contains(&ext.as_str()) {
         return Err(format!("No viewer for {ext}"));

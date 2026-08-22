@@ -1,6 +1,6 @@
 //! The assistant tool loop and consent gates — port of
 //! `src/main/conductor.js` (430 LOC): gives the assistant chat eyes and
-//! hands over the workspace via 13 tools, tracks per-pane scrollback +
+//! hands over the workspace via 16 tools, tracks per-pane scrollback +
 //! consent, and never runs a command unless the user flipped "assistant may
 //! run commands" on.
 //!
