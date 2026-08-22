@@ -87,6 +87,7 @@ flows, notes.
 | **Flows** | Wire agents into a graph and run it headless in the background. |
 | **Assistant** | A chat that can also drive the grid — read scrollback, open panes, type into terminals. |
 | **Brain** | A per-workspace markdown note vault with `[[wikilinks]]`, backlinks, and a graph view. |
+| **Code graph** | One-click knowledge graph of the workspace's code ([graphify](https://github.com/Graphify-Labs/graphify)): tree-sitter AST extraction, Leiden communities, an interactive `graph.html`, a plain-language report, and read-only `query` / `path` / `explain` / `affected` lookups. Builds are pinned offline — no LLM, no network. |
 | **Git** | Branch chip, live `+ ~ −` / `↑↓` counters, and a commit **History** pane. |
 | **Voice** | Push-to-talk and hands-free voice chat, transcribed on-device (Apple Speech) with a local whisper.cpp fallback — audio never leaves the machine. |
 
@@ -197,6 +198,46 @@ and files, and type into a terminal. Two guardrails:
   your Enter.
 - It can **read** a terminal's scrollback only for panes you approve — Tome
   asks before the first read, and contained panes are never readable.
+
+**Orchestrating agents headless.** Ask the assistant to delegate — it has a
+`run_agent` tool that runs Claude Code, opencode, or pi on a single prompt
+in the background: sandboxed and egress-gapped exactly like a pane, bounded
+at 10 minutes, with the agent's output handed back so the assistant can
+coordinate several of them. It also carries the knowledge-graph tools
+(`graph_query` / `graph_path` / `graph_explain`) described under Code graph
+above, and a skills catalog (`list_skills` / `read_skill`).
+
+**The plan tracker.** The moment the assistant starts executing, a small
+glass HUD docks at the bottom-right of the window and follows the plan
+step by step: every tool call is a row (icon · tool · argument hint ·
+wall-clock time), the step in flight pulses with a sweeping shimmer and an
+expanding ring, finished steps pop a green ✓, refusals and failures turn
+red, and a headless agent shows its live state ("⚙ claude — running")
+under its step. The header ticks elapsed time while a progress bar fills
+with completed steps; a clean finish stamps “✨ plan complete”, fires a
+particle burst across the HUD, and fades away. A failed plan stays up,
+red, to be read. Drag the HUD anywhere (it remembers where), click its
+header to jump to the chat driving it, ✕ to dismiss — and everything
+goes still under `prefers-reduced-motion`.
+
+**History that searches, fresh starts, and a rooted assistant.** The chat
+pane's ⌕ opens a searchable archive of past conversations (id · first
+question · message count, newest first, live-filtered server-side); pick
+one and the pane re-anchors to it — your next message continues that
+conversation. A workspace startup starts the assistant **clear**: restored
+chat panes mint a fresh conversation, and the old ones stay reachable only
+through the archive. The assistant also stays **at the root of the project
+you are looking at**: whichever workspace folder is active, that is where
+its commands, headless agents, graph queries, and flow drafts run — not
+the first folder of the first workspace.
+
+**opencode providers, keys, subscriptions, models.** Preferences → Agents →
+*opencode* manages the opencode CLI's own configuration — no Tome-side
+mirror: paste API keys (written straight into opencode's `auth.json`, typed
+read-only afterwards), log in with a subscription/OAuth account (opens the
+interactive `opencode providers login` flow in a terminal pane), and pick
+the default model from the live `opencode models` catalog. Agent panes and
+`run_agent` spawn with exactly what you configure there.
 
 **Voice is fully local.** The topbar 🎤 toggles an ambient hands-free session
 — talk, and the assistant answers aloud. The chat composer's 🎙 is

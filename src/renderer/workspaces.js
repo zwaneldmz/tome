@@ -14,9 +14,18 @@ export const activeWorkspace = () => wsState.ws.workspaces[wsState.ws.active] ||
 // used to leave main's list empty for the whole run.
 export const syncFolders = () =>
   tome.ws.syncFolders(wsState.ws.workspaces.flatMap((w) => w.folders))
+// The assistant's working root follows the ACTIVE workspace root (not the
+// first folder of the first workspace): every activeRoot mutation should
+// end in this call — boot, workspace switches, folder opens/closes. Null
+// clears it (main falls back to the first open folder). Fire-and-forget:
+// a missed sync only degrades to the old default, never blocks the UI.
+export const syncAssistantRoot = () => {
+  tome.conductor.setCwd(wsState.activeRoot || null).catch(() => {})
+}
 export const saveWs = () => {
   tome.store.set('workspaces', wsState.ws)
   syncFolders()
+  syncAssistantRoot()
   // A workspace mutation can add a folder carrying .tome/egress.json — the
   // consent check is fire-and-forget here; it guards against re-entrancy.
   checkRepoEgress()

@@ -22,13 +22,54 @@
     'conductor-run': false,
     'docker-gateway': false,
   }
-  const calls = { ptyCreate: [] }
+  const calls = {
+    ptyCreate: [],
+    graphifyStatus: [],
+    graphifyBuild: [],
+    graphifyQuery: [],
+    graphifyPath: [],
+    graphifyExplain: [],
+    graphifyAffected: [],
+    opencodeStatus: 0,
+    opencodeKeySet: [],
+    opencodeSetModel: [],
+    opencodeModels: [],
+    conductorSetCwd: [],
+    chatHistoryList: [],
+  }
 
   const noop = () => {}
-  const on = () => () => {}
+  // Event subscribers are RECORDED, not discarded: `window.__tomeMock.emit`
+  // replays a payload to every subscriber of that event, so specs can drive
+  // push-style features (the plan tracker, chat chips, mentor gates) with
+  // the exact payloads the real backend emits. The unsubscribe returned to
+  // the bridge stays a no-op — no spec has needed it yet.
+  const handlers = {}
+  const on = (event, cb) => {
+    if (typeof cb === 'function') (handlers[event] ||= []).push(cb)
+    return () => {}
+  }
+  // A subscription FACTORY bound to one wire event — the real bridge does
+  // this binding at each key (`onTool: (cb) => on('chat:tool', cb)`), so the
+  // mock has to spell it out too.
+  const sub = (event) => (cb) => on(event, cb)
   const asyncNoop = async () => {}
 
-  window.__tomeMock = { store, calls }
+  window.__tomeMock = {
+    store,
+    calls,
+    emit: (event, payload) => (handlers[event] || []).forEach((cb) => cb(payload)),
+    graphify: { available: true, built: false },
+    opencode: {
+      installed: true,
+      version: '1.18.19',
+      reason: null,
+      auth: [{ id: 'deepseek', cred_type: 'api' }],
+      providers: ['deepseek', 'eurouter'],
+      providers_with_key: [],
+      default_model: null,
+    },
+  }
 
   window.tome = {
     home: '/Users/test',
@@ -44,7 +85,7 @@
       resize: noop,
       kill: noop,
       onData: on,
-      onExit: on,
+      onExit: sub('pty:exit'),
     },
 
     fs: {
@@ -55,7 +96,7 @@
       createFile: asyncNoop,
       watch: asyncNoop,
       unwatch: asyncNoop,
-      onChanged: on,
+      onChanged: sub('fs:changed'),
       format: async () => null,
     },
 
@@ -71,7 +112,9 @@
     dragDrop: { onEnter: on, onLeave: on, onDrop: on },
 
     git: {
-      info: async () => null,
+      // A no-repo shape rather than `null` so workspace-seeding specs
+      // (graphify) don't make refreshGit throw on `.repo`.
+      info: async () => ({ repo: false }),
       branches: async () => [],
       checkout: asyncNoop,
       log: async () => [],
@@ -85,6 +128,51 @@
 
     skills: { list: async () => [], read: async () => null },
 
+    // Workspace knowledge graph — the pane reads availability/built state
+    // from `window.__tomeMock.graphify` so specs can flip it per test.
+    graphify: {
+      status: async (ws) => {
+        calls.graphifyStatus.push(ws)
+        const g = window.__tomeMock.graphify
+        const out = ws + '/graphify-out'
+        return {
+          available: g.available,
+          version: g.available ? 'graphify 0.9.48' : null,
+          reason: g.available ? null : 'graphify not found on PATH (No such file or directory (os error 2))',
+          built: g.built,
+          out_dir: out,
+          graph_json: out + '/graph.json',
+          graph_html: out + '/graph.html',
+          report: out + '/GRAPH_REPORT.md',
+        }
+      },
+      build: async (ws, onLine) => {
+        calls.graphifyBuild.push(ws)
+        onLine('graphify — building the workspace graph')
+        onLine('[1/2] extracting code with tree-sitter (offline, no LLM)')
+        onLine('[2/2] clustering communities and writing report + graph.html')
+        window.__tomeMock.graphify.built = true
+        return { summary: 'graph built — ' + ws + '/graphify-out/graph.json' }
+      },
+      cancel: async () => ({ killed: false }),
+      query: async (ws, question) => {
+        calls.graphifyQuery.push({ ws, question })
+        return 'query result'
+      },
+      path: async (ws, from, to) => {
+        calls.graphifyPath.push({ ws, from, to })
+        return 'path result'
+      },
+      explain: async (ws, symbol) => {
+        calls.graphifyExplain.push({ ws, symbol })
+        return 'explain result'
+      },
+      affected: async (ws, symbol) => {
+        calls.graphifyAffected.push({ ws, symbol })
+        return 'affected result'
+      },
+    },
+
     auth: {
       status: async () => ({ configured: false, totp: false, unlocked: true, touchId: false }),
       login: async () => ({ ok: true }),
@@ -97,9 +185,14 @@
     conductor: {
       allowRun: noop,
       allowRead: noop,
-      onReadRequest: on,
-      onOpen: on,
-      onActed: on,
+      setCwd: (root) => {
+        calls.conductorSetCwd.push(root)
+        return Promise.resolve({})
+      },
+      onReadRequest: sub('conductor:readRequest'),
+      onOpen: sub('conductor:open'),
+      onActed: sub('conductor:acted'),
+      onAgent: sub('conductor:agent'),
     },
 
     doc: { readBytes: async () => ({ base64: '' }) },
@@ -122,8 +215,8 @@
       readRepo: async () => ({ state: 'absent' }),
       consentRepo: async () => ({ ok: true, applied: [], rejected: [] }),
       revokeRepo: async () => ({ ok: true }),
-      onBlocked: on,
-      onState: on,
+      onBlocked: sub('egress:blocked'),
+      onState: sub('egress:state'),
     },
 
     agents: {
@@ -135,13 +228,29 @@
       changed: noop,
     },
 
-    events: { list: async () => [], onAppended: on },
+    // opencode CLI config — status shape mirrors ipc/opencode.rs (types
+    // only, never keys); keySet/models/setModel record into calls.
+    opencode: {
+      status: async () => {
+        calls.opencodeStatus++
+        return window.__tomeMock.opencode
+      },
+      keySet: async (provider, key) => {
+        calls.opencodeKeySet.push({ provider, key })
+      },
+      models: async () => calls.opencodeModels || [],
+      setModel: async (model) => {
+        calls.opencodeSetModel.push(model)
+      },
+    },
+
+    events: { list: async () => [], onAppended: sub('events:appended') },
 
     runs: {
       start: asyncNoop,
       cancel: asyncNoop,
       list: async () => [],
-      onChanged: on,
+      onChanged: sub('runs:changed'),
       export: asyncNoop,
     },
 
@@ -175,7 +284,7 @@
       append: noop,
       finish: noop,
       cancel: noop,
-      onPartial: on,
+      onPartial: sub('stt:partial'),
     },
 
     chat: {
@@ -190,10 +299,17 @@
       providerSet: asyncNoop,
       providerDelete: asyncNoop,
       providerAdd: async () => ({ id: 'mock-provider' }),
-      onDelta: on,
-      onDone: on,
-      onTool: on,
-      onRequestyNotice: on,
+      onDelta: sub('chat:delta'),
+      onDone: sub('chat:done'),
+      onTool: sub('chat:tool'),
+      onToolDone: sub('chat:tool-done'),
+      onRequestyNotice: sub('chat:requesty-notice'),
+      // Searchable archive — specs seed `window.__tomeMock.history` with
+      // the entries each call returns.
+      historyList: async (query) => {
+        calls.chatHistoryList.push(query)
+        return window.__tomeMock.history || []
+      },
     },
 
     brain: {
@@ -205,12 +321,12 @@
       delete: asyncNoop,
       coreInfo: async () => ({}),
       promote: asyncNoop,
-      onChanged: on,
+      onChanged: sub('brain:changed'),
     },
 
     review: { generate: asyncNoop },
 
-    mentor: { onCheck: on, answer: asyncNoop, judge: async () => '' },
+    mentor: { onCheck: sub('mentor:check'), answer: asyncNoop, judge: async () => '' },
 
     lsp: {
       didOpen: noop,

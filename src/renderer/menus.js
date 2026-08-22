@@ -3,7 +3,7 @@
 import { tome, toast, el, notifLog } from './util.js'
 import { prefs, wsState } from './state.js'
 import { activeWorkspace, saveWs, renderWsChip } from './workspaces.js'
-import { addTerminal, addChat, addBrain, addEvents, addRuns, addReport, openFile, createFlowFile } from './panes.js'
+import { addTerminal, addChat, addBrain, addGraphify, addEvents, addRuns, addReport, openFile, createFlowFile } from './panes.js'
 import { confirmModal, promptModal } from './modals.js'
 import { renderStatusbar } from './statusbar.js'
 import { renderTree, createFileIn, createFolderIn } from './tree.js'
@@ -402,6 +402,12 @@ export async function populateAddMenu(menu, target) {
     hint: activeWorkspace() ? 'vault' : 'needs a workspace',
     disabled: !activeWorkspace(),
     onClick: () => addBrain(target),
+  })
+  menuItem(menu, {
+    label: 'Code graph',
+    hint: wsState.activeRoot ? 'graphify' : 'needs a workspace',
+    disabled: !wsState.activeRoot,
+    onClick: () => addGraphify(target),
   })
   menuItem(menu, {
     label: 'Open file…',

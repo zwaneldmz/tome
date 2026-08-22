@@ -2,7 +2,7 @@
 // dimming. Clicking a folder also makes it the git widget's root.
 import { tome, el, toast } from './util.js'
 import { wsState } from './state.js'
-import { activeWorkspace, saveWs } from './workspaces.js'
+import { activeWorkspace, saveWs, syncAssistantRoot } from './workspaces.js'
 import { openFile } from './panes.js'
 import { refreshGit } from './git.js'
 
@@ -83,6 +83,9 @@ async function renderDir(dir, container, depth, rootPath) {
 function setActiveRoot(rootPath) {
   if (wsState.activeRoot === rootPath) return
   wsState.activeRoot = rootPath
+  // The tree drives activeRoot directly (no saveWs round-trip): the
+  // assistant's root follows the click too.
+  syncAssistantRoot()
   for (const h of treeEl.querySelectorAll('.root-head')) {
     h.classList.toggle('active', h.dataset.path === rootPath)
   }

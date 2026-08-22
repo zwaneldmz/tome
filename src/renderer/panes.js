@@ -16,6 +16,7 @@ import { EditorPanel } from './panels/editor.js'
 import { DocPanel } from './panels/doc.js'
 import { ChatPanel } from './panels/chat.js'
 import { BrainPanel } from './panels/brain.js'
+import { GraphifyPanel } from './panels/graphify.js'
 import { FlowPanel } from './panels/flow.js'
 import { EventsPanel } from './panels/events.js'
 import { RunsPanel } from './panels/runs.js'
@@ -24,6 +25,7 @@ import { HistoryPanel } from './history.js'
 import { renderStatusbar, setStatusbarDock } from './statusbar.js'
 import { plusIcon, popoutIcon } from './icons.js'
 import { AGENTS } from '../shared/pane-kinds.js'
+import { VOICE_CHAT_ID } from './chat-lifecycle.js'
 import { createFlow } from '../shared/flow-model.js'
 import { stripControlChars } from '../shared/terminal-text.js'
 import { isValidSavedLayout } from '../shared/layout.js'
@@ -108,6 +110,8 @@ export const dock = createDockview(document.getElementById('dock'), {
         return new DocPanel()
       case 'brain':
         return new BrainPanel()
+      case 'graphify':
+        return new GraphifyPanel()
       case 'history':
         return new HistoryPanel()
       case 'events':
@@ -481,6 +485,7 @@ tome.conductor.onOpen(async ({ kind, file, source }) => {
   if (file) return openFile(file, undefined, target)
   if (kind === 'chat') return addChat(target)
   if (kind === 'brain') return addBrain(target)
+  if (kind === 'graphify') return addGraphify(target)
   if (kind === 'flow') return addFlow(target)
   // Read-only, like the event log the assistant can already be asked about:
   // opening the runs page shows what is running, it starts nothing.
@@ -558,6 +563,10 @@ function componentOf(panel) {
   const params = panel.params || {}
   if (params.ptyId) return 'terminal'
   if (params.chatId) return 'chat'
+  // Must precede the params.ws -> 'brain' fallthrough: a code-graph pane
+  // also carries a ws (the workspace ROOT DIR, unlike brain's workspace
+  // NAME), so its params get a codegraph marker to disambiguate the two.
+  if (params.codegraph) return 'graphify'
   if (params.ws) return 'brain'
   if (params.dir) return 'history'
   if (params.events) return 'events'
@@ -655,10 +664,20 @@ export async function restoreLayout() {
           spawnTerminal({ kind, cwd: params.cwd, egress: params.egress, wsName: params.ws, model: params.model, saved: p })
           removePanel(p) // the fromJSON shell already spawned a doomed pty — drop it; the fresh panel above replaces it in the same group
         } else if (component === 'chat') {
-          spawnChat(p)
+          // A workspace startup starts the assistant FRESH: mint a new chat
+          // id for the restored pane (the old transcript stays in the
+          // store, reachable through the pane's history search). The voice
+          // session's canonical id is the one exception — voice.js routes
+          // by it, and a minted id would orphan the ambient turn.
+          const fresh = spawnChat(p, undefined, { freshId: params.chatId !== VOICE_CHAT_ID })
+          if (fresh.id !== p.id) removePanel(p) // the fromJSON shell was replaced by the fresh pane
         } else if (component === 'brain') {
           if (wsState.ws.workspaces.some((x) => x.name === params.ws)) spawnBrain(params.ws, p)
           else removePanel(p) // workspace gone — skip
+        } else if (component === 'graphify') {
+          const dir = typeof params.ws === 'string' && (await dirExists(params.ws)) ? params.ws : null
+          if (dir) spawnGraphify(dir, p)
+          else removePanel(p) // workspace folder gone — skip
         } else if (component === 'history') {
           const dir = typeof params.dir === 'string' && (await dirExists(params.dir)) ? params.dir : null
           if (dir) spawnHistory(dir, p)
@@ -723,11 +742,17 @@ export function addTerminal(kind, target) {
   return spawnTerminal({ kind, cwd: targetCwd(target), target })
 }
 
+// A plain terminal that starts with an initial command — the Settings
+// opencode-login flow (`opencode providers login` is an interactive TUI).
+export function addCommandTerminal(cmd, target) {
+  return spawnTerminal({ kind: 'terminal', cwd: targetCwd(target), cmd, target })
+}
+
 // Shared by the ＋ menus, layout restore, and flow Run (flow.js — it needs
 // the returned panel to read back .group so subsequent nodes in the same run
 // stack as tabs alongside the first). `saved` carries the persisted id/title
 // when recreating a pane from a stored layout.
-export function spawnTerminal({ kind, cwd, egress, wsName, saved, target, model, docker }) {
+export function spawnTerminal({ kind, cwd, egress, wsName, saved, target, model, docker, cmd }) {
   const id = `pty-${++counters.seq}`
   cwd = cwd || paneCwd()
   const name = cwd.split('/').pop() || cwd
@@ -756,6 +781,10 @@ export function spawnTerminal({ kind, cwd, egress, wsName, saved, target, model,
       ws: wsName ?? activeWorkspace()?.name,
       ...(model ? { model } : {}),
       ...(dockerOn ? { docker: true } : {}),
+      // The one-shot initial command (terminal kind only; main ignores it
+      // for agents). Restoring this layout re-runs it — a login flow is
+      // idempotent to start again, and the pane is a plain terminal.
+      ...(cmd ? { cmd } : {}),
     },
   })
 }
@@ -801,13 +830,16 @@ export function addChat(target, opts) {
 
 function spawnChat(saved, target, opts) {
   // A restored pane keeps its saved chatId so the persisted transcript
-  // (chat-log-<chatId> in the store) lines back up with this pane.
-  const id =
-    typeof saved?.params?.chatId === 'string'
-      ? saved.params.chatId
-      : typeof opts?.chatId === 'string'
-        ? opts.chatId
-        : `chat-${++counters.seq}`
+  // (chat-log-<chatId> in the store) lines back up with this pane — UNLESS
+  // the caller asks for a fresh conversation (`freshId`): a workspace
+  // startup starts the assistant CLEAR, and the old transcript stays in
+  // the store where the pane's history search can reach it.
+  const savedId = typeof saved?.params?.chatId === 'string' ? saved.params.chatId : null
+  const id = !opts?.freshId && savedId
+    ? savedId
+    : typeof opts?.chatId === 'string'
+      ? opts.chatId
+      : `chat-${++counters.seq}`
   const existing = dock.getPanel(id)
   if (existing) {
     existing.api.setActive()
@@ -826,6 +858,30 @@ export function addBrain(target) {
   const w = activeWorkspace()
   if (!w) return
   spawnBrain(w.name, undefined, target)
+}
+
+export function addGraphify(target) {
+  const dir = wsState.activeRoot
+  if (!dir) return
+  spawnGraphify(dir, undefined, target)
+}
+
+// One code-graph pane per workspace root: fixed id, so a second request
+// just activates the existing tab (same dedupe as brain/history).
+function spawnGraphify(dir, saved, target) {
+  const id = `graphify:${dir}`
+  const existing = dock.getPanel(id)
+  if (existing) {
+    existing.api.setActive()
+    return
+  }
+  dock.addPanel({
+    id,
+    component: 'graphify',
+    title: saved?.title || `⬡ code graph — ${dir.split('/').pop()}`,
+    position: saved ? { referencePanel: saved.id } : place(target),
+    params: { ws: dir, codegraph: true },
+  })
 }
 
 function spawnBrain(wsName, saved, target) {

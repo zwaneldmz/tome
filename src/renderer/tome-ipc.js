@@ -269,6 +269,23 @@ import { listen } from '@tauri-apps/api/event'
       read: (name) => call('skills_read', { name }),
     },
 
+    // Workspace knowledge graph (graphify sidecar): one-click build, then
+    // read-only queries. Build output streams through a Channel, the same
+    // shape pty.create uses.
+    graphify: {
+      status: (ws) => call('graphify_status', { ws }),
+      build: (ws, onLine) => {
+        const ch = new Channel()
+        ch.onmessage = (line) => onLine(line)
+        return call('graphify_build', { ws, onLine: ch })
+      },
+      cancel: () => call('graphify_cancel'),
+      query: (ws, question) => call('graphify_query', { ws, question }),
+      path: (ws, from, to) => call('graphify_path', { ws, from, to }),
+      explain: (ws, symbol) => call('graphify_explain', { ws, symbol }),
+      affected: (ws, symbol) => call('graphify_affected', { ws, symbol }),
+    },
+
     auth: {
       status: () => call('auth_status'),
       login: (opts) => call('auth_login', opts),
@@ -286,9 +303,13 @@ import { listen } from '@tauri-apps/api/event'
     conductor: {
       allowRun: (v) => fire('conductor_allow_run', { allow: v }),
       allowRead: (paneId, allowed) => fire('conductor_allow_read', { paneId, allowed }),
+      // The ACTIVE workspace root — keeps the assistant's workspace tools
+      // pointed at the project you are looking at.
+      setCwd: (root) => call('conductor_set_root', { root }),
       onReadRequest: (cb) => on('conductor:readRequest', cb),
       onOpen: (cb) => on('conductor:open', cb),
       onActed: (cb) => on('conductor:acted', cb),
+      onAgent: (cb) => on('conductor:agent', cb),
     },
 
     doc: {
@@ -324,6 +345,15 @@ import { listen } from '@tauri-apps/api/event'
       list: () => call('agents_list'),
       customs: () => call('agents_customs'),
       changed: () => fire('agents_changed'),
+    },
+
+    // opencode agent CLI: credentials (auth.json), models, default model.
+    // Keys are write-only — status reports credential TYPES only.
+    opencode: {
+      status: () => call('opencode_status'),
+      keySet: (provider, key) => call('opencode_key_set', { provider, key }),
+      models: (provider) => call('opencode_models', { provider }),
+      setModel: (model) => call('opencode_set_model', { model }),
     },
 
     // Persistent event log (main/Rust owns app_data_dir/events.jsonl): a
@@ -426,7 +456,13 @@ import { listen } from '@tauri-apps/api/event'
       onDelta: (cb) => on('chat:delta', cb),
       onDone: (cb) => on('chat:done', cb),
       onTool: (cb) => on('chat:tool', cb),
+      // chat:tool-done carries the honest outcome + wall-clock ms for each
+      // completed tool call — the plan tracker's step-completion feed.
+      onToolDone: (cb) => on('chat:tool-done', cb),
       onRequestyNotice: (cb) => on('chat:requesty-notice', cb),
+      // The searchable archive of past conversations (a workspace startup
+      // starts the pane fresh — this is how the old ones come back).
+      historyList: (query) => call('chat_history_list', { query }),
     },
 
     brain: {

@@ -1495,4 +1495,114 @@ mod tests {
         assert!(xkey_h.contains("x-api-key") && xkey_h.contains("sk-ant"));
         assert!(!xkey_h.to_lowercase().contains("authorization"));
     }
+
+    // ================= LIVE probe (ignored — real network) =================
+    //
+    // Exercises the exact OpenAI-wire tool-call path the conductor drives:
+    // `stream_chat` → `stream_openai` → SSE accumulation → normalized
+    // `tool_use` blocks. Run manually against a real endpoint:
+    //
+    //   TOME_PROBE_KEY=sk-… TOME_PROBE_MODEL=glm-5.2 \
+    //     cargo test --lib chat::sse::tests::live_openai_wire_tool_call_probe -- --ignored
+    //
+    // No network in normal test runs — the repo's purity discipline
+    // (parallel tests, no ambient I/O) holds; this is the same
+    // `#[ignore]`'d-live-proof precedent as the Linux bwrap matrix.
+    #[tokio::test]
+    #[ignore]
+    async fn live_openai_wire_tool_call_probe() {
+        use crate::chat::registry::KeyOrigin;
+        let key = std::env::var("TOME_PROBE_KEY").expect("TOME_PROBE_KEY not set");
+        let model = std::env::var("TOME_PROBE_MODEL").unwrap_or_else(|_| "glm-5.2".to_string());
+        let provider = ResolvedProvider {
+            id: "probe".to_string(),
+            label: "probe".to_string(),
+            wire: Wire::OpenAi,
+            auth: Auth::Bearer,
+            base_url: "https://api.eurouter.ai/api/v1".to_string(),
+            api_key: key,
+            key_origin: KeyOrigin::Env("probe".to_string()),
+            model,
+            max_output_tokens: 4096,
+            betas: vec![],
+        };
+        let tools = vec![json!({
+            "name": "list_panes",
+            "description": "List every open pane in the workspace grid.",
+            "input_schema": { "type": "object", "properties": {} },
+        })];
+        let messages = vec![json!({
+            "role": "user",
+            "content": "Call the list_panes tool now. No text, just the tool call."
+        })];
+        let client = reqwest::Client::new();
+        let resp = stream_chat(
+            &client,
+            &provider,
+            StreamChatArgs {
+                system: Some("You are a test probe. You must call list_panes."),
+                messages: &messages,
+                tools: &tools,
+                betas: None,
+                fallbacks: None,
+            },
+            noop,
+        )
+        .await
+        .expect("stream_chat should succeed");
+        println!("stop_reason: {}", resp.stop_reason);
+        println!("usage: {:?}", resp.usage);
+        for b in &resp.content {
+            println!("block: {b}");
+        }
+        let tool_uses: Vec<&Value> = resp
+            .content
+            .iter()
+            .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
+            .collect();
+        assert_eq!(resp.stop_reason, "tool_use", "probe should end on a tool call");
+        assert!(!tool_uses.is_empty(), "probe should contain a tool_use block");
+        let name = tool_uses[0].get("name").and_then(Value::as_str);
+        assert_eq!(name, Some("list_panes"), "probe should call list_panes");
+
+        // ---- turn 2: feed the tool result back, exactly as the
+        // conductor's run_loop does — assistant tool_use message + one
+        // user message of tool_result blocks. The loop is broken iff this
+        // second turn errors (a wire-shape refusal would 400 here).
+        let tool_id = tool_uses[0]
+            .get("id")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let mut msgs2 = messages.clone();
+        msgs2.push(json!({ "role": "assistant", "content": resp.content.clone() }));
+        msgs2.push(json!({
+            "role": "user",
+            "content": [ { "type": "tool_result", "tool_use_id": tool_id, "content": "[{\"id\":\"p1\",\"title\":\"opencode\"}]" } ]
+        }));
+        let resp2 = stream_chat(
+            &client,
+            &provider,
+            StreamChatArgs {
+                system: Some("You are a test probe. After the tool result, answer with one short sentence."),
+                messages: &msgs2,
+                tools: &tools,
+                betas: None,
+                fallbacks: None,
+            },
+            noop,
+        )
+        .await
+        .expect("second turn should succeed");
+        println!("turn2 stop_reason: {}", resp2.stop_reason);
+        for b in &resp2.content {
+            println!("turn2 block: {b}");
+        }
+        let text: String = resp2
+            .content
+            .iter()
+            .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|b| b.get("text").and_then(Value::as_str))
+            .collect();
+        assert!(!text.is_empty(), "turn 2 should produce a text answer, got: {resp2:?}");
+    }
 }

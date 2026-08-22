@@ -127,6 +127,13 @@ pub struct PtyCreateOpts {
     /// `docker-gateway` store key is also on AND the pane is gapped — an
     /// ungapped pane already has full host access and needs no gateway.
     pub docker: Option<bool>,
+    /// Initial command for a plain `terminal` pane — spliced into the
+    /// login shell as `-c <cmd>`, the same slot an agent CLI's command
+    /// line uses, so the sandbox/gap wrapping is identical either way.
+    /// Agent kinds ignore it (their command line comes from the agent
+    /// builder, never the renderer). The opencode `providers login` flow
+    /// in Settings is the one feature using it today.
+    pub cmd: Option<String>,
 }
 
 /// How a gapped pane's command line gets wrapped, once its `PaneProxy` is
@@ -546,7 +553,14 @@ pub async fn pty_create(
     // (a cached, but first-call-EXPENSIVE shell-out, deliberately NOT
     // moved for exactly that reason — see the gapped Linux branch below),
     // this is a plain allowlist lookup with no cost worth guarding.
-    let agent_cmd = agent_spawn::build_agent_spawn_from(&agents, &opts.kind, opts.model.as_deref());
+    let mut agent_cmd = agent_spawn::build_agent_spawn_from(&agents, &opts.kind, opts.model.as_deref());
+    if opts.kind == "terminal" {
+        agent_cmd = opts
+            .cmd
+            .as_ref()
+            .map(|c| c.trim().to_string())
+            .filter(|c| !c.is_empty());
+    }
 
     let egress_default = {
         let default_dir = dir.clone();

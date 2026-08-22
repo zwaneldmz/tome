@@ -1,4 +1,5 @@
 mod agent_env;
+mod agent_run;
 mod agent_spawn;
 mod authlock;
 mod brain;
@@ -16,6 +17,7 @@ mod flow;
 mod flow_env;
 mod fs;
 mod git;
+mod graphify;
 mod ipc;
 // Phase 4/slice L3: the real-bwrap curl-matrix proof — #[ignore]'d #[test]s
 // that actually spawn tome-shim inside a real Linux network namespace. See
@@ -39,6 +41,7 @@ mod lsp;
 mod mentor;
 mod menu;
 mod migrate;
+mod opencode;
 mod protocol;
 mod pty;
 mod pty_authority;
@@ -443,6 +446,7 @@ pub fn run() {
             // conductor
             ipc::conductor::conductor_allow_run,
             ipc::conductor::conductor_allow_read,
+            ipc::conductor::conductor_set_root,
             // doc
             ipc::doc::doc_read_bytes,
             // theme
@@ -497,6 +501,7 @@ pub fn run() {
             // chat
             ipc::chat::chat_send,
             ipc::chat::chat_abort,
+            ipc::chat::chat_history_list,
             ipc::chat::chat_providers,
             ipc::chat::chat_complete,
             ipc::chat::chat_key_set,
@@ -526,6 +531,19 @@ pub fn run() {
             // skills
             ipc::skills::skills_list,
             ipc::skills::skills_read,
+            // graphify (workspace knowledge graph)
+            ipc::graphify::graphify_status,
+            ipc::graphify::graphify_build,
+            ipc::graphify::graphify_cancel,
+            ipc::graphify::graphify_query,
+            ipc::graphify::graphify_path,
+            ipc::graphify::graphify_explain,
+            ipc::graphify::graphify_affected,
+            // opencode (agent CLI credentials + model choice)
+            ipc::opencode::opencode_status,
+            ipc::opencode::opencode_key_set,
+            ipc::opencode::opencode_models,
+            ipc::opencode::opencode_set_model,
             // dialog
             ipc::dialog::dialog_pick_folder,
             ipc::dialog::dialog_pick_file,
