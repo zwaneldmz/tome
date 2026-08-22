@@ -844,6 +844,58 @@ pub async fn chat_abort(state: State<'_, AppState>, id: String) -> Result<Value,
     Ok(json!({}))
 }
 
+/// `chat:history-list` (`{ query? }`) — the searchable conversation
+/// archive. A workspace startup starts the assistant FRESH (a new chat id
+/// per restored pane); this is how the old conversations stay reachable.
+/// Scans the store dir for `chat-log-*.json` (name-vetted by
+/// [`crate::chat::history::chat_id_of_file_name`], so nothing but a valid
+/// log key is ever read), filters case-insensitively over the raw payload,
+/// summarizes (id · count · first-user snippet · mtime), and returns
+/// newest-first. Reading happens on the blocking pool — a store dir with
+/// many logs is many small reads, not a hot path.
+#[tauri::command]
+pub async fn chat_history_list(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    query: Option<String>,
+) -> Result<Value, String> {
+    lock_gate::guard(&state, "chat:history-list")?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let query = query.unwrap_or_default();
+    tokio::task::spawn_blocking(move || -> Result<Value, String> {
+        let mut entries = Vec::new();
+        let Ok(read_dir) = std::fs::read_dir(&dir) else {
+            return Ok(json!([]));
+        };
+        for entry in read_dir.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Some(id) = crate::chat::history::chat_id_of_file_name(&name) else {
+                continue;
+            };
+            let mtime_ms = entry
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let Ok(payload) = std::fs::read_to_string(entry.path()) else {
+                continue;
+            };
+            if !crate::chat::history::log_matches(&payload, &query) {
+                continue;
+            }
+            if let Some(v) = crate::chat::history::summarize_log(&id, &payload, mtime_ms) {
+                entries.push(v);
+            }
+        }
+        crate::chat::history::sort_newest_first(&mut entries);
+        Ok(Value::Array(entries))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Emits `chat:done` — see this file's module doc comment on why every
 /// call here includes both keys explicitly (`aborted: false, error: null`)
 /// where the JS original sometimes sends a bare `{ id }`: the renderer's

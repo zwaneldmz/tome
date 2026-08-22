@@ -16,6 +16,7 @@
 //! directory entirely. See `ipc::chat`'s own doc comment for the exact
 //! scope boundary this implies for `chat:send`/`chat:done`/`chat:tool`.
 
+pub mod history;
 pub mod migrate;
 pub mod overlay;
 pub mod registry;

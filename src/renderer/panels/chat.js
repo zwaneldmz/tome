@@ -5,7 +5,7 @@ import { renderMarkdown } from '../markdown.js'
 import { chats } from '../regs.js'
 import { activeWorkspace } from '../workspaces.js'
 import { encodeWav } from '../../shared/wav.js'
-import { loadHistory, persistHistory, flushHistory } from '../chat-history.js'
+import { loadHistory, persistHistory, flushHistory, openChatHistory } from '../chat-history.js'
 import { shouldAbortOnDispose } from '../chat-lifecycle.js'
 import { voiceActive } from '../voice.js'
 import { isVerbose, mentorState } from '../mentor.js'
@@ -17,6 +17,7 @@ export class ChatPanel {
     this.element.innerHTML = `
       <div class="chat-header">
         <button type="button" class="chat-provider-line" title="Which provider the next message goes to — click to change" aria-label="Assistant provider">…</button>
+        <button type="button" class="chat-history-btn" title="Search past conversations" aria-label="Search chat history">⌕</button>
       </div>
       <div class="chat-log"></div>
       <form class="chat-form">
@@ -52,6 +53,10 @@ export class ChatPanel {
     })
     this.stopBtn = this.element.querySelector('.chat-stop')
     this.stopBtn.addEventListener('click', () => tome.chat.abort(this.chatId))
+    this.historyBtn = this.element.querySelector('.chat-history-btn')
+    this.historyBtn.addEventListener('click', () =>
+      openChatHistory((id) => this.loadConversation(id))
+    )
     this.micBtn = this.element.querySelector('.chat-mic')
     this.micBtn.addEventListener('click', () => (this.rec ? this.stopRec() : this.startRec()))
     this.element.addEventListener('keydown', (e) => {
@@ -92,6 +97,9 @@ export class ChatPanel {
     const msgs = await loadHistory(this.chatId)
     if (!msgs.length) return
     this.history = msgs
+    this.renderTranscript(msgs)
+  }
+  renderTranscript(msgs) {
     for (const m of msgs) {
       if (m.role === 'user') {
         this.bubble('me', m.content)
@@ -103,6 +111,29 @@ export class ChatPanel {
         renderMarkdown(body, m.content)
       }
     }
+  }
+  // Re-anchor this pane to a PAST conversation picked in the history
+  // search: future turns append to that conversation's log, and events for
+  // its id now route here. Refuses mid-reply (a switch would orphan the
+  // in-flight turn's deltas).
+  async loadConversation(id) {
+    if (this.busy) {
+      toast('wait for the reply to finish first')
+      return
+    }
+    const msgs = await loadHistory(id)
+    if (!msgs.length) {
+      toast('that conversation is empty', 'err')
+      return
+    }
+    chats.delete(this.chatId)
+    this.chatId = id
+    this.history = msgs
+    chats.set(this.chatId, this)
+    this.log.replaceChildren()
+    this.renderTranscript(msgs)
+    this.persistHistory()
+    this.log.scrollTop = this.log.scrollHeight
   }
   persistHistory() {
     persistHistory(this.chatId, this.history)
@@ -304,6 +335,25 @@ export class ChatPanel {
     this.bubble('tool', `⚙ ${tool}${hint ? ' · ' + hint : ''}`)
     this.aiBubble()
     // keep the elapsed readout alive across the segment break
+    if (this.wait) this.current.appendChild(this.wait)
+    this.segText = ''
+  }
+  // A headless agent the assistant started changed state: update its chip IN
+  // PLACE (one chip per agent run, not a new bubble per started/done/failed).
+  // Dataset-matched by iteration rather than a CSS-escape'd selector — the
+  // kind is vetted [a-z0-9-] upstream, but not needing the escape at all
+  // keeps the lookup honest by construction.
+  agentNote(kind, status) {
+    const label = `⚙ run_agent · ${kind} — ${status}`
+    for (const el of this.log.querySelectorAll('.msg.tool[data-agent]')) {
+      if (el.dataset.agent === kind) {
+        el.textContent = label
+        return
+      }
+    }
+    const node = this.bubble('tool', label)
+    node.dataset.agent = kind
+    this.aiBubble()
     if (this.wait) this.current.appendChild(this.wait)
     this.segText = ''
   }
