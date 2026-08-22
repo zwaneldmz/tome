@@ -34,17 +34,26 @@ export function modalShell(title, onClose, doc = document) {
   const close = () => {
     if (closed) return
     closed = true
+    doc.removeEventListener('keydown', esc, true)
     overlay.remove()
     prevFocus?.focus()
     onClose?.()
   }
-  overlay.addEventListener('click', (e) => e.target === overlay && close())
-  overlay.addEventListener('keydown', (e) => {
+  // Escape is handled on the DOCUMENT (capture phase), not the overlay:
+  // modals that mount empty and fill their controls async (e.g. the TOTP
+  // enroll dialog) leave focus on <body>, and a keydown from <body> never
+  // bubbles through the overlay element — Escape would silently do
+  // nothing. Capture-phase document handling sees it regardless of where
+  // focus sits, which is what the "Escape closes" contract always meant.
+  const esc = (e) => {
     if (e.key === 'Escape') {
       e.preventDefault()
       close()
-      return
     }
+  }
+  doc.addEventListener('keydown', esc, true)
+  overlay.addEventListener('click', (e) => e.target === overlay && close())
+  overlay.addEventListener('keydown', (e) => {
     if (e.key === 'Tab') {
       const f = [...overlay.querySelectorAll(FOCUSABLE)].filter((n) => !n.closest('.hidden'))
       if (!f.length) return

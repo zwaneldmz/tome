@@ -72,6 +72,7 @@ export default [
         queueMicrotask: 'readonly',
         matchMedia: 'readonly',
         Element: 'readonly',
+        MutationObserver: 'readonly',
         atob: 'readonly',
         Worker: 'readonly',
         self: 'readonly',

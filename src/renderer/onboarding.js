@@ -49,7 +49,33 @@ export async function showOnboarding() {
     mic: null, // 'ok' | 'fail'
     dirty: false, // anything entered/chosen → Esc asks before skipping
   }
-  const m = modalShell(`Set up Tome — ${STEPS[0]}`)
+  // Escape decisions register BEFORE modalShell's own document-level
+  // Esc-close (registered inside modalShell() below): capture-phase
+  // keydown listeners on the document run in registration order, so this
+  // handler — registered first — can veto the close for the two cases
+  // where Esc means something else here (un-confirm, or confirm the skip).
+  // The assignment targets below (footer/render/skip) don't exist yet; they
+  // are filled in as the wizard builds, before any key can reach here.
+  const stateRef = { confirming: false }
+  let escTargets = null
+  const onEsc = (e) => {
+    if (e.key !== 'Escape') return
+    if (stateRef.confirming) {
+      e.stopImmediatePropagation()
+      stateRef.confirming = false
+      escTargets?.footer.classList.remove('hidden')
+      escTargets?.render()
+      return
+    }
+    if (state.dirty) {
+      e.stopImmediatePropagation()
+      escTargets?.skip()
+    }
+  }
+  document.addEventListener('keydown', onEsc, true)
+  const m = modalShell(`Set up Tome — ${STEPS[0]}`, () =>
+    document.removeEventListener('keydown', onEsc, true)
+  )
   m.err.remove() // steps report inline, never through the error line
   const box = m.body.parentElement
   box.classList.add('ob-box')
@@ -111,13 +137,13 @@ export async function showOnboarding() {
     m.close()
   }
   const next = () => {
-    if (state.confirming) return
+    if (stateRef.confirming) return
     if (state.step === STEPS.length - 1) return finish()
     state.step++
     render()
   }
   const back = () => {
-    if (state.confirming || state.step === 0) return
+    if (stateRef.confirming || state.step === 0) return
     state.step--
     render()
   }
@@ -125,9 +151,9 @@ export async function showOnboarding() {
   // and modalShell keeps one overlay at a time — the wizard would be gone
   // even if the user changed their mind.
   const skip = () => {
-    if (state.confirming || state.step === 0 || state.step === STEPS.length - 1) return
+    if (stateRef.confirming || state.step === 0 || state.step === STEPS.length - 1) return
     if (!state.dirty) return finish()
-    state.confirming = true
+    stateRef.confirming = true
     m.body.textContent = ''
     footer.classList.add('hidden')
     note('Skip setup? Your choices so far will be lost.')
@@ -137,7 +163,7 @@ export async function showOnboarding() {
     const no = el('button', 'ag-btn ghost', 'Keep going')
     no.type = 'button'
     no.addEventListener('click', () => {
-      state.confirming = false
+      stateRef.confirming = false
       footer.classList.remove('hidden')
       render()
     })
@@ -147,20 +173,14 @@ export async function showOnboarding() {
   nextBtn.addEventListener('click', next)
   backBtn.addEventListener('click', back)
   skipBtn.addEventListener('click', skip)
-  // →/Enter = next, ← = back; Escape stays on modalShell (closes like the
-  // scrim) unless something was entered, where it becomes the skip confirm.
-  // Capture phase: this must see Escape before modalShell's close handler.
+  // Arrow/Enter navigation stays on the overlay (no conflict with
+  // modalShell's Esc handling — that lives on the document now); the
+  // Escape branches moved up to onEsc, registered before modalShell.
+  escTargets = { footer, render, skip }
   overlay.addEventListener(
     'keydown',
     (e) => {
-      if (state.confirming) {
-        if (e.key === 'Escape') {
-          e.preventDefault()
-          e.stopPropagation()
-          state.confirming = false
-          footer.classList.remove('hidden')
-          render()
-        }
+      if (stateRef.confirming) {
         return
       }
       if (e.key === 'ArrowRight' || (e.key === 'Enter' && e.target.tagName !== 'BUTTON')) {
@@ -169,10 +189,6 @@ export async function showOnboarding() {
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
         back()
-      } else if (e.key === 'Escape' && state.dirty) {
-        e.preventDefault()
-        e.stopPropagation()
-        skip()
       }
     },
     true

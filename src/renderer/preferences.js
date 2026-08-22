@@ -11,6 +11,7 @@ import { totpModal } from './egress-ui.js'
 import { showOnboarding } from './onboarding.js'
 import { activeWorkspace } from './workspaces.js'
 import { mentorState, saveMentorSettings, setUq, uq } from './mentor.js'
+import { GROUPS, normalize, filterRows, sectionToGroup } from './settings-nav.js'
 
 const THEME_LABEL = { system: 'Match system', light: 'Light', dark: 'Dark' }
 const SIDEBAR_DEFAULT = 236
@@ -613,312 +614,687 @@ function toggleRow(parent, label, hint, get, set) {
   paint()
 }
 
-export async function preferencesModal() {
-  const m = modalShell('Settings')
+// ---- the Settings shell (slice 3a) ----
+// modalShell keeps exactly one overlay at a time (its own doc comment), so
+// the four flows that need a second modal — "Add destination…", "Add
+// remote source…", "Enroll authenticator (2FA)…", "Replay setup wizard…" —
+// still close Settings first. Each now stashes the group it should reopen
+// at in pendingReopen just before closing; Settings' own onClose arms
+// watchNestedOverlay, which watches the overlay through the flow's own
+// chain (a form and its confirm modal replace each other synchronously;
+// only showOnboarding mounts late, after an auth probe) and reopens
+// Settings there when the last overlay unmounts — however the flow ends,
+// cancel included.
+let pendingReopen = null
+const NESTED_MOUNT_TIMEOUT_MS = 10000
+
+// A MutationObserver rather than a poll: browsers throttle timers in
+// background/occluded windows, and a throttled interval can miss a
+// short-lived nested modal entirely (never seeing it mount means never
+// reopening). Mutation callbacks are microtasks — they fire exactly, in
+// order, however the modal chain mounts and unmounts.
+function watchNestedOverlay(section) {
+  let sawOverlay = false
+  const bail = setTimeout(() => {
+    // The flow never mounted an overlay (showOnboarding's locked-workspace
+    // path toasts instead) — stop watching, reopen nothing.
+    if (!sawOverlay) {
+      observer.disconnect()
+      pendingReopen = null
+    }
+  }, NESTED_MOUNT_TIMEOUT_MS)
+  const done = () => {
+    observer.disconnect()
+    clearTimeout(bail)
+    pendingReopen = null
+    // Deferred past the CURRENT keydown dispatch: keys.js's global Escape
+    // handler runs later in the same dispatch and raw-removes whatever
+    // #ag-overlay it finds — a synchronous reopen would mount straight
+    // into that dispatch and be killed instantly (observed in practice).
+    setTimeout(() => preferencesModal({ section }), 0)
+  }
+  const check = () => {
+    const up = !!document.getElementById('ag-overlay')
+    if (up) {
+      sawOverlay = true
+      return
+    }
+    if (sawOverlay) done()
+  }
+  const observer = new MutationObserver(check)
+  observer.observe(document.body, { childList: true })
+  // The launch site's own overlay is already gone by the time onClose arms
+  // this (modalShell removes it before calling onClose), so the first sync
+  // check correctly sees "nothing yet" — a nested flow that mounted AND
+  // closed before we started watching still counts via its own mutations.
+  check()
+}
+
+// Index text for one DOM node, excluding .prefs-row and h4 subtrees: the
+// row/hint text plus every control's placeholder, value, and select
+// options — so provider labels and model ids are findable even though
+// they live in button text and input values, not text nodes.
+function nodeSearchText(node) {
+  let s = ''
+  const walk = (n) => {
+    for (const c of n.childNodes) {
+      if (c.nodeType === 3) s += ' ' + c.textContent // Node.TEXT_NODE
+      else if (c.nodeType === 1 && c.tagName !== 'H4' && !c.classList.contains('prefs-row')) walk(c)
+    }
+  }
+  walk(node)
+  for (const c of node.querySelectorAll('input, select')) {
+    s += ' ' + (c.placeholder || '') + ' ' + (c.value || '')
+    if (c.tagName === 'SELECT') for (const o of c.options) s += ' ' + o.textContent
+  }
+  return s
+}
+
+export async function preferencesModal({ section } = {}) {
+  // A stale stash (a nested flow that never mounted) must not arm a
+  // watcher on this instance's close.
+  pendingReopen = null
+
+  // The search box and its Esc-clear handler must exist BEFORE modalShell
+  // registers its own document-level Esc-close: capture-phase keydown
+  // listeners on the document run in registration order, and Esc inside
+  // the search box means "clear the filter", not "close Settings" — so
+  // this handler registers first and vetos the close with
+  // stopImmediatePropagation (which also keeps keys.js's global Escape
+  // handler from ever seeing the keypress).
+  let activeQuery = ''
+  const search = el('input', 'prefs-search')
+  search.type = 'text'
+  search.placeholder = 'Search settings…'
+  search.setAttribute('aria-label', 'Search settings')
+  search.spellcheck = false
+  let clearSearch = () => {}
+  const escSearch = (e) => {
+    if (e.key === 'Escape' && document.activeElement === search && activeQuery) {
+      e.stopImmediatePropagation()
+      clearSearch()
+    }
+  }
+  document.addEventListener('keydown', escSearch, true)
+
+  const m = modalShell('Settings', () => {
+    document.removeEventListener('keydown', escSearch, true)
+    if (pendingReopen != null) watchNestedOverlay(pendingReopen)
+  })
   m.err.remove() // no error line — prefs report via toasts
   m.body.parentElement.classList.add('prefs-box')
-  let voiceWarmup = !!(await tome.store.get('voice-warmup'))
+
+  // ---------- shell ----------
+  // Left rail (search + seven groups + the setup-wizard footer), right
+  // scrolling pane. Sections keep the .prefs-section/.prefs-row
+  // vocabulary; they just render inside the pane now.
+  const shell = el('div', 'prefs-shell')
+  const nav = el('nav', 'prefs-nav')
+  nav.setAttribute('aria-label', 'Settings groups')
+  const pane = el('div', 'prefs-pane')
+  shell.append(nav, pane)
+  m.body.appendChild(shell)
+
+  // ---------- live search ----------
+  search.addEventListener('input', () => applyFilter(search.value))
+  clearSearch = () => {
+    search.value = ''
+    applyFilter('')
+  }
+  const matchCount = el('div', 'prefs-match-count')
+  matchCount.setAttribute('aria-live', 'polite')
+  matchCount.hidden = true
+
+  // The index is re-read from the pane on every pass: async sections fill
+  // in after mount and list sections re-render their own rows, and a
+  // fresh walk of a few dozen rows costs nothing. Non-row content (the
+  // custom-provider form, hints like the login-shell key line) indexes as
+  // one extra per-section entry so it stays findable.
+  const applyFilter = (query) => {
+    activeQuery = query
+    const empty = normalize(query) === ''
+    const index = new Map() // sectionId → { el, rows: [{el, text}] }
+    const entries = [] // row + non-row entries
+    const headings = [] // section titles, kept apart so a title hit shows the whole section
+    for (const sec of pane.querySelectorAll('[data-section]')) {
+      const id = sec.dataset.section
+      const groupId = sectionToGroup(id)
+      const rows = [...sec.querySelectorAll('.prefs-row')].map((r) => ({ el: r, text: nodeSearchText(r) }))
+      index.set(id, { el: sec, rows })
+      headings.push({ groupId, sectionId: id, text: sec.querySelector('h4')?.textContent || '' })
+      entries.push({ groupId, sectionId: id, text: nodeSearchText(sec) })
+      for (const r of rows) entries.push({ groupId, sectionId: id, text: r.text })
+    }
+    const hits = filterRows(query, entries)
+    const headHits = filterRows(query, headings)
+    for (const [id, s] of index) {
+      s.el.classList.toggle('prefs-section-hidden', !empty && !hits.sections.has(id))
+      const whole = empty || headHits.sections.has(id)
+      for (const r of s.rows) {
+        const rowHit = empty || filterRows(query, [{ groupId: sectionToGroup(id), sectionId: id, text: r.text }]).sections.has(id)
+        r.el.classList.toggle('prefs-row-hidden', !(rowHit || whole))
+      }
+    }
+    for (const b of groupBtns)
+      b.classList.toggle('prefs-nav-dim', !empty && !hits.groups.has(b.dataset.group))
+    if (empty) {
+      matchCount.hidden = true
+    } else {
+      // scroll sync is suspended while filtering — drop the stale marker
+      // rather than leave it pointing at a group the user can't see
+      for (const b of groupBtns) b.removeAttribute('aria-current')
+      matchCount.hidden = false
+      matchCount.textContent = hits.count ? `${hits.count} of ${index.size} sections` : 'no matches'
+    }
+    syncNav()
+  }
+
+  // ---------- rail ----------
+  nav.appendChild(search)
+  nav.appendChild(matchCount)
+  const groupBtns = []
+  for (const g of GROUPS) {
+    const b = el('button', 'prefs-nav-item', g.label)
+    b.type = 'button'
+    b.dataset.group = g.id
+    b.addEventListener('click', () => scrollToGroup(g.id))
+    nav.appendChild(b)
+    groupBtns.push(b)
+  }
+  nav.appendChild(el('div', 'prefs-nav-divider'))
+  const footer = el('div', 'prefs-nav-footer')
+  const replay = el('button', 'prefs-nav-item prefs-nav-action', 'Replay setup wizard…')
+  replay.type = 'button'
+  replay.title = 'the first-run tour — agents, assistant, voice, security'
+  replay.addEventListener('click', () => {
+    pendingReopen = 'general'
+    m.close()
+    showOnboarding()
+  })
+  footer.appendChild(replay)
+  nav.appendChild(footer)
+
+  // '/' anywhere in the modal (outside a field) jumps to the search box.
+  m.body.parentElement.addEventListener('keydown', (e) => {
+    if (e.key !== '/') return
+    const t = e.target
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return
+    e.preventDefault()
+    search.focus()
+    search.select()
+  })
+
+  // ---------- nav ↔ pane scroll sync ----------
+  // The rail button for the group most in view carries aria-current;
+  // suspended while a search query is active (sections jump around under
+  // a filter). rAF-throttled: scroll events fire per frame.
+  let navRaf = 0
+  const syncNav = () => {
+    navRaf = 0
+    if (activeQuery !== '') return
+    const top = pane.getBoundingClientRect().top
+    let current = null
+    for (const sec of pane.querySelectorAll('[data-section]')) {
+      if (sec.classList.contains('prefs-section-hidden')) continue
+      if (sec.getBoundingClientRect().top - top <= 64) current = sec.dataset.section
+      else break
+    }
+    // At the bottom of the pane the last sections can never cross the top
+    // line — a jump to them must still highlight their group, not whatever
+    // group happens to sit at the top when the scroll runs out.
+    if (pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 2) {
+      const visible = [...pane.querySelectorAll('[data-section]')].filter(
+        (s) => !s.classList.contains('prefs-section-hidden')
+      )
+      if (visible.length) current = visible[visible.length - 1].dataset.section
+    }
+    const g = current ? sectionToGroup(current) : GROUPS[0].id
+    for (const b of groupBtns) {
+      if (b.dataset.group === g) b.setAttribute('aria-current', 'true')
+      else b.removeAttribute('aria-current')
+    }
+  }
+  pane.addEventListener(
+    'scroll',
+    () => {
+      if (!navRaf) navRaf = requestAnimationFrame(syncNav)
+    },
+    { passive: true }
+  )
+
+  const scrollToGroup = (groupId) => {
+    for (const sec of pane.querySelectorAll('[data-section]')) {
+      if (sectionToGroup(sec.dataset.section) !== groupId) continue
+      if (sec.classList.contains('prefs-section-hidden')) continue // dimmed group under a filter: first surviving section
+      sec.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+  }
+
+  // ---------- deep links ----------
+  // preferencesModal({ section }) takes a section id or a group id —
+  // infrastructure for later slices (chat header, egress-gap jump, the
+  // Voice menu item); it scrolls to the target and flashes it, again once
+  // the target's async content has landed.
+  const resolveDeepLink = (id) => {
+    if (!id) return null
+    if (sectionToGroup(id)) return id // a section id
+    const g = GROUPS.find((x) => x.id === id)
+    return g ? g.sections[0] : null // a group id → its first section
+  }
+  const flash = (node) => {
+    node.classList.add('prefs-highlight')
+    setTimeout(() => node.classList.remove('prefs-highlight'), 1500)
+  }
+  const deepTarget = resolveDeepLink(section)
+  let deepLink = deepTarget // cleared once the target's real content lands
+
+  // ---------- sections ----------
+  // Sync groups paint with the modal; async groups mount a placeholder in
+  // their pane slot now and fill in as their probes land — every probe is
+  // in flight before the first paint, so opening Settings never waits on
+  // chat:providers' login-shell spawn (or any other IPC).
+  const mount = (sec, id) => {
+    sec.dataset.section = id
+    pane.appendChild(sec)
+    return sec
+  }
+  const startAsync = (sectionId, heading, build) => {
+    const placeholder = el('section', 'prefs-section')
+    placeholder.dataset.section = sectionId
+    placeholder.append(el('h4', '', heading))
+    const hint = el('div', 'prefs-hint', 'Loading…')
+    placeholder.appendChild(hint)
+    pane.appendChild(placeholder)
+    Promise.resolve()
+      .then(build) // one microtask later: the modal paints first, with placeholders
+      .then((real) => {
+        if (!pane.isConnected) return // modal closed while the probe was out
+        real.dataset.section = sectionId
+        placeholder.replaceWith(real)
+        applyFilter(activeQuery) // a late arrival respects the live query
+        syncNav()
+        if (deepLink === sectionId) {
+          deepLink = null
+          real.scrollIntoView({ block: 'start' })
+          flash(real)
+        }
+      })
+      .catch((err) => {
+        if (!pane.isConnected) return
+        // Builders catch their own expected failures; this is the net.
+        hint.textContent = err?.message || 'Could not load this section.'
+        applyFilter(activeQuery)
+      })
+  }
+  // buildExportSection / buildRemoteSourcesSection take a "close
+  // Preferences" callback their add-buttons call right before mounting
+  // their own modal — this variant also stashes where to come back to.
+  const closeReopeningAt = (groupId) => () => {
+    pendingReopen = groupId
+    m.close()
+  }
+
+  // ===== general =====
 
   // ---------- appearance ----------
-  const appearance = el('section', 'prefs-section')
-  appearance.append(el('h4', '', 'Appearance'))
-  const seg = el('div', 'prefs-seg')
-  seg.setAttribute('role', 'radiogroup')
-  seg.setAttribute('aria-label', 'Theme')
-  for (const pref of THEME_ORDER) {
-    const b = el('button', '', `${THEME_GLYPH[pref]} ${THEME_LABEL[pref]}`)
-    b.type = 'button'
-    b.setAttribute('role', 'radio')
-    b.setAttribute('aria-checked', String(themeState.pref === pref))
-    b.classList.toggle('on', themeState.pref === pref)
-    b.addEventListener('click', () => {
-      setTheme(pref) // persists 'theme' and re-skins live
-      for (const s of seg.children) {
-        const on = s === b
-        s.classList.toggle('on', on)
-        s.setAttribute('aria-checked', String(on))
-      }
-    })
-    seg.appendChild(b)
+  const buildAppearance = () => {
+    const section = el('section', 'prefs-section')
+    section.append(el('h4', '', 'Appearance'))
+    const seg = el('div', 'prefs-seg')
+    seg.setAttribute('role', 'radiogroup')
+    seg.setAttribute('aria-label', 'Theme')
+    for (const pref of THEME_ORDER) {
+      const b = el('button', '', `${THEME_GLYPH[pref]} ${THEME_LABEL[pref]}`)
+      b.type = 'button'
+      b.setAttribute('role', 'radio')
+      b.setAttribute('aria-checked', String(themeState.pref === pref))
+      b.classList.toggle('on', themeState.pref === pref)
+      b.addEventListener('click', () => {
+        setTheme(pref) // persists 'theme' and re-skins live
+        for (const s of seg.children) {
+          const on = s === b
+          s.classList.toggle('on', on)
+          s.setAttribute('aria-checked', String(on))
+        }
+      })
+      seg.appendChild(b)
+    }
+    row(section, 'Theme', seg)
+    return section
   }
-  row(appearance, 'Theme', seg)
-  m.body.appendChild(appearance)
 
   // ---------- terminal ----------
-  const terminal = el('section', 'prefs-section')
-  terminal.append(el('h4', '', 'Terminal'))
-  const size = await tome.store.get('term-font-size')
-  let fontSize =
-    typeof size === 'number' && size >= TERM_FONT.min && size <= TERM_FONT.max ? size : TERM_FONT.default
-  const stepper = el('div', 'prefs-stepper')
-  const value = el('span', 'prefs-value', String(fontSize))
-  const apply = (next) => {
-    fontSize = Math.min(TERM_FONT.max, Math.max(TERM_FONT.min, next))
-    // setTermFontSize applies to every live terminal and persists
-    // 'term-font-size', keeping Preferences and ⌘=/⌘-/⌘0 in sync
-    setTermFontSize(fontSize)
-    value.textContent = String(fontSize)
-    minus.disabled = fontSize <= TERM_FONT.min
-    plus.disabled = fontSize >= TERM_FONT.max
+  const buildTerminal = () => {
+    const section = el('section', 'prefs-section')
+    section.append(el('h4', '', 'Terminal'))
+    // Paint with the default; the stored size is a fast store read that
+    // corrects the row when it lands — the modal must not wait on IPC.
+    let fontSize = TERM_FONT.default
+    const stepper = el('div', 'prefs-stepper')
+    const value = el('span', 'prefs-value', String(fontSize))
+    const paint = () => {
+      value.textContent = String(fontSize)
+      minus.disabled = fontSize <= TERM_FONT.min
+      plus.disabled = fontSize >= TERM_FONT.max
+    }
+    const apply = (next) => {
+      fontSize = Math.min(TERM_FONT.max, Math.max(TERM_FONT.min, next))
+      // setTermFontSize applies to every live terminal and persists
+      // 'term-font-size', keeping Preferences and ⌘=/⌘-/⌘0 in sync
+      setTermFontSize(fontSize)
+      paint()
+    }
+    const minus = el('button', '', '−')
+    minus.type = 'button'
+    minus.setAttribute('aria-label', 'Decrease terminal font size')
+    minus.addEventListener('click', () => apply(fontSize - 1))
+    const plus = el('button', '', '+')
+    plus.type = 'button'
+    plus.setAttribute('aria-label', 'Increase terminal font size')
+    plus.addEventListener('click', () => apply(fontSize + 1))
+    stepper.append(minus, value, plus)
+    row(section, 'Font size', stepper, `${TERM_FONT.min}–${TERM_FONT.max} · ⌘= / ⌘- / ⌘0`)
+    paint()
+    tome.store
+      .get('term-font-size')
+      .then((size) => {
+        if (typeof size === 'number' && size >= TERM_FONT.min && size <= TERM_FONT.max) {
+          fontSize = size
+          paint()
+        }
+      })
+      .catch(() => {})
+    return section
   }
-  const minus = el('button', '', '−')
-  minus.type = 'button'
-  minus.setAttribute('aria-label', 'Decrease terminal font size')
-  minus.addEventListener('click', () => apply(fontSize - 1))
-  const plus = el('button', '', '+')
-  plus.type = 'button'
-  plus.setAttribute('aria-label', 'Increase terminal font size')
-  plus.addEventListener('click', () => apply(fontSize + 1))
-  stepper.append(minus, value, plus)
-  row(terminal, 'Font size', stepper, `${TERM_FONT.min}–${TERM_FONT.max} · ⌘= / ⌘- / ⌘0`)
-  minus.disabled = fontSize <= TERM_FONT.min
-  plus.disabled = fontSize >= TERM_FONT.max
-  m.body.appendChild(terminal)
 
   // ---------- editor ----------
-  const editor = el('section', 'prefs-section')
-  editor.append(el('h4', '', 'Editor'))
-  const tabStep = el('div', 'prefs-stepper')
-  const tabValue = el('span', 'prefs-value', String(editorPrefs.tabSize))
-  const setTab = (n) => {
-    const size = Math.min(8, Math.max(1, n))
-    setEditorPrefs({ tabSize: size })
-    tabValue.textContent = String(size)
-    tabMinus.disabled = size <= 1
-    tabPlus.disabled = size >= 8
+  const buildEditor = () => {
+    const section = el('section', 'prefs-section')
+    section.append(el('h4', '', 'Editor'))
+    const tabStep = el('div', 'prefs-stepper')
+    const tabValue = el('span', 'prefs-value', String(editorPrefs.tabSize))
+    const setTab = (n) => {
+      const size = Math.min(8, Math.max(1, n))
+      setEditorPrefs({ tabSize: size })
+      tabValue.textContent = String(size)
+      tabMinus.disabled = size <= 1
+      tabPlus.disabled = size >= 8
+    }
+    const tabMinus = el('button', '', '−')
+    tabMinus.type = 'button'
+    tabMinus.setAttribute('aria-label', 'Decrease indent size')
+    tabMinus.addEventListener('click', () => setTab(editorPrefs.tabSize - 1))
+    const tabPlus = el('button', '', '+')
+    tabPlus.type = 'button'
+    tabPlus.setAttribute('aria-label', 'Increase indent size')
+    tabPlus.addEventListener('click', () => setTab(editorPrefs.tabSize + 1))
+    tabStep.append(tabMinus, tabValue, tabPlus)
+    row(section, 'Indent size', tabStep, 'spaces per Tab · 1–8')
+    tabMinus.disabled = editorPrefs.tabSize <= 1
+    tabPlus.disabled = editorPrefs.tabSize >= 8
+    toggleRow(
+      section,
+      'Wrap long lines',
+      'soft-wrap instead of scrolling sideways',
+      () => editorPrefs.wrap,
+      (v) => setEditorPrefs({ wrap: v })
+    )
+    toggleRow(
+      section,
+      'Trim trailing whitespace on save',
+      'applied to the buffer, so the pane stays clean',
+      () => editorPrefs.trimOnSave,
+      (v) => setEditorPrefs({ trimOnSave: v })
+    )
+    toggleRow(
+      section,
+      'Format on save',
+      'Prettier, using the project’s own config',
+      () => editorPrefs.formatOnSave,
+      (v) => setEditorPrefs({ formatOnSave: v })
+    )
+    toggleRow(
+      section,
+      'Autosave',
+      'save a moment after you stop typing',
+      () => editorPrefs.autosave,
+      (v) => setEditorPrefs({ autosave: v })
+    )
+    return section
   }
-  const tabMinus = el('button', '', '−')
-  tabMinus.type = 'button'
-  tabMinus.setAttribute('aria-label', 'Decrease indent size')
-  tabMinus.addEventListener('click', () => setTab(editorPrefs.tabSize - 1))
-  const tabPlus = el('button', '', '+')
-  tabPlus.type = 'button'
-  tabPlus.setAttribute('aria-label', 'Increase indent size')
-  tabPlus.addEventListener('click', () => setTab(editorPrefs.tabSize + 1))
-  tabStep.append(tabMinus, tabValue, tabPlus)
-  row(editor, 'Indent size', tabStep, 'spaces per Tab · 1–8')
-  tabMinus.disabled = editorPrefs.tabSize <= 1
-  tabPlus.disabled = editorPrefs.tabSize >= 8
-  toggleRow(
-    editor,
-    'Wrap long lines',
-    'soft-wrap instead of scrolling sideways',
-    () => editorPrefs.wrap,
-    (v) => setEditorPrefs({ wrap: v })
-  )
-  toggleRow(
-    editor,
-    'Trim trailing whitespace on save',
-    'applied to the buffer, so the pane stays clean',
-    () => editorPrefs.trimOnSave,
-    (v) => setEditorPrefs({ trimOnSave: v })
-  )
-  toggleRow(
-    editor,
-    'Format on save',
-    'Prettier, using the project’s own config',
-    () => editorPrefs.formatOnSave,
-    (v) => setEditorPrefs({ formatOnSave: v })
-  )
-  toggleRow(
-    editor,
-    'Autosave',
-    'save a moment after you stop typing',
-    () => editorPrefs.autosave,
-    (v) => setEditorPrefs({ autosave: v })
-  )
-  m.body.appendChild(editor)
+
+  // ---------- sidebar ----------
+  const buildSidebar = () => {
+    const section = el('section', 'prefs-section')
+    section.append(el('h4', '', 'Sidebar'))
+    const tree = document.getElementById('tree')
+    const reset = el('button', 'ag-btn ghost', 'Reset width')
+    reset.type = 'button'
+    const width = el('span', 'prefs-value')
+    const paintWidth = () => {
+      // Read on demand (click + open), not during render — a layout read in
+      // the build path forces sync reflow of the whole app under the modal.
+      const current = Math.round(tree.getBoundingClientRect().width) || SIDEBAR_DEFAULT
+      width.textContent = `${current} px`
+    }
+    reset.addEventListener('click', () => {
+      tree.style.width = ''
+      tome.store.set('sidebar-width', null) // no store:delete — null reads as unset
+      paintWidth()
+      toast('Sidebar width reset', 'ok')
+    })
+    const widthBox = el('div', 'prefs-inline')
+    widthBox.append(width, reset)
+    row(section, 'Width', widthBox, `drag the divider · default ${SIDEBAR_DEFAULT} px`)
+    paintWidth()
+    return section
+  }
+
+  // ===== assistant =====
 
   // ---------- assistant ----------
   // Provider choice + model override for the assistant pane. Keys are NOT
   // stored: they come from the login shell (main's ensureLoginEnv), so this
   // section only shows whether each key was found — never the key itself.
-  const assistant = el('section', 'prefs-section')
-  assistant.append(el('h4', '', 'Assistant'))
-  const chatInfo = await tome.chat.providers().catch(() => null)
-  if (chatInfo) {
-    const pseg = el('div', 'prefs-seg')
-    pseg.setAttribute('role', 'radiogroup')
-    pseg.setAttribute('aria-label', 'Assistant provider')
-    const modelRow = { input: null } // filled below; provider switch repopulates it
-    for (const p of chatInfo.providers) {
-      // ● key found in the login shell · ○ missing — set it and restart
-      const b = el('button', '', `${p.keySet ? '●' : '○'} ${p.label}`)
-      b.type = 'button'
-      b.setAttribute('role', 'radio')
-      b.title = p.keyEnv
-        ? p.keySet
-          ? `${p.keyEnv} found in your login shell`
-          : `${p.keyEnv} not found in your login shell`
-        : p.keySet
-          ? 'custom provider configured in Settings'
-          : 'custom provider not configured — set it below'
-      b.setAttribute('aria-checked', String(chatInfo.active === p.id))
-      b.classList.toggle('on', chatInfo.active === p.id)
-      b.addEventListener('click', () => {
-        tome.store.set('chat-provider', p.id)
-        for (const s of pseg.children) {
-          const on = s === b
-          s.classList.toggle('on', on)
-          s.setAttribute('aria-checked', String(on))
-        }
-        // Repopulate the model field with the newly picked provider's
-        // default; the stored override only makes sense per provider.
-        if (modelRow.input) {
-          modelRow.input.value = p.model
-          tome.store.set('chat-model', null)
-        }
-      })
-      pseg.appendChild(b)
+  // Async: chat:providers awaits a login-shell spawn in main, so the
+  // section fills in whenever that probe returns.
+  const buildAssistant = async () => {
+    const section = el('section', 'prefs-section')
+    section.append(el('h4', '', 'Assistant'))
+    const chatInfo = await tome.chat.providers().catch(() => null)
+    if (chatInfo) {
+      const pseg = el('div', 'prefs-seg')
+      pseg.setAttribute('role', 'radiogroup')
+      pseg.setAttribute('aria-label', 'Assistant provider')
+      const modelRow = { input: null } // filled below; provider switch repopulates it
+      for (const p of chatInfo.providers) {
+        // ● key found in the login shell · ○ missing — set it and restart
+        const b = el('button', '', `${p.keySet ? '●' : '○'} ${p.label}`)
+        b.type = 'button'
+        b.setAttribute('role', 'radio')
+        b.title = p.keyEnv
+          ? p.keySet
+            ? `${p.keyEnv} found in your login shell`
+            : `${p.keyEnv} not found in your login shell`
+          : p.keySet
+            ? 'custom provider configured in Settings'
+            : 'custom provider not configured — set it below'
+        b.setAttribute('aria-checked', String(chatInfo.active === p.id))
+        b.classList.toggle('on', chatInfo.active === p.id)
+        b.addEventListener('click', () => {
+          tome.store.set('chat-provider', p.id)
+          for (const s of pseg.children) {
+            const on = s === b
+            s.classList.toggle('on', on)
+            s.setAttribute('aria-checked', String(on))
+          }
+          // Repopulate the model field with the newly picked provider's
+          // default; the stored override only makes sense per provider.
+          if (modelRow.input) {
+            modelRow.input.value = p.model
+            tome.store.set('chat-model', null)
+          }
+        })
+        pseg.appendChild(b)
+      }
+      row(section, 'Provider', pseg, '● key found in your login shell · ○ missing')
+      const activeEntry = chatInfo.providers.find((p) => p.id === chatInfo.active)
+      const storedModel = await tome.store.get('chat-model')
+      modelRow.input = textRow(
+        section,
+        'Model',
+        'blank = provider default',
+        'chat-model',
+        typeof storedModel === 'string' && storedModel ? storedModel : activeEntry?.model
+      )
+      const keysHint = el(
+        'div',
+        'prefs-hint',
+        'keys come from your login shell — set MOONSHOT_API_KEY / ZHIPU_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY and restart'
+      )
+      section.appendChild(keysHint)
+    } else {
+      section.appendChild(el('div', 'prefs-hint', 'Provider list unavailable.'))
     }
-    row(assistant, 'Provider', pseg, '● key found in your login shell · ○ missing')
-    const activeEntry = chatInfo.providers.find((p) => p.id === chatInfo.active)
-    const storedModel = await tome.store.get('chat-model')
-    modelRow.input = textRow(
-      assistant,
-      'Model',
-      'blank = provider default',
-      'chat-model',
-      typeof storedModel === 'string' && storedModel ? storedModel : activeEntry?.model
-    )
-    const keysHint = el(
-      'div',
-      'prefs-hint',
-      'keys come from your login shell — set MOONSHOT_API_KEY / ZHIPU_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY and restart'
-    )
-    assistant.appendChild(keysHint)
-  } else {
-    assistant.appendChild(el('div', 'prefs-hint', 'Provider list unavailable.'))
+    return section
   }
-  m.body.appendChild(assistant)
 
   // ---------- custom provider ("any provider") ----------
   // An OpenAI- or Anthropic-compatible endpoint the user supplies. Unlike the
   // built-ins (whose key comes from a login-shell env var), the key is stored
   // in the 0600 JSON store so it can be pasted here — it never reaches the
   // browser layer beyond this form.
-  const customSection = el('section', 'prefs-section')
-  customSection.append(el('h4', '', 'Custom provider'))
-  const custom = (await tome.store.get('custom-provider')) || {}
-  const cpInput = (key, placeholder, type = 'text') => {
-    const i = el('input', 'prefs-input')
-    i.type = type
-    i.placeholder = placeholder
-    i.spellcheck = false
-    i.value = custom[key] || ''
-    i.setAttribute('aria-label', placeholder)
-    return i
-  }
-  const cpLabel = cpInput('label', 'label — e.g. My endpoint')
-  const cpBase = cpInput('baseUrl', 'base URL — e.g. https://api.deepseek.com/v1')
-  const cpModel = cpInput('model', 'model id — e.g. deepseek-v4-pro')
-  const cpKey = cpInput('key', 'API key', 'password')
-  const wireSeg = el('div', 'prefs-seg')
-  wireSeg.setAttribute('role', 'radiogroup')
-  wireSeg.setAttribute('aria-label', 'Custom provider wire')
-  let wire = custom.wire === 'anthropic' ? 'anthropic' : 'openai'
-  const wireOpenai = el('button', '', 'OpenAI')
-  const wireAnth = el('button', '', 'Anthropic')
-  for (const b of [wireOpenai, wireAnth]) {
-    b.type = 'button'
-    b.setAttribute('role', 'radio')
-  }
-  const paintWire = () => {
-    wireOpenai.classList.toggle('on', wire === 'openai')
-    wireAnth.classList.toggle('on', wire === 'anthropic')
-    wireOpenai.setAttribute('aria-checked', String(wire === 'openai'))
-    wireAnth.setAttribute('aria-checked', String(wire === 'anthropic'))
-  }
-  wireOpenai.addEventListener('click', () => {
-    wire = 'openai'
-    paintWire()
-  })
-  wireAnth.addEventListener('click', () => {
-    wire = 'anthropic'
-    paintWire()
-  })
-  wireSeg.append(wireOpenai, wireAnth)
-  paintWire()
-  const cpSave = el('button', 'ag-btn ghost', 'Save custom provider')
-  cpSave.type = 'button'
-  cpSave.addEventListener('click', async () => {
-    const value = {
-      label: cpLabel.value.trim(),
-      baseUrl: cpBase.value.trim(),
-      model: cpModel.value.trim(),
-      key: cpKey.value.trim(),
-      wire,
+  const buildCustomProvider = async () => {
+    const section = el('section', 'prefs-section')
+    section.append(el('h4', '', 'Custom provider'))
+    const custom = (await tome.store.get('custom-provider')) || {}
+    const cpInput = (key, placeholder, type = 'text') => {
+      const i = el('input', 'prefs-input')
+      i.type = type
+      i.placeholder = placeholder
+      i.spellcheck = false
+      i.value = custom[key] || ''
+      i.setAttribute('aria-label', placeholder)
+      return i
     }
-    if (!value.label || !value.baseUrl || !value.model || !value.key) {
-      return toast('fill in label, base URL, model, and key')
+    const cpLabel = cpInput('label', 'label — e.g. My endpoint')
+    const cpBase = cpInput('baseUrl', 'base URL — e.g. https://api.deepseek.com/v1')
+    const cpModel = cpInput('model', 'model id — e.g. deepseek-v4-pro')
+    const cpKey = cpInput('key', 'API key', 'password')
+    const wireSeg = el('div', 'prefs-seg')
+    wireSeg.setAttribute('role', 'radiogroup')
+    wireSeg.setAttribute('aria-label', 'Custom provider wire')
+    let wire = custom.wire === 'anthropic' ? 'anthropic' : 'openai'
+    const wireOpenai = el('button', '', 'OpenAI')
+    const wireAnth = el('button', '', 'Anthropic')
+    for (const b of [wireOpenai, wireAnth]) {
+      b.type = 'button'
+      b.setAttribute('role', 'radio')
     }
-    await tome.store.set('custom-provider', value)
-    toast('custom provider saved — select it under Provider', 'ok')
-  })
-  const cpClear = el('button', 'ag-btn ghost', 'Clear')
-  cpClear.type = 'button'
-  cpClear.addEventListener('click', async () => {
-    await tome.store.set('custom-provider', null)
-    cpLabel.value = cpBase.value = cpModel.value = cpKey.value = ''
-    toast('custom provider cleared', 'ok')
-  })
-  customSection.append(cpLabel, cpBase, cpModel, cpKey, wireSeg, cpSave, cpClear)
-  customSection.append(
-    el('div', 'prefs-hint', 'the key is stored locally in the 0600 store — never shown to a browser or logged')
-  )
-  m.body.appendChild(customSection)
+    const paintWire = () => {
+      wireOpenai.classList.toggle('on', wire === 'openai')
+      wireAnth.classList.toggle('on', wire === 'anthropic')
+      wireOpenai.setAttribute('aria-checked', String(wire === 'openai'))
+      wireAnth.setAttribute('aria-checked', String(wire === 'anthropic'))
+    }
+    wireOpenai.addEventListener('click', () => {
+      wire = 'openai'
+      paintWire()
+    })
+    wireAnth.addEventListener('click', () => {
+      wire = 'anthropic'
+      paintWire()
+    })
+    wireSeg.append(wireOpenai, wireAnth)
+    paintWire()
+    const cpSave = el('button', 'ag-btn ghost', 'Save custom provider')
+    cpSave.type = 'button'
+    cpSave.addEventListener('click', async () => {
+      const value = {
+        label: cpLabel.value.trim(),
+        baseUrl: cpBase.value.trim(),
+        model: cpModel.value.trim(),
+        key: cpKey.value.trim(),
+        wire,
+      }
+      if (!value.label || !value.baseUrl || !value.model || !value.key) {
+        return toast('fill in label, base URL, model, and key')
+      }
+      await tome.store.set('custom-provider', value)
+      toast('custom provider saved — select it under Provider', 'ok')
+    })
+    const cpClear = el('button', 'ag-btn ghost', 'Clear')
+    cpClear.type = 'button'
+    cpClear.addEventListener('click', async () => {
+      await tome.store.set('custom-provider', null)
+      cpLabel.value = cpBase.value = cpModel.value = cpKey.value = ''
+      toast('custom provider cleared', 'ok')
+    })
+    section.append(cpLabel, cpBase, cpModel, cpKey, wireSeg, cpSave, cpClear)
+    section.append(
+      el('div', 'prefs-hint', 'the key is stored locally in the 0600 store — never shown to a browser or logged')
+    )
+    return section
+  }
+
+  // ===== agents ===== (buildAgentsSection, exported above — WS-E
+  // onboarding mounts it on its own surface; here it is an async group)
+
+  // ===== security =====
 
   // ---------- security ----------
-  const security = el('section', 'prefs-section')
-  security.append(el('h4', '', 'Security'))
-  toggleRow(
-    security,
-    'Spawn agents contained',
-    null,
-    () => prefs.egressDefault,
-    (v) => {
-      prefs.egressDefault = v
-      tome.store.set('egress-default', v)
-    }
-  )
-  toggleRow(
-    security,
-    'Assistant may run commands',
-    null,
-    () => prefs.conductorRun,
-    (v) => {
-      prefs.conductorRun = v
-      tome.store.set('conductor-run', v)
-      tome.conductor.allowRun(v)
-    }
-  )
-  toggleRow(
-    security,
-    'Allow sandboxed Docker',
-    'a filtered gateway, never the real daemon socket — default off',
-    () => prefs.dockerGateway,
-    (v) => {
-      prefs.dockerGateway = v
-      tome.store.set('docker-gateway', v)
-    }
-  )
-  const enroll = el('button', 'ag-btn ghost', 'Enroll authenticator (2FA)…')
-  enroll.type = 'button'
-  enroll.addEventListener('click', () => {
-    m.close()
-    totpModal()
-  })
-  row(security, 'Two-factor authentication', enroll, 'required to open a contained pane')
-  m.body.appendChild(security)
+  const buildSecurity = () => {
+    const section = el('section', 'prefs-section')
+    section.append(el('h4', '', 'Security'))
+    toggleRow(
+      section,
+      'Spawn agents contained',
+      null,
+      () => prefs.egressDefault,
+      (v) => {
+        prefs.egressDefault = v
+        tome.store.set('egress-default', v)
+      }
+    )
+    toggleRow(
+      section,
+      'Assistant may run commands',
+      null,
+      () => prefs.conductorRun,
+      (v) => {
+        prefs.conductorRun = v
+        tome.store.set('conductor-run', v)
+        tome.conductor.allowRun(v)
+      }
+    )
+    toggleRow(
+      section,
+      'Allow sandboxed Docker',
+      'a filtered gateway, never the real daemon socket — default off',
+      () => prefs.dockerGateway,
+      (v) => {
+        prefs.dockerGateway = v
+        tome.store.set('docker-gateway', v)
+      }
+    )
+    const enroll = el('button', 'ag-btn ghost', 'Enroll authenticator (2FA)…')
+    enroll.type = 'button'
+    enroll.addEventListener('click', () => {
+      // One overlay at a time: totpModal takes Settings' place, and the
+      // stash + watchNestedOverlay reopen it at this group afterwards.
+      pendingReopen = 'security'
+      m.close()
+      totpModal()
+    })
+    row(section, 'Two-factor authentication', enroll, 'required to open a contained pane')
+    return section
+  }
 
-  // ---------- export destinations ----------
-  m.body.appendChild(await buildExportSection(m.close))
+  // ===== integrations ===== (export / schedules / remote — the three
+  // module-level builders above, in that group's slot order)
 
-  // ---------- schedules ----------
-  m.body.appendChild(await buildSchedulesSection())
-
-  // ---------- remote sources ----------
-  m.body.appendChild(await buildRemoteSourcesSection(m.close))
+  // ===== voice =====
 
   // ---------- voice ----------
   // Whisper availability + the launch warm-up opt-in the onboarding wizard's
@@ -927,217 +1303,215 @@ export async function preferencesModal() {
   // below resolves to Apple's on-device recognizer or whisper.cpp through
   // the same resolution, so the hint can never claim an engine the probe
   // didn't pick.
-  const voice = el('section', 'prefs-section')
-  voice.append(el('h4', '', 'Voice'))
-  const sttStatus = el('div', 'prefs-hint', 'Checking local speech…')
-  // Task 5: one-click model download, shown only when whisper is the resolved
-  // engine and the model (not the binary) is what's missing — the binary
-  // still needs `brew install whisper-cpp` first, which no in-app button can
-  // do for the user.
-  const downloadBtn = el('button', 'ag-btn ghost', 'Download speech model')
-  downloadBtn.type = 'button'
-  downloadBtn.hidden = true
-  const statusRow = el('div', 'prefs-inline')
-  statusRow.append(sttStatus, downloadBtn)
-  voice.appendChild(statusRow)
-  const paintStatus = (s) => {
-    if (s.engine === 'apple') {
-      sttStatus.textContent = s.ready ? 'Apple on-device dictation — ready.' : s.why
-      downloadBtn.hidden = true
-    } else if (s.ready) {
-      sttStatus.textContent = 'Local whisper transcription is ready.'
-      downloadBtn.hidden = true
-    } else if (!s.bin) {
-      sttStatus.textContent = 'whisper-cli not found — install it (brew install whisper-cpp) and restart.'
-      downloadBtn.hidden = true
-    } else {
-      sttStatus.textContent = 'Speech model not downloaded.'
-      downloadBtn.hidden = false
-    }
-  }
-  downloadBtn.addEventListener('click', async () => {
-    downloadBtn.disabled = true
-    downloadBtn.textContent = 'Downloading…'
-    try {
-      const res = await tome.stt.downloadModel()
-      if (res?.error) {
-        sttStatus.textContent = res.error
+  const buildVoice = async () => {
+    const section = el('section', 'prefs-section')
+    section.append(el('h4', '', 'Voice'))
+    const sttStatus = el('div', 'prefs-hint', 'Checking local speech…')
+    // Task 5: one-click model download, shown only when whisper is the resolved
+    // engine and the model (not the binary) is what's missing — the binary
+    // still needs `brew install whisper-cpp` first, which no in-app button can
+    // do for the user.
+    const downloadBtn = el('button', 'ag-btn ghost', 'Download speech model')
+    downloadBtn.type = 'button'
+    downloadBtn.hidden = true
+    const statusRow = el('div', 'prefs-inline')
+    statusRow.append(sttStatus, downloadBtn)
+    section.appendChild(statusRow)
+    const paintStatus = (s) => {
+      if (s.engine === 'apple') {
+        sttStatus.textContent = s.ready ? 'Apple on-device dictation — ready.' : s.why
+        downloadBtn.hidden = true
+      } else if (s.ready) {
+        sttStatus.textContent = 'Local whisper transcription is ready.'
+        downloadBtn.hidden = true
+      } else if (!s.bin) {
+        sttStatus.textContent = 'whisper-cli not found — install it (brew install whisper-cpp) and restart.'
+        downloadBtn.hidden = true
       } else {
-        sttStatus.textContent = 'Speech model downloaded.'
-        const s = await tome.stt.status().catch(() => null)
-        if (s) paintStatus(s)
+        sttStatus.textContent = 'Speech model not downloaded.'
+        downloadBtn.hidden = false
       }
-    } catch (err) {
-      sttStatus.textContent = err?.message || 'Download failed.'
-    } finally {
-      downloadBtn.disabled = false
-      downloadBtn.textContent = 'Download speech model'
     }
-  })
-  tome.stt
-    .status()
-    .then(paintStatus)
-    .catch(() => (sttStatus.textContent = 'Whisper status unavailable.'))
+    downloadBtn.addEventListener('click', async () => {
+      downloadBtn.disabled = true
+      downloadBtn.textContent = 'Downloading…'
+      try {
+        const res = await tome.stt.downloadModel()
+        if (res?.error) {
+          sttStatus.textContent = res.error
+        } else {
+          sttStatus.textContent = 'Speech model downloaded.'
+          const s = await tome.stt.status().catch(() => null)
+          if (s) paintStatus(s)
+        }
+      } catch (err) {
+        sttStatus.textContent = err?.message || 'Download failed.'
+      } finally {
+        downloadBtn.disabled = false
+        downloadBtn.textContent = 'Download speech model'
+      }
+    })
+    // Both probes in flight at once — the section lands as one piece.
+    const [warmup, engineInfo, sttReady] = await Promise.all([
+      tome.store.get('voice-warmup').catch(() => null),
+      tome.stt.engine().catch(() => null),
+      tome.stt.status().catch(() => null),
+    ])
+    let voiceWarmup = !!warmup
+    if (sttReady) paintStatus(sttReady)
+    else sttStatus.textContent = 'Whisper status unavailable.'
 
-  const engineSelect = el('select')
-  for (const [value, label] of [
-    ['auto', 'Auto'],
-    ['apple', 'Apple on-device'],
-    ['whisper', 'whisper.cpp'],
-  ]) {
-    const opt = el('option', null, label)
-    opt.value = value
-    engineSelect.appendChild(opt)
-  }
-  // Restore the select from stt:engine's normalized `preference` field, not
-  // the raw store key — a never-set/cleared key normalizes to "auto" on both
-  // sides, so this never has to guess what a missing key means.
-  const engineInfo = await tome.stt.engine().catch(() => null)
-  engineSelect.value = engineInfo?.preference || 'auto'
-  engineSelect.addEventListener('change', () => {
-    tome.store.set('stt-engine', engineSelect.value)
-    tome.stt
-      .status()
-      .then(paintStatus)
-      .catch(() => (sttStatus.textContent = 'Whisper status unavailable.'))
-  })
-  row(
-    voice,
-    'Speech engine',
-    engineSelect,
-    'Apple uses on-device dictation; whisper.cpp needs the local CLI and model'
-  )
-  toggleRow(
-    voice,
-    'Warm up whisper at launch',
-    'loads the speech model in the background so the first dictation is instant',
-    () => voiceWarmup,
-    (v) => {
-      voiceWarmup = v
-      tome.store.set('voice-warmup', v)
+    const engineSelect = el('select')
+    for (const [value, label] of [
+      ['auto', 'Auto'],
+      ['apple', 'Apple on-device'],
+      ['whisper', 'whisper.cpp'],
+    ]) {
+      const opt = el('option', null, label)
+      opt.value = value
+      engineSelect.appendChild(opt)
     }
-  )
-  m.body.appendChild(voice)
-
-  // ---------- agents ----------
-  m.body.appendChild(await buildAgentsSection())
-
-  // ---------- sidebar ----------
-  const sidebar = el('section', 'prefs-section')
-  sidebar.append(el('h4', '', 'Sidebar'))
-  const tree = document.getElementById('tree')
-  const reset = el('button', 'ag-btn ghost', 'Reset width')
-  reset.type = 'button'
-  const width = el('span', 'prefs-value')
-  const paintWidth = () => {
-    // Read on demand (click + open), not during render — a layout read in
-    // the build path forces sync reflow of the whole app under the modal.
-    const current = Math.round(tree.getBoundingClientRect().width) || SIDEBAR_DEFAULT
-    width.textContent = `${current} px`
+    // Restore the select from stt:engine's normalized `preference` field, not
+    // the raw store key — a never-set/cleared key normalizes to "auto" on both
+    // sides, so this never has to guess what a missing key means.
+    engineSelect.value = engineInfo?.preference || 'auto'
+    engineSelect.addEventListener('change', () => {
+      tome.store.set('stt-engine', engineSelect.value)
+      tome.stt
+        .status()
+        .then(paintStatus)
+        .catch(() => (sttStatus.textContent = 'Whisper status unavailable.'))
+    })
+    row(
+      section,
+      'Speech engine',
+      engineSelect,
+      'Apple uses on-device dictation; whisper.cpp needs the local CLI and model'
+    )
+    toggleRow(
+      section,
+      'Warm up whisper at launch',
+      'loads the speech model in the background so the first dictation is instant',
+      () => voiceWarmup,
+      (v) => {
+        voiceWarmup = v
+        tome.store.set('voice-warmup', v)
+      }
+    )
+    return section
   }
-  reset.addEventListener('click', () => {
-    tree.style.width = ''
-    tome.store.set('sidebar-width', null) // no store:delete — null reads as unset
-    paintWidth()
-    toast('Sidebar width reset', 'ok')
-  })
-  const widthBox = el('div', 'prefs-inline')
-  widthBox.append(width, reset)
-  row(sidebar, 'Width', widthBox, `drag the divider · default ${SIDEBAR_DEFAULT} px`)
-  paintWidth()
-  m.body.appendChild(sidebar)
+
+  // ===== mentor =====
 
   // ---------- mentor ----------
-  const mentor = el('section', 'prefs-section')
-  mentor.append(el('h4', '', 'Mentor'))
-  toggleRow(
-    mentor,
-    'Verbose guide (default)',
-    'new workspaces teach rather than just do',
-    () => mentorState.verboseDefault,
-    (v) => saveMentorSettings({ verboseDefault: v })
-  )
-  toggleRow(
-    mentor,
-    'Test before implementing',
-    'the mentor writes a failing test and checks understanding first',
-    () => mentorState.gate,
-    (v) => saveMentorSettings({ gate: v })
-  )
-  toggleRow(
-    mentor,
-    'Gate before commit',
-    null,
-    () => mentorState.gatePoints.commit,
-    (v) => saveMentorSettings({ gatePoints: { ...mentorState.gatePoints, commit: v } })
-  )
-  toggleRow(
-    mentor,
-    'Gate before push',
-    null,
-    () => mentorState.gatePoints.push,
-    (v) => saveMentorSettings({ gatePoints: { ...mentorState.gatePoints, push: v } })
-  )
-  const thrInput = el('input', 'prefs-input')
-  thrInput.type = 'number'
-  thrInput.min = '0'
-  thrInput.max = '100'
-  thrInput.value = String(mentorState.threshold)
-  thrInput.addEventListener('change', () => {
-    const n = Math.max(0, Math.min(100, Number(thrInput.value) || 0))
-    saveMentorSettings({ threshold: n })
-    thrInput.value = String(n)
-  })
-  row(mentor, 'Pass threshold', thrInput, 'understanding score needed to pass a gate · 0–100')
-  const mix = el('div', 'prefs-mix')
-  const MIX = [
-    ['multiple_choice', 'Multiple choice'],
-    ['true_false', 'True / false'],
-    ['short_answer', 'Short answer'],
-    ['code', 'Code'],
-  ]
-  for (const [key, label] of MIX) {
-    const item = el('span', 'prefs-mix-item')
-    const sw = el('button', 'prefs-switch')
-    sw.type = 'button'
-    sw.setAttribute('role', 'switch')
-    sw.append(el('span', 'prefs-knob'))
-    const paint = () => {
-      const on = mentorState.questionTypes.includes(key)
-      sw.classList.toggle('on', on)
-      sw.setAttribute('aria-checked', String(on))
-    }
-    sw.addEventListener('click', () => {
-      const next = mentorState.questionTypes.includes(key)
-        ? mentorState.questionTypes.filter((t) => t !== key)
-        : [...mentorState.questionTypes, key]
-      saveMentorSettings({ questionTypes: next })
-      paint()
+  const buildMentor = () => {
+    const section = el('section', 'prefs-section')
+    section.append(el('h4', '', 'Mentor'))
+    toggleRow(
+      section,
+      'Verbose guide (default)',
+      'new workspaces teach rather than just do',
+      () => mentorState.verboseDefault,
+      (v) => saveMentorSettings({ verboseDefault: v })
+    )
+    toggleRow(
+      section,
+      'Test before implementing',
+      'the mentor writes a failing test and checks understanding first',
+      () => mentorState.gate,
+      (v) => saveMentorSettings({ gate: v })
+    )
+    toggleRow(
+      section,
+      'Gate before commit',
+      null,
+      () => mentorState.gatePoints.commit,
+      (v) => saveMentorSettings({ gatePoints: { ...mentorState.gatePoints, commit: v } })
+    )
+    toggleRow(
+      section,
+      'Gate before push',
+      null,
+      () => mentorState.gatePoints.push,
+      (v) => saveMentorSettings({ gatePoints: { ...mentorState.gatePoints, push: v } })
+    )
+    const thrInput = el('input', 'prefs-input')
+    thrInput.type = 'number'
+    thrInput.min = '0'
+    thrInput.max = '100'
+    thrInput.value = String(mentorState.threshold)
+    thrInput.addEventListener('change', () => {
+      const n = Math.max(0, Math.min(100, Number(thrInput.value) || 0))
+      saveMentorSettings({ threshold: n })
+      thrInput.value = String(n)
     })
-    item.append(el('span', 'prefs-mix-label', label), sw)
-    mix.appendChild(item)
-    paint()
+    row(section, 'Pass threshold', thrInput, 'understanding score needed to pass a gate · 0–100')
+    const mix = el('div', 'prefs-mix')
+    const MIX = [
+      ['multiple_choice', 'Multiple choice'],
+      ['true_false', 'True / false'],
+      ['short_answer', 'Short answer'],
+      ['code', 'Code'],
+    ]
+    for (const [key, label] of MIX) {
+      const item = el('span', 'prefs-mix-item')
+      const sw = el('button', 'prefs-switch')
+      sw.type = 'button'
+      sw.setAttribute('role', 'switch')
+      sw.append(el('span', 'prefs-knob'))
+      const paint = () => {
+        const on = mentorState.questionTypes.includes(key)
+        sw.classList.toggle('on', on)
+        sw.setAttribute('aria-checked', String(on))
+      }
+      sw.addEventListener('click', () => {
+        const next = mentorState.questionTypes.includes(key)
+          ? mentorState.questionTypes.filter((t) => t !== key)
+          : [...mentorState.questionTypes, key]
+        saveMentorSettings({ questionTypes: next })
+        paint()
+      })
+      item.append(el('span', 'prefs-mix-label', label), sw)
+      mix.appendChild(item)
+      paint()
+    }
+    row(section, 'Question mix', mix, 'which kinds of question the gate may ask')
+    const resetUq = el('button', 'ag-btn ghost', 'Reset understanding score')
+    resetUq.type = 'button'
+    resetUq.addEventListener('click', () => {
+      if (!activeWorkspace()) return toast('no active workspace to reset')
+      setUq(0)
+      toast('understanding score reset', 'ok')
+    })
+    row(section, 'Understanding score', resetUq, `per workspace · currently ${uq()}`)
+    return section
   }
-  row(mentor, 'Question mix', mix, 'which kinds of question the gate may ask')
-  const resetUq = el('button', 'ag-btn ghost', 'Reset understanding score')
-  resetUq.type = 'button'
-  resetUq.addEventListener('click', () => {
-    if (!activeWorkspace()) return toast('no active workspace to reset')
-    setUq(0)
-    toast('understanding score reset', 'ok')
-  })
-  row(mentor, 'Understanding score', resetUq, `per workspace · currently ${uq()}`)
-  m.body.appendChild(mentor)
 
-  // ---------- onboarding ----------
-  const onboarding = el('section', 'prefs-section')
-  onboarding.append(el('h4', '', 'Onboarding'))
-  const replay = el('button', 'ag-btn ghost', 'Replay setup wizard…')
-  replay.type = 'button'
-  replay.addEventListener('click', () => {
-    m.close()
-    showOnboarding()
-  })
-  row(onboarding, 'Setup wizard', replay, 'the first-run tour — agents, assistant, voice, security')
-  m.body.appendChild(onboarding)
+  // ---------- mount, in group order ----------
+  // general → assistant → agents → security → integrations → voice → mentor
+  mount(buildAppearance(), 'appearance')
+  mount(buildTerminal(), 'terminal')
+  mount(buildEditor(), 'editor')
+  mount(buildSidebar(), 'sidebar')
+  startAsync('assistant', 'Assistant', buildAssistant)
+  startAsync('custom-provider', 'Custom provider', buildCustomProvider)
+  startAsync('agents', 'Agents', () => buildAgentsSection())
+  mount(buildSecurity(), 'security')
+  startAsync('export', 'Export destinations', () => buildExportSection(closeReopeningAt('integrations')))
+  startAsync('schedules', 'Schedules', () => buildSchedulesSection())
+  startAsync('remote', 'Remote sources', () => buildRemoteSourcesSection(closeReopeningAt('integrations')))
+  startAsync('voice', 'Voice', buildVoice)
+  mount(buildMentor(), 'mentor')
+
+  applyFilter('') // index the sync sections, set the rail's initial state
+  if (deepTarget)
+    setTimeout(() => {
+      // One tick after paint: placeholders already hold every slot, so the
+      // scroll lands even when the target's own content is still loading.
+      const t = pane.querySelector(`[data-section="${deepTarget}"]`)
+      if (t && pane.isConnected) {
+        t.scrollIntoView({ block: 'start' })
+        flash(t)
+      }
+    }, 0)
 }
