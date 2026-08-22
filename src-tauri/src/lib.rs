@@ -362,6 +362,45 @@ pub fn run() {
             migrate::run(app.handle());
             boot_auth_and_egress(app.handle());
             spawn_schedule_ticker(app.handle());
+            // Chat provider migration (chat::migrate — NOT the Electron
+            // copier above): folds legacy chat-provider/chat-model/custom-
+            // provider/TOME_CHAT_* state into the registry overlay + vault,
+            // once ("migrated": 1 marker). Async because the GLM China-
+            // platform rule needs login_env()'s harvested secrets. Runs
+            // after boot_auth_and_egress; the vault snapshot that call
+            // loaded is refreshed here when keys moved (a migrated custom
+            // key must be visible to resolution immediately).
+            {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let Ok(dir) = app_handle.path().app_data_dir() else {
+                        return;
+                    };
+                    let login = login_env::login_env().await;
+                    let env: std::collections::HashMap<String, String> =
+                        std::env::vars().collect();
+                    let dir_for_job = dir.clone();
+                    let secrets = login.secrets.clone();
+                    let report = tokio::task::spawn_blocking(move || {
+                        let vault = crate::chat::vault::Vault::new(&dir_for_job);
+                        crate::chat::migrate::run(&dir_for_job, &secrets, &env, &vault)
+                    })
+                    .await
+                    .unwrap_or_default();
+                    if report.moved_keys {
+                        let state = app_handle.state::<AppState>();
+                        let vault = crate::chat::vault::Vault::new(&dir);
+                        let (keys, kind) = vault.load();
+                        *state
+                            .chat_keys
+                            .write()
+                            .expect("AppState.chat_keys lock poisoned") = (keys, kind);
+                    }
+                    if report.requesty_notice {
+                        let _ = app_handle.emit("chat:requesty-notice", ());
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -463,6 +502,7 @@ pub fn run() {
             ipc::chat::chat_key_set,
             ipc::chat::chat_provider_set,
             ipc::chat::chat_provider_delete,
+            ipc::chat::chat_provider_add,
             // mentor
             ipc::mentor::mentor_answer,
             ipc::mentor::mentor_judge,

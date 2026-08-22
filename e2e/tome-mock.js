@@ -181,14 +181,19 @@
     chat: {
       send: asyncNoop,
       abort: noop,
-      // Real shape is { providers: [...], active: id } — the Preferences
-      // assistant section iterates `chatInfo.providers`, so an empty array
-      // (not a bare []) keeps it from throwing.
-      providers: async () => ({ providers: [], active: null }),
+      // Real shape is { providers: [...], active: id, effective, reason } —
+      // the Preferences assistant section iterates `chatInfo.providers`, so
+      // an empty array (not a bare []) keeps it from throwing.
+      providers: async () => ({ providers: [], active: null, effective: null, reason: null }),
       complete: async () => '',
+      keySet: asyncNoop,
+      providerSet: asyncNoop,
+      providerDelete: asyncNoop,
+      providerAdd: async () => ({ id: 'mock-provider' }),
       onDelta: on,
       onDone: on,
       onTool: on,
+      onRequestyNotice: on,
     },
 
     brain: {

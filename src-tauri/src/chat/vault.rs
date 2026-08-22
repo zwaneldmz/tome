@@ -50,8 +50,10 @@ const FILE_NAME: &str = "chat-secrets.json";
 
 /// The one side effect this module knows how to perform: read or write
 /// the single keychain blob. Kept a trait (not inline calls) purely as
-/// the test seam — see the module doc comment.
-trait SecretIo: Send + Sync {
+/// the test seam — see the module doc comment. `pub(crate)` so
+/// `chat::migrate`'s tests can inject the same fake (both run under
+/// `cargo test`, where the real keychain must never be touched).
+pub(crate) trait SecretIo: Send + Sync {
     fn get(&self) -> Option<String>;
     fn set(&self, secret: &str) -> bool;
 }
@@ -103,9 +105,10 @@ impl Vault {
 
     /// Test-only seam: like [`Self::new`], but with an injected
     /// [`SecretIo`] instead of the real OS keychain. Not `pub` — nothing
-    /// outside this module's own tests should construct a `Vault` with a
-    /// fake (same discipline as `authlock.rs`'s `load_with_protector`).
-    fn with_io(dir: impl AsRef<Path>, io: Box<dyn SecretIo>) -> Self {
+    /// outside this module's own tests and `chat::migrate`'s tests should
+    /// construct a `Vault` with a fake (same discipline as `authlock.rs`'s
+    /// `load_with_protector`).
+    pub(crate) fn with_io(dir: impl AsRef<Path>, io: Box<dyn SecretIo>) -> Self {
         Vault {
             dir: dir.as_ref().to_path_buf(),
             io,

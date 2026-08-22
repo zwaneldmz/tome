@@ -854,11 +854,27 @@ pub async fn pty_create(
 
     let login = login_env::login_env().await;
     let process_env: HashMap<String, String> = std::env::vars().collect();
-    let secrets = if is_agent {
+    let mut secrets = if is_agent {
         login.secrets.clone()
     } else {
         HashMap::new()
     };
+    // Kind-matched chat-key injection (plan Q1, delta 1): a pasted vault
+    // key reaches only the agent pane whose CLI consumes it — the claude
+    // CLI reads ANTHROPIC_API_KEY. Blanket injection (every pasted key in
+    // every agent pane) was rejected: one pane should see at most the one
+    // key its own CLI uses, and terminal panes none. Shell-sourced keys
+    // already flow through login.secrets above; this adds the vault rung.
+    if is_agent {
+        let vault_keys = &state
+            .chat_keys
+            .read()
+            .expect("AppState.chat_keys lock poisoned")
+            .0;
+        if let Some((env_name, key)) = chat_key_injection(&opts.kind, vault_keys) {
+            secrets.insert(env_name, key);
+        }
+    }
     // `if (ws) { env.TOME_BRAIN = await brain.ensureBrain(ws); ... }` —
     // unconditional on is_agent/gapped, matching buildAgentEnv's own order
     // (see PtyCreateOpts's doc comment on `ws`).
@@ -1033,6 +1049,27 @@ fn resolve_core_vault_root(core_vault_store_value: Option<&str>) -> Option<Strin
     brain::core_info(core_vault_store_value)
         .configured_root()
         .map(str::to_string)
+}
+
+/// Agent kind → (provider row id, env name the pane's CLI reads). The
+/// extensibility point for kind-matched chat-key injection (plan Q1,
+/// delta 1): widening later is a reviewed one-line array edit, not a
+/// policy rewrite. `opencode`/`pi` are deliberately absent — they carry
+/// their own auth/config systems, and silently injecting foreign keys
+/// into them was exactly the blast radius the blanket default had.
+const AGENT_PROVIDER_KEYS: &[(&str, &str, &str)] = &[("claude", "claude", "ANTHROPIC_API_KEY")];
+
+/// The pure half of kind-matched chat-key injection: given an agent kind
+/// and the vault snapshot, the `(env_name, key)` pair the pane's env
+/// gains — at most one, only for a kind with a mapping, and never an
+/// empty/whitespace key (empty is falsy at every vault rung).
+fn chat_key_injection(
+    kind: &str,
+    chat_keys: &HashMap<String, String>,
+) -> Option<(String, String)> {
+    let (_, provider_id, env_name) = AGENT_PROVIDER_KEYS.iter().find(|(k, _, _)| *k == kind)?;
+    let key = chat_keys.get(*provider_id)?.clone();
+    (!key.trim().is_empty()).then(|| ((*env_name).to_string(), key))
 }
 
 /// Resolves `TOME_BRAIN`/`TOME_CORE_VAULT` for a workspace-scoped pane —
@@ -1254,6 +1291,45 @@ mod tests {
             env.iter().all(|(k, _)| k != "ANTHROPIC_API_KEY"),
             "pane_env with is_agent:false must never carry a provider credential"
         );
+    }
+
+    // ================= chat_key_injection — kind-matched vault keys
+    // (plan Q1, delta 1) =================
+
+    #[test]
+    fn chat_key_injection_gives_a_claude_pane_the_pasted_anthropic_key() {
+        let mut chat_keys = HashMap::new();
+        chat_keys.insert("claude".to_string(), "sk-ant-pasted".to_string());
+        assert_eq!(
+            chat_key_injection("claude", &chat_keys),
+            Some(("ANTHROPIC_API_KEY".to_string(), "sk-ant-pasted".to_string()))
+        );
+    }
+
+    #[test]
+    fn chat_key_injection_never_reaches_other_kinds_or_terminals() {
+        let mut chat_keys = HashMap::new();
+        chat_keys.insert("claude".to_string(), "sk-ant".to_string());
+        chat_keys.insert("glm".to_string(), "z-key".to_string());
+        // opencode and pi have no mapping — they carry their own auth;
+        // the glm key must never leak into any pane.
+        assert_eq!(chat_key_injection("opencode", &chat_keys), None);
+        assert_eq!(chat_key_injection("pi", &chat_keys), None);
+        assert_eq!(chat_key_injection("terminal", &chat_keys), None);
+        // and a claude pane sees ONLY the claude key — never glm's.
+        assert_eq!(
+            chat_key_injection("claude", &chat_keys),
+            Some(("ANTHROPIC_API_KEY".to_string(), "sk-ant".to_string()))
+        );
+    }
+
+    #[test]
+    fn chat_key_injection_treats_a_missing_or_blank_vault_key_as_no_injection() {
+        let empty = HashMap::new();
+        assert_eq!(chat_key_injection("claude", &empty), None);
+        let mut blank = HashMap::new();
+        blank.insert("claude".to_string(), "   ".to_string());
+        assert_eq!(chat_key_injection("claude", &blank), None);
     }
 
     #[test]

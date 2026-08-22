@@ -579,21 +579,6 @@ function row(parent, label, ctrl, hint) {
   return r
 }
 
-// Single-line text input that persists a store key on change; clearing the
-// field writes null (no store:delete — null reads as unset).
-function textRow(parent, label, hint, key, initial) {
-  const input = el('input', 'prefs-input')
-  input.type = 'text'
-  input.spellcheck = false
-  input.value = initial || ''
-  input.addEventListener('change', () => {
-    const v = input.value.trim()
-    tome.store.set(key, v || null)
-  })
-  row(parent, label, input, hint)
-  return input
-}
-
 // Switch-style toggle: a button with role=switch whose .on state mirrors the
 // menu item's .active state. Reads/writes the exact store keys and prefs
 // mutations from menus.js populateAddMenu.
@@ -1094,147 +1079,342 @@ export async function preferencesModal({ section } = {}) {
   // ===== assistant =====
 
   // ---------- assistant ----------
-  // Provider choice + model override for the assistant pane. Keys are NOT
-  // stored: they come from the login shell (main's ensureLoginEnv), so this
-  // section only shows whether each key was found — never the key itself.
-  // Async: chat:providers awaits a login-shell spawn in main, so the
-  // section fills in whenever that probe returns.
+  // Provider cards (plan §4.8): every merged row is a card with a
+  // write-only key field, per-row model/region selects, hide/delete, and
+  // the REAL resolution in the banner — so a UI-vs-backend divergence is
+  // impossible to hide (the old UI computed "active" from the store and
+  // never ran resolution, so a stray env key could route bytes to a
+  // different host than the radio showed). "+ Add provider" is an inline
+  // accordion, never a nested modal — modalShell keeps one overlay at a
+  // time.
+  const ORIGIN_TEXT = {
+    keychain: () => 'keychain',
+    file: () => 'local store',
+    shell: (n) => `shell: ${n}`,
+    env: (n) => `env: ${n}`,
+  }
+  const originText = (o) => (o ? ORIGIN_TEXT[o.kind]?.(o.name) : 'no key')
+
+  // Migration rule 6: main emits chat:requesty-notice exactly once, at
+  // first boot after upgrade, when REQUESTY_API_KEY is present. The offer
+  // rides on the Assistant group — when Settings opens (whenever that
+  // is), the pre-filled add-form appears once. Nothing is auto-added.
+  let requestyOffer = false
+  tome.chat.onRequestyNotice?.(() => {
+    requestyOffer = true
+  })
+
   const buildAssistant = async () => {
     const section = el('section', 'prefs-section')
     section.append(el('h4', '', 'Assistant'))
-    const chatInfo = await tome.chat.providers().catch(() => null)
-    if (chatInfo) {
-      const pseg = el('div', 'prefs-seg')
-      pseg.setAttribute('role', 'radiogroup')
-      pseg.setAttribute('aria-label', 'Assistant provider')
-      const modelRow = { input: null } // filled below; provider switch repopulates it
-      for (const p of chatInfo.providers) {
-        // ● key found in the login shell · ○ missing — set it and restart
-        const b = el('button', '', `${p.keySet ? '●' : '○'} ${p.label}`)
-        b.type = 'button'
-        b.setAttribute('role', 'radio')
-        b.title = p.keyEnv
-          ? p.keySet
-            ? `${p.keyEnv} found in your login shell`
-            : `${p.keyEnv} not found in your login shell`
-          : p.keySet
-            ? 'custom provider configured in Settings'
-            : 'custom provider not configured — set it below'
-        b.setAttribute('aria-checked', String(chatInfo.active === p.id))
-        b.classList.toggle('on', chatInfo.active === p.id)
-        b.addEventListener('click', () => {
-          tome.store.set('chat-provider', p.id)
-          for (const s of pseg.children) {
-            const on = s === b
-            s.classList.toggle('on', on)
-            s.setAttribute('aria-checked', String(on))
-          }
-          // Repopulate the model field with the newly picked provider's
-          // default; the stored override only makes sense per provider.
-          if (modelRow.input) {
-            modelRow.input.value = p.model
-            tome.store.set('chat-model', null)
+    const banner = el('div', 'prefs-hint')
+    const list = el('div', 'prefs-providers')
+    section.append(banner, list)
+
+    // ---------- the cards ----------
+    const providerCard = (p, refresh) => {
+      const card = el('div', 'prov-card' + (p.active ? ' on' : ''))
+      card.setAttribute('role', 'group')
+      card.setAttribute('aria-label', `${p.label} provider`)
+
+      const head = el('div', 'prov-line')
+      const use = el('button', 'ag-btn' + (p.active ? '' : ' ghost'), `${p.keyOrigin ? '●' : '○'} ${p.label}`)
+      use.type = 'button'
+      use.setAttribute('aria-pressed', String(p.active))
+      use.addEventListener('click', async () => {
+        await tome.store.set('chat-provider', p.id)
+        refresh()
+      })
+
+      // Write-only key field (Cursor's contract): the key travels on its
+      // own inbound command, clears after save, and is never re-read.
+      const keyIn = el('input', 'prefs-input prov-key')
+      keyIn.type = 'password'
+      keyIn.placeholder = p.keyOrigin ? `•••••••• ${originText(p.keyOrigin)}` : 'paste API key'
+      keyIn.setAttribute('aria-label', `${p.label} API key`)
+      const saveKey = el('button', 'ag-btn ghost', 'Save key')
+      saveKey.type = 'button'
+      saveKey.addEventListener('click', async () => {
+        try {
+          await tome.chat.keySet(p.id, keyIn.value.trim())
+          keyIn.value = ''
+          toast(`${p.label} key ${p.keyOrigin ? 'updated' : 'saved'}`, 'ok')
+          refresh()
+        } catch (err) {
+          toast(err.message)
+        }
+      })
+      head.append(use, keyIn, saveKey)
+      if (p.keyOrigin && (p.keyOrigin.kind === 'keychain' || p.keyOrigin.kind === 'file')) {
+        const removeKey = el('button', 'ag-btn ghost', 'Remove key')
+        removeKey.type = 'button'
+        removeKey.addEventListener('click', async () => {
+          try {
+            await tome.chat.keySet(p.id, '') // empty removes the vault slot
+            refresh()
+          } catch (err) {
+            toast(err.message)
           }
         })
-        pseg.appendChild(b)
+        head.appendChild(removeKey)
       }
-      row(section, 'Provider', pseg, '● key found in your login shell · ○ missing')
-      const activeEntry = chatInfo.providers.find((p) => p.id === chatInfo.active)
-      const storedModel = await tome.store.get('chat-model')
-      modelRow.input = textRow(
-        section,
-        'Model',
-        'blank = provider default',
-        'chat-model',
-        typeof storedModel === 'string' && storedModel ? storedModel : activeEntry?.model
-      )
-      const keysHint = el(
-        'div',
-        'prefs-hint',
-        'keys come from your login shell — set MOONSHOT_API_KEY / ZHIPU_API_KEY / ANTHROPIC_API_KEY / DEEPSEEK_API_KEY and restart'
-      )
-      section.appendChild(keysHint)
-    } else {
-      section.appendChild(el('div', 'prefs-hint', 'Provider list unavailable.'))
-    }
-    return section
-  }
+      card.appendChild(head)
 
-  // ---------- custom provider ("any provider") ----------
-  // An OpenAI- or Anthropic-compatible endpoint the user supplies. Unlike the
-  // built-ins (whose key comes from a login-shell env var), the key is stored
-  // in the 0600 JSON store so it can be pasted here — it never reaches the
-  // browser layer beyond this form.
-  const buildCustomProvider = async () => {
-    const section = el('section', 'prefs-section')
-    section.append(el('h4', '', 'Custom provider'))
-    const custom = (await tome.store.get('custom-provider')) || {}
-    const cpInput = (key, placeholder, type = 'text') => {
-      const i = el('input', 'prefs-input')
+      const controls = el('div', 'prov-line prov-sub')
+      // Model is PER ROW now: the old global chat-model scalar carried
+      // the previous provider's model id into the next provider and
+      // 400'd it.
+      const model = el('select', 'prefs-input prov-model')
+      model.setAttribute('aria-label', `${p.label} model`)
+      for (const m of p.models.length ? p.models : [p.model]) {
+        const o = el('option', null, m)
+        o.value = m
+        o.selected = m === p.model
+        model.appendChild(o)
+      }
+      const free = el('option', null, 'Type a model id…')
+      free.value = '__free'
+      model.appendChild(free)
+      model.addEventListener('change', async () => {
+        const v = model.value === '__free' ? (window.prompt('Model id') || '').trim() : model.value
+        if (!v) {
+          refresh()
+          return
+        }
+        try {
+          await tome.chat.providerSet(p.id, { model: v })
+          toast(`${p.label} model → ${v}`, 'ok')
+          refresh()
+        } catch (err) {
+          toast(err.message)
+          refresh()
+        }
+      })
+      controls.appendChild(model)
+
+      if (p.alternates.length) {
+        const region = el('select', 'prefs-input prov-region')
+        region.setAttribute('aria-label', `${p.label} region`)
+        for (const a of p.alternates) {
+          const o = el('option', null, a.label)
+          o.value = a.baseUrl
+          o.selected = a.baseUrl === p.baseUrl
+          region.appendChild(o)
+        }
+        if (!p.alternates.some((a) => a.baseUrl === p.baseUrl)) {
+          const o = el('option', null, p.baseUrl)
+          o.value = p.baseUrl
+          o.selected = true
+          region.appendChild(o)
+        }
+        region.addEventListener('change', async () => {
+          try {
+            await tome.chat.providerSet(p.id, { region: region.value })
+            refresh()
+          } catch (err) {
+            toast(err.message)
+            refresh()
+          }
+        })
+        controls.appendChild(region)
+      }
+      controls.appendChild(el('span', 'prov-host', p.baseUrl))
+      card.appendChild(controls)
+
+      // Notes: consent, egress gap, region accounts, rejection line.
+      const notes = el('div', 'prov-notes')
+      if (p.id === 'claude' && p.keyOrigin) {
+        notes.appendChild(el('span', 'prefs-hint', 'also given to claude agent panes you spawn'))
+      }
+      if (p.agentEgress === 'not-allowlisted') {
+        const jump = el('button', 'prov-link', 'Security → Egress')
+        jump.type = 'button'
+        jump.addEventListener('click', () => scrollToGroup('security'))
+        notes.appendChild(el('span', 'prefs-hint', 'Chat works. Agent panes cannot reach this host — '))
+        notes.lastChild.appendChild(jump)
+      }
+      if (p.alternates.length > 1) {
+        notes.appendChild(
+          el('span', 'prefs-hint', 'regions are separate accounts — switching may need a different key')
+        )
+      }
+      if (p.lastError) {
+        notes.appendChild(el('span', 'prefs-hint prefs-hint-warn', `⛔ ${p.lastError}`))
+      }
+      if (notes.childNodes.length) card.appendChild(notes)
+
+      // Hide (built-ins) / Delete (added rows).
+      const action = el('button', 'ag-btn ghost', p.builtin ? 'Hide' : 'Delete provider')
+      action.type = 'button'
+      action.addEventListener('click', async () => {
+        try {
+          if (p.builtin) {
+            await tome.chat.providerSet(p.id, { hidden: true })
+            toast(`${p.label} hidden`, 'ok')
+          } else {
+            await tome.chat.providerDelete(p.id)
+            toast(`${p.label} removed`, 'ok')
+          }
+          refresh()
+        } catch (err) {
+          toast(err.message)
+        }
+      })
+      card.appendChild(action)
+
+      return card
+    }
+
+    // ---------- + Add provider (inline accordion) ----------
+    const addForm = el('form', 'prefs-agent-form prefs-add-form hidden')
+    const mk = (placeholder, type = 'text') => {
+      const i = el('input')
       i.type = type
       i.placeholder = placeholder
-      i.spellcheck = false
-      i.value = custom[key] || ''
       i.setAttribute('aria-label', placeholder)
+      i.spellcheck = false
       return i
     }
-    const cpLabel = cpInput('label', 'label — e.g. My endpoint')
-    const cpBase = cpInput('baseUrl', 'base URL — e.g. https://api.deepseek.com/v1')
-    const cpModel = cpInput('model', 'model id — e.g. deepseek-v4-pro')
-    const cpKey = cpInput('key', 'API key', 'password')
-    const wireSeg = el('div', 'prefs-seg')
-    wireSeg.setAttribute('role', 'radiogroup')
-    wireSeg.setAttribute('aria-label', 'Custom provider wire')
-    let wire = custom.wire === 'anthropic' ? 'anthropic' : 'openai'
-    const wireOpenai = el('button', '', 'OpenAI')
-    const wireAnth = el('button', '', 'Anthropic')
-    for (const b of [wireOpenai, wireAnth]) {
+    const afLabel = mk('label — e.g. Groq')
+    const afBase = mk('base URL — e.g. https://api.groq.com/openai/v1')
+    const afModel = mk('model id — e.g. llama-4')
+    const afKey = mk('API key', 'password')
+    const afWire = el('div', 'prefs-seg')
+    afWire.setAttribute('role', 'radiogroup')
+    afWire.setAttribute('aria-label', 'Wire')
+    let wireVal = 'openai'
+    for (const [v, name] of [
+      ['openai', 'OpenAI'],
+      ['anthropic', 'Anthropic'],
+    ]) {
+      const b = el('button', '', name)
       b.type = 'button'
       b.setAttribute('role', 'radio')
+      b.addEventListener('click', () => {
+        wireVal = v
+        for (const s of afWire.children) {
+          const on = s === b
+          s.classList.toggle('on', on)
+          s.setAttribute('aria-checked', String(on))
+        }
+      })
+      afWire.appendChild(b)
     }
-    const paintWire = () => {
-      wireOpenai.classList.toggle('on', wire === 'openai')
-      wireAnth.classList.toggle('on', wire === 'anthropic')
-      wireOpenai.setAttribute('aria-checked', String(wire === 'openai'))
-      wireAnth.setAttribute('aria-checked', String(wire === 'anthropic'))
+    const afAuth = el('div', 'prefs-seg')
+    afAuth.setAttribute('role', 'radiogroup')
+    afAuth.setAttribute('aria-label', 'Auth header')
+    let authVal = 'bearer'
+    for (const [v, name] of [
+      ['bearer', 'Bearer'],
+      ['x-api-key', 'x-api-key'],
+    ]) {
+      const b = el('button', '', name)
+      b.type = 'button'
+      b.setAttribute('role', 'radio')
+      b.addEventListener('click', () => {
+        authVal = v
+        for (const s of afAuth.children) {
+          const on = s === b
+          s.classList.toggle('on', on)
+          s.setAttribute('aria-checked', String(on))
+        }
+      })
+      afAuth.appendChild(b)
     }
-    wireOpenai.addEventListener('click', () => {
-      wire = 'openai'
-      paintWire()
+    const afErr = el('div', 'prefs-hint')
+    afErr.style.color = 'var(--danger, #e5534b)'
+    const afAdd = el('button', 'ag-btn ghost', 'Add')
+    afAdd.type = 'submit'
+    const afCancel = el('button', 'ag-btn ghost', 'Cancel')
+    afCancel.type = 'button'
+    afCancel.addEventListener('click', () => {
+      addForm.classList.add('hidden')
+      addBtn.classList.remove('hidden')
     })
-    wireAnth.addEventListener('click', () => {
-      wire = 'anthropic'
-      paintWire()
-    })
-    wireSeg.append(wireOpenai, wireAnth)
-    paintWire()
-    const cpSave = el('button', 'ag-btn ghost', 'Save custom provider')
-    cpSave.type = 'button'
-    cpSave.addEventListener('click', async () => {
-      const value = {
-        label: cpLabel.value.trim(),
-        baseUrl: cpBase.value.trim(),
-        model: cpModel.value.trim(),
-        key: cpKey.value.trim(),
-        wire,
+    addForm.append(afLabel, afBase, afModel, afKey, afWire, afAuth, afErr, afAdd, afCancel)
+
+    const openAddForm = (prefill = {}) => {
+      afLabel.value = prefill.label || ''
+      afBase.value = prefill.baseUrl || ''
+      afModel.value = prefill.model || ''
+      afKey.value = ''
+      wireVal = prefill.wire || 'openai'
+      authVal = prefill.auth || 'bearer'
+      for (const b of afWire.children) {
+        const on = b.textContent.toLowerCase() === wireVal || (wireVal === 'openai' && b.textContent === 'OpenAI')
+        b.classList.toggle('on', on)
+        b.setAttribute('aria-checked', String(on))
       }
-      if (!value.label || !value.baseUrl || !value.model || !value.key) {
-        return toast('fill in label, base URL, model, and key')
+      for (const b of afAuth.children) {
+        const on = b.textContent === authVal
+        b.classList.toggle('on', on)
+        b.setAttribute('aria-checked', String(on))
       }
-      await tome.store.set('custom-provider', value)
-      toast('custom provider saved — select it under Provider', 'ok')
+      afErr.textContent = ''
+      addForm.classList.remove('hidden')
+      addBtn.classList.add('hidden')
+      afLabel.focus()
+    }
+    addForm.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const label = afLabel.value.trim()
+      const baseUrl = afBase.value.trim()
+      const model = afModel.value.trim()
+      const key = afKey.value.trim()
+      afErr.textContent = ''
+      if (!label || !baseUrl || !model || !key) {
+        afErr.textContent = 'label, base URL, model, and key are required'
+        return
+      }
+      try {
+        // Add the row first, then the key — two inbound-only commands.
+        const { id } = await tome.chat.providerAdd(label, baseUrl, model, wireVal, authVal)
+        await tome.chat.keySet(id, key)
+        await tome.store.set('chat-provider', id)
+        addForm.classList.add('hidden')
+        addBtn.classList.remove('hidden')
+        toast(`${label} added — keys are sent only to ${baseUrl}, never through Tome`, 'ok')
+        await refresh()
+      } catch (err) {
+        afErr.textContent = err.message
+      }
     })
-    const cpClear = el('button', 'ag-btn ghost', 'Clear')
-    cpClear.type = 'button'
-    cpClear.addEventListener('click', async () => {
-      await tome.store.set('custom-provider', null)
-      cpLabel.value = cpBase.value = cpModel.value = cpKey.value = ''
-      toast('custom provider cleared', 'ok')
-    })
-    section.append(cpLabel, cpBase, cpModel, cpKey, wireSeg, cpSave, cpClear)
-    section.append(
-      el('div', 'prefs-hint', 'the key is stored locally in the 0600 store — never shown to a browser or logged')
-    )
+
+    const addBtn = el('button', 'ag-btn ghost', '+ Add provider')
+    addBtn.type = 'button'
+    addBtn.addEventListener('click', () => openAddForm())
+    section.append(addBtn, addForm)
+
+    // ---------- render ----------
+    const refresh = async () => {
+      const info = await tome.chat.providers().catch(() => null)
+      if (!info) {
+        banner.textContent = 'Provider list unavailable.'
+        banner.classList.add('prefs-hint-warn')
+        return
+      }
+      if (info.effective) {
+        const e = info.effective
+        banner.textContent = `Next message → ${e.label} · ${e.model} · ${e.host} · key from ${originText(e.keyOrigin)}`
+        banner.classList.remove('prefs-hint-warn')
+      } else {
+        banner.textContent = info.reason || 'No provider chosen — pick one and paste a key.'
+        banner.classList.add('prefs-hint-warn')
+      }
+      list.innerHTML = ''
+      for (const p of info.providers) list.appendChild(providerCard(p, refresh))
+      if (requestyOffer) {
+        requestyOffer = false
+        openAddForm({
+          label: 'Requesty',
+          baseUrl: 'https://router.requesty.ai/v1',
+          wire: 'openai',
+          auth: 'bearer',
+        })
+        toast('REQUESTY_API_KEY found in your shell — add Requesty as a provider?', 'ok')
+      }
+    }
+    await refresh()
     return section
   }
 
@@ -1494,7 +1674,6 @@ export async function preferencesModal({ section } = {}) {
   mount(buildEditor(), 'editor')
   mount(buildSidebar(), 'sidebar')
   startAsync('assistant', 'Assistant', buildAssistant)
-  startAsync('custom-provider', 'Custom provider', buildCustomProvider)
   startAsync('agents', 'Agents', () => buildAgentsSection())
   mount(buildSecurity(), 'security')
   startAsync('export', 'Export destinations', () => buildExportSection(closeReopeningAt('integrations')))

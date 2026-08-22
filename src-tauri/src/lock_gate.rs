@@ -222,6 +222,7 @@ pub const CHANNEL_OF_COMMAND: &[(&str, &str)] = &[
     ("chat_key_set", "chat:key-set"),
     ("chat_provider_set", "chat:provider-set"),
     ("chat_provider_delete", "chat:provider-delete"),
+    ("chat_provider_add", "chat:provider-add"),
     ("brain_open", "brain:open"),
     ("brain_close", "brain:close"),
     ("brain_index", "brain:index"),

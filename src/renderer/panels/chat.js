@@ -15,6 +15,9 @@ export class ChatPanel {
     this.element = document.createElement('div')
     this.element.className = 'panel-chat'
     this.element.innerHTML = `
+      <div class="chat-header">
+        <button type="button" class="chat-provider-line" title="Which provider the next message goes to — click to change" aria-label="Assistant provider">…</button>
+      </div>
       <div class="chat-log"></div>
       <form class="chat-form">
         <button type="button" class="chat-brain-toggle" title="Inject workspace brain context" aria-label="Inject workspace brain context" aria-pressed="false">◈ brain</button>
@@ -61,6 +64,15 @@ export class ChatPanel {
       e.preventDefault()
       this.send()
     })
+    // The effective provider, shown where the user is looking when the
+    // bytes' destination matters (delta 7). Clicking deep-links into
+    // Settings → Assistant; the dynamic import avoids a static cycle
+    // (preferences.js imports panels/terminal.js and panels/editor.js).
+    this.providerLine = this.element.querySelector('.chat-provider-line')
+    this.providerLine.addEventListener('click', () =>
+      import('../preferences.js').then((m) => m.preferencesModal({ section: 'assistant' }))
+    )
+    this.refreshProviderLine()
     this.input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
@@ -222,12 +234,26 @@ export class ChatPanel {
       this.micBtn.classList.remove('busy')
     }
   }
+  // The one-line answer to "where will my next message go", painted from
+  // the same resolution the send path uses — a UI-vs-backend divergence is
+  // visible the moment it exists. Warns (and points at ⌘,) when nothing
+  // is resolved.
+  async refreshProviderLine() {
+    const info = await tome.chat.providers().catch(() => null)
+    const e = info?.effective
+    this.providerLine.textContent = e
+      ? `${e.label} · ${e.model} · ${e.host}`
+      : info?.reason || 'No provider — pick one in ⌘,'
+    this.providerLine.classList.toggle('chat-provider-warn', !e)
+  }
+
   send() {
     const text = this.input.value.trim()
     // `busy` also covers a voice-session turn in flight (voice.js sets it):
     // typed messages only join the shared history while voice is idle.
     if (!text || this.busy) return
     this.busy = true
+    this.refreshProviderLine()
     this.stopBtn.classList.remove('hidden')
     this.input.value = ''
     this.bubble('me', text)
@@ -302,7 +328,12 @@ export class ChatPanel {
         this.input.focus()
       }
     } else {
-      this.history.push({ role: 'assistant', content: this.currentText })
+      // The unguarded empty-assistant push: a turn whose reply was only
+      // tool calls (no text) must not persist an empty assistant message —
+      // the anthropic wire 400s on empty text blocks next turn.
+      if (this.currentText) {
+        this.history.push({ role: 'assistant', content: this.currentText })
+      }
       if (this.speak && this.currentText) {
         speechSynthesis.cancel()
         speechSynthesis.speak(new SpeechSynthesisUtterance(this.currentText.slice(0, 1500)))

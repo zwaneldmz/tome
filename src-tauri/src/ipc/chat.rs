@@ -356,6 +356,108 @@ pub async fn chat_key_set(
     Ok(json!({}))
 }
 
+/// `chat:provider-add` — the "+ Add provider" form's write path (the
+/// fourth command; the handover's three-command list missed that the
+/// add-provider UI needs one). Builds an `added` row from the form's
+/// fields, vets the base URL (https, or http for loopback only, no
+/// embedded credentials, no metadata hosts), mints a slug id from the
+/// label (deduped with a numeric suffix), and returns it so the renderer
+/// can follow up with `chat:key-set` for the pasted key.
+#[tauri::command]
+pub async fn chat_provider_add(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    label: String,
+    base_url: String,
+    model: String,
+    wire: String,
+    auth: Option<String>,
+) -> Result<Value, String> {
+    lock_gate::guard(&state, "chat:provider-add")?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+
+    let label = label.trim().to_string();
+    let model = model.trim().to_string();
+    if label.is_empty() || model.is_empty() {
+        return Err("Label and model are required.".to_string());
+    }
+    let wire = match wire.trim() {
+        "anthropic" => registry::Wire::Anthropic,
+        _ => registry::Wire::OpenAi,
+    };
+    let auth = match auth.as_deref().map(str::trim) {
+        Some("x-api-key") => registry::Auth::XApiKey,
+        _ => registry::Auth::Bearer,
+    };
+    let base_url = registry::vet_base_url(&base_url)?;
+
+    let row = registry::ProviderRow {
+        id: String::new(), // minted below against the existing rows
+        label,
+        wire,
+        auth,
+        base_url,
+        model: model.clone(),
+        models: vec![model.clone()],
+        models_url: None,
+        alternates: vec![],
+        key_env: vec![],
+        max_output_tokens: None,
+        betas: vec![],
+        builtin: false,
+    };
+
+    let id = tokio::task::spawn_blocking(move || {
+        let rows = overlay::load_rows(&dir);
+        let mut ov = overlay::load_overlay(&dir);
+        let id = mint_added_id(&rows, &ov, &row.label);
+        let mut row = row;
+        row.id = id.clone();
+        ov.added.push(row);
+        overlay::save_overlay(&dir, &ov)?;
+        Ok::<String, String>(id)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    Ok(json!({ "id": id }))
+}
+
+/// Mints a collision-free id for a user-added row: a slug of the label
+/// (`[a-z0-9-]`, collapsed dashes, never empty — "My Local vLLM" →
+/// "my-local-vllm"), with a `-2`/`-3`… suffix when the slug is taken by
+/// a built-in or an existing added row. Pure — unit-testable.
+pub(crate) fn mint_added_id(rows: &[ProviderRow], ov: &registry::Overlay, label: &str) -> String {
+    let taken: Vec<&str> = rows
+        .iter()
+        .map(|r| r.id.as_str())
+        .chain(ov.added.iter().map(|r| r.id.as_str()))
+        .collect();
+    let mut slug: String = label
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    slug = slug
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if slug.is_empty() {
+        slug = "provider".to_string();
+    }
+    if !taken.iter().any(|t| *t == slug) {
+        return slug;
+    }
+    for n in 2.. {
+        let candidate = format!("{slug}-{n}");
+        if !taken.iter().any(|t| *t == candidate) {
+            return candidate;
+        }
+    }
+    unreachable!("the suffix loop always terminates")
+}
+
 /// The overlay patch `chat:provider-set` accepts — `{ model?, region?,
 /// hidden? }`, all optional, never a sparse patch over arbitrary row
 /// fields (a built-in's `base_url` is reachable only through `region`,
@@ -1031,5 +1133,47 @@ mod tests {
         let mut rows = rows();
         rows.push(added);
         assert!(apply_patch(&rows, &mut ov, "myai", &hide).is_err());
+    }
+
+    // ================= mint_added_id =================
+
+    #[test]
+    fn mint_added_id_slugifies_the_label() {
+        let ov = registry::Overlay::default();
+        assert_eq!(mint_added_id(&rows(), &ov, "My Local vLLM"), "my-local-vllm");
+        assert_eq!(mint_added_id(&rows(), &ov, "Groq!"), "groq");
+    }
+
+    #[test]
+    fn mint_added_id_never_collides_with_a_builtin_or_added_row() {
+        let ov = registry::Overlay::default();
+        assert_eq!(mint_added_id(&rows(), &ov, "OpenAI"), "openai-2");
+        assert_eq!(mint_added_id(&rows(), &ov, "Kimi"), "kimi-2");
+
+        let mut ov = registry::Overlay::default();
+        ov.added.push(ProviderRow {
+            id: "my-ai".to_string(),
+            label: "My AI".to_string(),
+            wire: Wire::OpenAi,
+            auth: Auth::Bearer,
+            base_url: "https://myai.example.com/v1".to_string(),
+            model: "m1".to_string(),
+            models: vec![],
+            models_url: None,
+            alternates: vec![],
+            key_env: vec![],
+            max_output_tokens: None,
+            betas: vec![],
+            builtin: false,
+        });
+        let mut all = rows();
+        all.push(ov.added[0].clone());
+        assert_eq!(mint_added_id(&all, &ov, "My AI"), "my-ai-2");
+    }
+
+    #[test]
+    fn mint_added_id_falls_back_to_provider_for_an_unsluggable_label() {
+        let ov = registry::Overlay::default();
+        assert_eq!(mint_added_id(&rows(), &ov, "!!!"), "provider");
     }
 }

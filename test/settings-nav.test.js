@@ -7,7 +7,7 @@ const ENTRIES = [
   { groupId: 'general', sectionId: 'appearance', text: 'Appearance — Theme Match system' },
   { groupId: 'general', sectionId: 'terminal', text: 'Terminal — Font size 10–28' },
   { groupId: 'assistant', sectionId: 'assistant', text: 'Assistant — Provider GLM (Z.ai)' },
-  { groupId: 'assistant', sectionId: 'custom-provider', text: 'Custom provider — model id deepseek-v4-pro' },
+  { groupId: 'assistant', sectionId: 'assistant', text: 'Assistant — Custom row — model id deepseek-v4-pro' },
   { groupId: 'security', sectionId: 'security', text: 'Security — Two-factor authentication (2FA)' },
 ]
 
@@ -42,14 +42,14 @@ describe('normalize', () => {
 describe('filterRows', () => {
   it('matches everything on an empty query', () => {
     const r = filterRows('', ENTRIES)
-    expect(r.count).toBe(5)
+    expect(r.count).toBe(4)
     expect(r.sections).toEqual(new Set(ENTRIES.map((e) => e.sectionId)))
     expect(r.groups).toEqual(new Set(['general', 'assistant', 'security']))
   })
 
   it('matches everything on a whitespace-only query', () => {
     const r = filterRows('   \t ', ENTRIES)
-    expect(r.count).toBe(5)
+    expect(r.count).toBe(4)
     expect(r.sections.has('appearance')).toBe(true)
   })
 
@@ -65,8 +65,8 @@ describe('filterRows', () => {
   })
 
   it('does not light sibling sections of the same group on a hit in one of them', () => {
-    // 'assistant' and 'custom-provider' share the assistant group; only the
-    // provider row mentions GLM.
+    // The provider rows share the assistant section; only one of them
+    // mentions GLM.
     const r = filterRows('glm', ENTRIES)
     expect(r.sections).toEqual(new Set(['assistant']))
     expect(r.groups).toEqual(new Set(['assistant']))

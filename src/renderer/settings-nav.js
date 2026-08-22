@@ -8,7 +8,7 @@
 
 export const GROUPS = [
   { id: 'general', label: 'General', sections: ['appearance', 'terminal', 'editor', 'sidebar'] },
-  { id: 'assistant', label: 'Assistant', sections: ['assistant', 'custom-provider'] },
+  { id: 'assistant', label: 'Assistant', sections: ['assistant'] },
   { id: 'agents', label: 'Agents', sections: ['agents'] },
   { id: 'security', label: 'Security', sections: ['security'] },
   { id: 'integrations', label: 'Integrations', sections: ['export', 'schedules', 'remote'] },

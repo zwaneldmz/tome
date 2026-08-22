@@ -4088,3 +4088,111 @@ body.tome-popout .dockview-theme-tome .dv-groupview {
   text-align: left;
   width: 100%;
 }
+
+/* ---- provider cards (Assistant group, slice 3b) ---- */
+.prov-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md, 10px);
+  background: var(--surface);
+}
+.prov-card.on {
+  border-color: var(--accent-ring, var(--accent));
+}
+.prov-card > .ag-btn {
+  align-self: flex-start;
+  padding: 4px 10px;
+}
+.prov-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.prov-sub {
+  gap: 6px;
+}
+.prov-line .prefs-input {
+  flex: 1;
+  min-width: 120px;
+}
+.prov-model,
+.prov-region {
+  flex: 0 0 auto;
+  max-width: 260px;
+}
+.prov-host {
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prov-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.prov-notes .prefs-hint {
+  margin: 0;
+}
+.prefs-hint-warn {
+  color: var(--danger, #e5534b);
+}
+.prov-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 4px;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: var(--fs-meta);
+  text-decoration: underline;
+}
+.prov-link:hover {
+  opacity: 0.8;
+}
+.prefs-add-form {
+  gap: 6px;
+}
+.prefs-add-form .prefs-seg {
+  width: fit-content;
+}
+
+/* onboarding inline key field (slice 3b) */
+.ob-keyrow {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.ob-keyin {
+  flex: 1;
+}
+
+/* chat panel provider line (slice 3b, delta 7) */
+.chat-header {
+  display: flex;
+  padding: 4px 8px 2px;
+}
+.chat-provider-line {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--muted);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.chat-provider-line:hover {
+  color: var(--accent);
+}
+.chat-provider-warn {
+  color: var(--danger, #e5534b);
+}

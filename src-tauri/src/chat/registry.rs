@@ -280,10 +280,13 @@ pub fn default_rows() -> Vec<ProviderRow> {
 /// (trimmed, non-empty only), honor a region pin ONLY when its value is
 /// one of that row's compiled-in alternates (the security line — a
 /// built-in's key can only ever be sent to a host in the signed binary),
-/// then append the overlay's added rows. An added row whose id collides
-/// with a default's is dropped: built-in ids are reserved, so an overlay
-/// can neither shadow a visible built-in nor resurrect a hidden one with
-/// a foreign base_url.
+/// then append the overlay's added rows. Two defenses on `added`: a row
+/// whose id collides with a default's is dropped (built-in ids are
+/// reserved, so an overlay can neither shadow a visible built-in nor
+/// resurrect a hidden one with a foreign base_url), and a row whose
+/// `base_url` fails [`vet_base_url`] is dropped — vetting happens at
+/// upsert AND at load, so a hand-edited overlay file can never aim a key
+/// at an unvetted host.
 pub fn merge(defaults: &[ProviderRow], ov: &Overlay) -> Vec<ProviderRow> {
     let mut rows = Vec::with_capacity(defaults.len() + ov.added.len());
     for row in defaults {
@@ -308,6 +311,7 @@ pub fn merge(defaults: &[ProviderRow], ov: &Overlay) -> Vec<ProviderRow> {
         ov.added
             .iter()
             .filter(|row| !defaults.iter().any(|d| d.id == row.id))
+            .filter(|row| vet_base_url(&row.base_url).is_ok())
             .cloned(),
     );
     rows
@@ -601,6 +605,44 @@ mod tests {
             merged.iter().all(|r| r.id != "glm"),
             "a hidden builtin must not resurrect via an added row"
         );
+    }
+
+    #[test]
+    fn merge_drops_added_rows_with_an_unvetted_base_url() {
+        // vet-on-load (defense in depth on top of the upsert vet): a
+        // hand-edited overlay file must never aim a key at a plain-http
+        // public host, a metadata address, or an embedded credential.
+        for bad in [
+            "http://evil.example.com/v1",
+            "https://user:pw@host.example/v1",
+            "https://169.254.169.254/v1",
+            "not a url",
+        ] {
+            let mut fake = synthetic_row("badrow");
+            fake.base_url = bad.to_string();
+            let merged = merge(
+                &default_rows(),
+                &Overlay {
+                    added: vec![fake],
+                    ..Default::default()
+                },
+            );
+            assert!(
+                merged.iter().all(|r| r.id != "badrow"),
+                "an unvetted base_url must drop the row: {bad}"
+            );
+        }
+        // the legit local-model shape survives (http + loopback)
+        let mut local = synthetic_row("local");
+        local.base_url = "http://localhost:9999/v1".to_string();
+        let merged = merge(
+            &default_rows(),
+            &Overlay {
+                added: vec![local],
+                ..Default::default()
+            },
+        );
+        assert!(merged.iter().any(|r| r.id == "local"));
     }
 
     // ================= resolve =================

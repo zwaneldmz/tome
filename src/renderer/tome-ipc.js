@@ -414,11 +414,19 @@ import { listen } from '@tauri-apps/api/event'
       abort: (id) => fire('chat_abort', { id }),
       providers: () => call('chat_providers'),
       complete: (messages, system) => call('chat_complete', { messages, system }),
+      // Write-only key management: the key travels inbound only; no read
+      // path returns it (Cursor's contract). Empty key removes the slot.
+      keySet: (id, key) => call('chat_key_set', { id, key }),
+      providerSet: (id, patch) => call('chat_provider_set', { id, patch }),
+      providerDelete: (id) => call('chat_provider_delete', { id }),
+      providerAdd: (label, baseUrl, model, wire, auth) =>
+        call('chat_provider_add', { label, baseUrl, model, wire, auth }),
       // Rust side emits these as plain events until the real chat command
       // lands (plan §Chat) — same wire names, same shim, no special-casing.
       onDelta: (cb) => on('chat:delta', cb),
       onDone: (cb) => on('chat:done', cb),
       onTool: (cb) => on('chat:tool', cb),
+      onRequestyNotice: (cb) => on('chat:requesty-notice', cb),
     },
 
     brain: {

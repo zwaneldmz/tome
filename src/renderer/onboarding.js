@@ -285,19 +285,32 @@ export async function showOnboarding() {
     const stale = () => state.step !== myStep
     Promise.resolve(providersP)
       .then(async (info) => {
-        // chat:providers returns { providers, active } — main's active is the
-        // stored pick validated against the provider table, so it is the
-        // correct initial selection (and what a skipped step keeps).
+        // chat:providers returns { providers, active, effective } — main's
+        // active is the stored pick validated against the registry, so it
+        // is the correct initial selection (and what a skipped step keeps).
         const providers = info?.providers || []
         if (!providers.length) {
           if (!stale()) note('No assistant providers configured — the assistant keeps its shell default.')
           return
         }
         if (stale()) return
-        note('Pick the model the assistant pane talks to. ● means its API key was found in your login shell.')
+        note('Pick the model the assistant pane talks to. ● means a key is known — paste one inline if it is not.')
         const group = el('div', 'ob-providers')
         group.setAttribute('role', 'radiogroup')
         group.setAttribute('aria-label', 'Assistant provider')
+
+        // Inline key field on the SELECTED row: pasted keys are the fix
+        // for Finder-launched apps that never see the login shell, so the
+        // wizard must not send the user back to export-vars-and-restart.
+        const keyRow = el('div', 'ob-keyrow')
+        const keyIn = el('input', 'ob-keyin')
+        keyIn.type = 'password'
+        keyIn.placeholder = 'paste API key for the selected provider'
+        keyIn.setAttribute('aria-label', 'API key')
+        const keySave = el('button', 'ag-btn ghost', 'Save key')
+        keySave.type = 'button'
+        keyRow.append(keyIn, keySave)
+
         const paint = (selectedId) => {
           for (const s of group.children) {
             const sel = s.dataset.pid === selectedId
@@ -310,15 +323,12 @@ export async function showOnboarding() {
           b.type = 'button'
           b.dataset.pid = p.id
           b.setAttribute('role', 'radio')
-          b.title = p.keyEnv
-            ? p.keySet
-              ? `${p.keyEnv} found in your login shell`
-              : `${p.keyEnv} not found — set it and restart Tome`
-            : p.keySet
-              ? 'custom provider configured in Settings'
-              : 'custom provider not configured — set it in Settings'
+          const hasKey = !!p.keyOrigin
+          b.title = hasKey
+            ? `key from ${p.keyOrigin.kind === 'shell' || p.keyOrigin.kind === 'env' ? `${p.keyOrigin.kind}: ${p.keyOrigin.name}` : p.keyOrigin.kind}`
+            : 'no key yet — paste one below'
           b.append(
-            el('span', 'ob-dot-avail ' + (p.keySet ? 'ok' : 'off'), p.keySet ? '●' : '○'),
+            el('span', 'ob-dot-avail ' + (hasKey ? 'ok' : 'off'), hasKey ? '●' : '○'),
             el('span', 'ob-agent-name', p.label || p.id),
             el('span', 'ob-provider-model', p.model)
           )
@@ -326,12 +336,35 @@ export async function showOnboarding() {
             state.provider = p.id
             state.dirty = true
             tome.store.set('chat-provider', p.id)
+            keySave.dataset.pid = p.id
             paint(p.id)
           })
           group.appendChild(b)
         }
+        keySave.addEventListener('click', async () => {
+          const id = keySave.dataset.pid || state.provider || info.active
+          if (!id) return toast('pick a provider first')
+          try {
+            await tome.chat.keySet(id, keyIn.value.trim())
+            keyIn.value = ''
+            toast('key saved', 'ok')
+            // Refresh dots so ● reflects the paste immediately.
+            const again = await tome.chat.providers()
+            const row = again?.providers?.find((p) => p.id === id)
+            const dot = group.querySelector(`[data-pid="${id}"] .ob-dot-avail`)
+            if (dot && row?.keyOrigin) {
+              dot.textContent = '●'
+              dot.classList.remove('off')
+              dot.classList.add('ok')
+            }
+          } catch (err) {
+            toast(err.message)
+          }
+        })
         m.body.appendChild(group)
+        m.body.appendChild(keyRow)
         paint(state.provider || info.active)
+        keySave.dataset.pid = state.provider || info.active || providers[0].id
       })
       .catch(
         () => !stale() && note('Could not load providers — the assistant keeps its current settings.')
