@@ -56,10 +56,13 @@
 //! read response *bytes*, not just render them). The fix has two halves,
 //! split across two files, and BOTH must hold:
 //!
-//! - **This file**: confine to open workspace folders/brain vaults +
+//! - **This file**: confine to open workspace folders/brain vaults + the
+//!   store-named core vault (P5.4: `confine::confined_real_path_in_store`,
+//!   whose roots come from the `core-vault` store key) +
 //!   `TOME_SERVE_EXT` allowlist, so even a CSP mistake can only leak an
-//!   already-open-workspace file of an allowlisted (already-would-be-
-//!   displayed) type, not arbitrary filesystem contents.
+//!   already-open-workspace, brain-vault, or user-set-core-vault file of
+//!   an allowlisted (already-would-be-displayed) type, not arbitrary
+//!   filesystem contents.
 //! - **`src/renderer/index.html`'s CSP meta tag**: `connect-src` must keep
 //!   omitting `tome:` (verified present as of this port: `connect-src
 //!   'self' ws: wss: ipc: http://ipc.localhost` — no `tome:`), so renderer
@@ -295,10 +298,11 @@ async fn build_response<R: tauri::Runtime>(
     if !TOME_SERVE_EXT.contains(&ext_lower_no_dot(&raw_path).as_str()) {
         return deny_response(app);
     }
-    // Gate 2: confinement — open workspace folders + brain vaults,
-    // symlink-resolved. Reused, not reimplemented; see module doc comment.
+    // Gate 2: confinement — open workspace folders + brain vaults +
+    // store-named core vault, symlink-resolved. Reused, not reimplemented;
+    // see module doc comment.
     let state: State<'_, AppState> = app.state::<AppState>();
-    let real = match confine::confined_real_path(&state, Path::new(&raw_path)) {
+    let real = match confine::confined_real_path_in_store(app, &state, Path::new(&raw_path)) {
         Ok(p) => p,
         Err(_) => return deny_response(app),
     };

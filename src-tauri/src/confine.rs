@@ -35,9 +35,10 @@
 use std::env;
 use std::path::{Component, Path, PathBuf};
 
-use tauri::State;
+use tauri::{AppHandle, Manager, Runtime, State};
 
 use crate::state::AppState;
+use crate::store_keys::CONFINED_STORE_ROOTS;
 
 // ---- lexical path resolution (no filesystem access) ----
 //
@@ -163,7 +164,10 @@ fn is_brain_path(p: &Path) -> bool {
 /// `p` resolves (lexically only — no filesystem access, no symlink
 /// following) inside an open workspace folder (the root itself included:
 /// unlike `confine()` above, an exact match *is* confined) or inside a
-/// brain vault.
+/// brain vault. This is the validation form of the decision — display/
+/// open callers (`doc:readBytes`, `tome://`, `shell:openPath`) go through
+/// [`confined_real_path_in_store`], which additionally admits the
+/// store-named roots ([`is_confined_with_roots`]) below.
 ///
 /// `pub(crate)` (not private) as of `protocol.rs` (Phase 6): that module's
 /// own tests call this directly to exercise a real `../`-escape denial
@@ -174,6 +178,22 @@ fn is_brain_path(p: &Path) -> bool {
 /// core is the only piece of this confinement path a non-running-app test
 /// can reach at all. No behavior changed by this widen, only visibility.
 pub(crate) fn is_confined(open_folders: &[PathBuf], folders_synced: bool, p: &Path) -> bool {
+    is_confined_with_roots(open_folders, folders_synced, p, &[])
+}
+
+/// [`is_confined`] plus the store-named roots: `p` is also confined when
+/// it resolves inside any of `store_roots` — the directories named by the
+/// `core-vault` store key (`store_keys::CONFINED_STORE_ROOTS`), resolved
+/// from the store by `confined_real_path_in_store` below. P5.4 closes the
+/// improvement-review gap that left files in a user-set core vault
+/// unservable through `tome://`/`doc:readBytes` while every workspace/
+/// brain-vault file served fine.
+pub(crate) fn is_confined_with_roots(
+    open_folders: &[PathBuf],
+    folders_synced: bool,
+    p: &Path,
+    store_roots: &[PathBuf],
+) -> bool {
     if !folders_synced {
         return false;
     }
@@ -181,7 +201,9 @@ pub(crate) fn is_confined(open_folders: &[PathBuf], folders_synced: bool, p: &Pa
         return false;
     }
     let abs = resolve1(p);
-    open_folders.iter().any(|f| abs.starts_with(f)) || is_brain_path(&abs)
+    open_folders.iter().any(|f| abs.starts_with(f))
+        || store_roots.iter().any(|r| abs.starts_with(r))
+        || is_brain_path(&abs)
 }
 
 fn is_confined_path(state: &State<'_, AppState>, p: &Path) -> bool {
@@ -215,12 +237,13 @@ fn confined_real_path_core(
     open_folders: &[PathBuf],
     folders_synced: bool,
     path: &Path,
+    store_roots: &[PathBuf],
 ) -> Result<PathBuf, String> {
-    if !is_confined(open_folders, folders_synced, path) {
+    if !is_confined_with_roots(open_folders, folders_synced, path, store_roots) {
         return Err(confinement_reason(folders_synced));
     }
     let real = std::fs::canonicalize(path).map_err(|_| confinement_reason(folders_synced))?;
-    if is_confined(open_folders, folders_synced, &real) {
+    if is_confined_with_roots(open_folders, folders_synced, &real, store_roots) {
         Ok(real)
     } else {
         Err(confinement_reason(folders_synced))
@@ -241,13 +264,81 @@ fn confined_real_path_core(
 /// roots, so a symlink whose target lands outside a confined root is
 /// still refused even though its own name looked fine.
 ///
-/// Phase 1 stub signature, unchanged (see module docs above for why this
-/// slice's own commands don't call it yet): callers already thread
-/// `state`/`path` through exactly this way.
+/// Workspace-folder + brain-vault confinement only — the form validation
+/// callers use (`ws_sync`'s repo-consent reapply, `egress` allowlist
+/// checks, the conductor's cwd/env roots, `graphify`'s workspace arg):
+/// their inputs are workspace roots by contract, never display targets,
+/// and admitting the store-named roots there would let a repo-consent
+/// path validate against a non-repo directory. Display/open callers
+/// (`doc:readBytes`, `tome://`, `shell:openPath`) use
+/// [`confined_real_path_in_store`] instead.
 pub fn confined_real_path(state: &State<'_, AppState>, path: &Path) -> Result<PathBuf, String> {
     let folders_synced = *state.folders_synced.read().unwrap();
     let open_folders = state.open_folders.read().unwrap();
-    confined_real_path_core(&open_folders, folders_synced, path)
+    confined_real_path_core(&open_folders, folders_synced, path, &[])
+}
+
+/// Resolves the store-named roots ([`is_confined_with_roots`]) — one per
+/// key in `store_keys::CONFINED_STORE_ROOTS` whose stored value is a
+/// non-empty absolute path. `dir` is the app-data directory the JSON
+/// store lives in; `locked` the caller's current lock snapshot. Pure
+/// (`&Path` in, `Vec` out) so confine.rs's own tests can exercise it with
+/// a `tempfile` store — the `AppHandle`-based [`confined_real_path_in_store`]
+/// wrapper cannot be constructed in a unit test, same split as every
+/// other core/wrapper pair in this module.
+pub(crate) fn store_named_roots_core(dir: &Path, locked: bool) -> Vec<PathBuf> {
+    // Belt-and-braces on the P5.4 pin: if a new path-bearing store key
+    // ever misses its confinement-set entry, debug builds (every `cargo
+    // test` run) trip here in addition to store_keys.rs's CI test.
+    debug_assert!(
+        crate::store_keys::PATH_BEARING_STORE_KEYS
+            .iter()
+            .all(|k| CONFINED_STORE_ROOTS.contains(k)),
+        "every path-bearing store key must be in the confinement set"
+    );
+    CONFINED_STORE_ROOTS
+        .iter()
+        .filter_map(|key| {
+            // `store::get` applies the full key gate (shape/reserve/lock)
+            // before touching the file — a key denied while locked (every
+            // member of CONFINED_STORE_ROOTS is policy-gated) yields Null
+            // here, so a locked app serves no core-vault files even if
+            // the renderer somehow asks.
+            let value = crate::store::get(dir, key, locked);
+            let s = value.as_str()?;
+            let p = PathBuf::from(s);
+            // A relative or empty stored value is not a root we can
+            // contain — treat it as unconfigured, same as `brain::core_info`
+            // does for the same key.
+            (p.is_absolute() && !s.is_empty()).then_some(p)
+        })
+        .collect()
+}
+
+/// The display/open form of [`confined_real_path`]: admits the
+/// store-named roots (`core-vault` — see `store_keys::CONFINED_STORE_ROOTS`)
+/// alongside the open workspace folders and brain vaults, so a file
+/// inside the user's core vault serves through `tome://`/`doc:readBytes`
+/// and opens via `shell:openPath` exactly like any workspace or
+/// brain-vault file (P5.4 — the improvement review's flagged gap).
+///
+/// The store is re-read on every call rather than cached on `AppState`:
+/// the renderer can repoint `core-vault` through `store:set` at any time,
+/// and a cached root would make the confinement decision stale in BOTH
+/// directions (a removed vault would keep serving, a fresh one would keep
+/// 403ing). The read is one tiny JSON file — the same cost class as the
+/// `realpath(3)` this call already performs.
+pub fn confined_real_path_in_store<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &State<'_, AppState>,
+    path: &Path,
+) -> Result<PathBuf, String> {
+    let folders_synced = *state.folders_synced.read().unwrap();
+    let open_folders = state.open_folders.read().unwrap();
+    let locked = *state.locked.read().unwrap();
+    let dir = app.path().app_data_dir().unwrap_or_else(|_| PathBuf::new());
+    let store_roots = store_named_roots_core(&dir, locked);
+    confined_real_path_core(&open_folders, folders_synced, path, &store_roots)
 }
 
 /// Pure core of [`confined_write_path`] — same testability split as
@@ -423,7 +514,7 @@ mod tests {
         fs::write(&file, "hi").unwrap();
 
         let folders = vec![inside];
-        let result = confined_real_path_core(&folders, true, &file);
+        let result = confined_real_path_core(&folders, true, &file, &[]);
         assert_eq!(result, Ok(file));
     }
 
@@ -441,7 +532,7 @@ mod tests {
         symlink(&secret_file, &link).unwrap();
 
         let folders = vec![inside];
-        let result = confined_real_path_core(&folders, true, &link);
+        let result = confined_real_path_core(&folders, true, &link, &[]);
         assert!(
             result.is_err(),
             "a symlink whose target resolves outside the confined root must be refused"
@@ -451,7 +542,7 @@ mod tests {
     #[test]
     fn confined_real_path_rejects_a_lexically_outside_path_without_touching_disk() {
         let folders = vec![PathBuf::from("/work/proj")];
-        let result = confined_real_path_core(&folders, true, Path::new("/etc/passwd"));
+        let result = confined_real_path_core(&folders, true, Path::new("/etc/passwd"), &[]);
         assert_eq!(result, Err(confinement_reason(true)));
     }
 
@@ -460,7 +551,7 @@ mod tests {
         let tmp = tempdir().unwrap();
         let base = tmp.path().canonicalize().unwrap();
         let folders = vec![base.clone()];
-        let result = confined_real_path_core(&folders, true, &base.join("does-not-exist"));
+        let result = confined_real_path_core(&folders, true, &base.join("does-not-exist"), &[]);
         assert!(result.is_err());
     }
 
@@ -468,10 +559,135 @@ mod tests {
     fn confined_real_path_reports_not_synced_vs_outside_distinctly() {
         let folders = vec![PathBuf::from("/work/proj")];
         assert_eq!(
-            confined_real_path_core(&folders, false, Path::new("/work/proj/f.txt")),
+            confined_real_path_core(&folders, false, Path::new("/work/proj/f.txt"), &[]),
             Err(confinement_reason(false))
         );
         assert_ne!(confinement_reason(true), confinement_reason(false));
+    }
+
+    // ---- store-named roots — the core-vault confinement set (P5.4) ----
+
+    #[test]
+    fn store_named_roots_core_resolves_every_confined_store_root() {
+        // Every key the confinement set promises to cover
+        // (store_keys::CONFINED_STORE_ROOTS) must actually resolve into a
+        // root — a key added to the list without a working resolution (or
+        // dropped from the resolver) fails CI here instead of silently
+        // serving nothing.
+        let tmp = tempdir().unwrap();
+        for key in CONFINED_STORE_ROOTS.iter().copied() {
+            let root = tmp.path().join("some-vault");
+            crate::store::set(
+                tmp.path(),
+                key,
+                &serde_json::json!(root.to_string_lossy()),
+                false,
+            )
+            .unwrap();
+            assert_eq!(
+                store_named_roots_core(tmp.path(), false),
+                vec![root],
+                "{key} must resolve to a confinement root"
+            );
+            crate::store::set(tmp.path(), key, &serde_json::Value::Null, false).unwrap();
+        }
+    }
+
+    #[test]
+    fn store_named_roots_core_yields_nothing_while_locked() {
+        // While locked the store gate denies every policy key, so
+        // store::get returns Null and the confinement set shrinks back to
+        // workspace folders + brain vaults — a locked app serves no
+        // core-vault files even if the renderer asks.
+        let tmp = tempdir().unwrap();
+        crate::store::set(
+            tmp.path(),
+            "core-vault",
+            &serde_json::json!("/vaults/core"),
+            false,
+        )
+        .unwrap();
+        assert!(store_named_roots_core(tmp.path(), true).is_empty());
+    }
+
+    #[test]
+    fn store_named_roots_core_ignores_missing_empty_and_relative_values() {
+        let tmp = tempdir().unwrap();
+        // Unset key: no root.
+        assert!(store_named_roots_core(tmp.path(), false).is_empty());
+        // Relative / empty values are not roots we can contain —
+        // brain::core_info treats the same shapes as unconfigured.
+        crate::store::set(
+            tmp.path(),
+            "core-vault",
+            &serde_json::json!("relative/vault"),
+            false,
+        )
+        .unwrap();
+        assert!(store_named_roots_core(tmp.path(), false).is_empty());
+        crate::store::set(tmp.path(), "core-vault", &serde_json::json!(""), false).unwrap();
+        assert!(store_named_roots_core(tmp.path(), false).is_empty());
+    }
+
+    #[test]
+    fn confined_real_path_core_admits_a_file_inside_a_store_named_root() {
+        // The P5.4 gap itself, pinned: a file in a user-set core vault
+        // must pass the SAME symlink-safe check a workspace file passes.
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let vault = base.join("core-vault");
+        fs::create_dir_all(&vault).unwrap();
+        let note = vault.join("promoted.md");
+        fs::write(&note, "# note").unwrap();
+
+        let roots = vec![vault];
+        let result = confined_real_path_core(&[], true, &note, &roots);
+        assert_eq!(result, Ok(note));
+    }
+
+    #[test]
+    fn confined_real_path_core_rejects_a_file_outside_the_store_named_roots() {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let vault = base.join("core-vault");
+        let outside = base.join("elsewhere.txt");
+        fs::create_dir_all(&vault).unwrap();
+        fs::write(&outside, "nope").unwrap();
+
+        let roots = vec![vault];
+        assert!(
+            confined_real_path_core(&[], true, &outside, &roots).is_err(),
+            "a store-named root must not widen confinement beyond itself"
+        );
+        // And a symlink INSIDE the vault whose target escapes it is
+        // still refused — the double-check applies to store roots too.
+        let link = base.join("core-vault").join("escape.md");
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        assert!(confined_real_path_core(&[], true, &link, &roots).is_err());
+    }
+
+    #[test]
+    fn is_confined_with_roots_admits_store_root_children_lexically() {
+        let roots = vec![PathBuf::from("/vaults/core")];
+        assert!(is_confined_with_roots(
+            &[],
+            true,
+            Path::new("/vaults/core/note.md"),
+            &roots
+        ));
+        assert!(!is_confined_with_roots(
+            &[],
+            true,
+            Path::new("/vaults/coredump"),
+            &roots
+        ));
+        // Not-synced still denies everything, store roots included.
+        assert!(!is_confined_with_roots(
+            &[],
+            false,
+            Path::new("/vaults/core/note.md"),
+            &roots
+        ));
     }
 
     // ---- confined_write_path_core — parent-checked write resolution ----
