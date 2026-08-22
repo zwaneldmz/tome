@@ -2028,4 +2028,68 @@ mod tests {
         assert!(!pty_authority::unrestricted_spawn_needs_reauth(true, true));
         assert!(!pty_authority::unrestricted_spawn_needs_reauth(true, false));
     }
+
+    // ================= P5.3 escape-suite coverage: the composed ceremony
+    // with a REAL AuthLock (the dynamic escape suite, a separate crate,
+    // cannot reach these pub(crate) items — these tests are its attempt
+    // 9's delegated assertion, and run in every CI gate via cargo test) ====
+
+    #[test]
+    fn ungapped_spawn_with_a_real_configured_factor_demands_a_verified_second_factor() {
+        // Composes the exact ceremony pty_create runs for an ungapped
+        // spawn (the TOME-001 re-auth block):
+        // unrestricted_spawn_needs_reauth gates, then evaluate_reauth
+        // turns (payload_supplied, verified) into the refusal/proceed
+        // outcome — with a REAL AuthLock so "verified" is a real scrypt
+        // check, not a mocked boolean. Passphrase-only (no TOTP), so the
+        // OS keychain protector is never consulted (it exists only for
+        // the TOTP-secret path).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut lock = crate::authlock::AuthLock::load(dir.path());
+        lock.set_passphrase("correct horse battery staple")
+            .expect("set passphrase");
+        assert!(lock.status().configured);
+
+        // An ungapped pane with a configured factor enters the ceremony.
+        assert!(pty_authority::unrestricted_spawn_needs_reauth(
+            false,
+            lock.status().configured
+        ));
+
+        // No payload at all -> refused pending credentials.
+        assert!(matches!(
+            evaluate_reauth(false, false),
+            ReauthOutcome::NeedsCredentials
+        ));
+
+        // A supplied but WRONG factor -> refused; the real verify failed.
+        assert!(!lock.verify_passphrase("wrong horse battery staple"));
+        assert!(matches!(
+            evaluate_reauth(true, false),
+            ReauthOutcome::Rejected
+        ));
+
+        // The correct factor -> the spawn proceeds.
+        assert!(lock.verify_passphrase("correct horse battery staple"));
+        assert!(matches!(
+            evaluate_reauth(true, true),
+            ReauthOutcome::Verified
+        ));
+    }
+
+    #[test]
+    fn ungapped_spawn_with_no_configured_factor_needs_no_ceremony() {
+        // The TOME-001 exception, with a REAL (fresh, unconfigured)
+        // AuthLock: there is no factor to re-prove, so an ungapped spawn
+        // proceeds — pinned here so a future edit cannot "convenience"
+        // the ceremony away for the configured case or demand it for the
+        // unconfigured one.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lock = crate::authlock::AuthLock::load(dir.path());
+        assert!(!lock.status().configured);
+        assert!(!pty_authority::unrestricted_spawn_needs_reauth(
+            false,
+            lock.status().configured
+        ));
+    }
 }

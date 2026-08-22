@@ -71,7 +71,7 @@ tome-flow = { path = "crates/tome-flow" }
 tempfile = "3"
 
 [workspace]
-members = ["crates/tome-shim", "crates/tome-flow", "crates/tome-runner"]
+members = ["crates/tome-shim", "crates/tome-flow", "crates/tome-runner", "crates/tome-escape-suite"]
 
 # The conductor/flow `*Env` structs are dependency-injection seams whose
 # fields are `Arc<dyn Fn(...) + Send + Sync>` callbacks — each signature is a
