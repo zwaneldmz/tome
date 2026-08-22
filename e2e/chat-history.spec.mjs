@@ -100,6 +100,22 @@ test.describe('@chat-history history + fresh start', () => {
         { role: 'assistant', content: 'here you go' },
       ]
       window.__tomeMock.history = [{ id: 'chat-3', count: 2, snippet: 'release notes please', mtimeMs: 200 }]
+      // P3.1: a send requires a picked provider — seed one, or the consent
+      // gate would open the picker instead of sending this turn.
+      window.__tomeMock.store['chat-provider'] = 'kimi'
+      window.tome.chat.providers = async () => ({
+        providers: [],
+        active: 'kimi',
+        effective: {
+          id: 'kimi',
+          label: 'Kimi (Moonshot)',
+          model: 'kimi-k3',
+          host: 'https://api.moonshot.ai/v1',
+          keyOrigin: { kind: 'file' },
+        },
+        reason: null,
+        none: false,
+      })
     })
     await page.locator('.hist-search').fill('release')
     await page.locator('.hist-row').first().click()

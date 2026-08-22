@@ -36,6 +36,7 @@
     opencodeModels: [],
     conductorSetCwd: [],
     chatHistoryList: [],
+    chatSend: [],
   }
 
   const noop = () => {}
@@ -288,12 +289,16 @@
     },
 
     chat: {
-      send: asyncNoop,
+      send: async (id, messages) => {
+        calls.chatSend.push({ id, messages })
+      },
       abort: noop,
-      // Real shape is { providers: [...], active: id, effective, reason } —
-      // the Preferences assistant section iterates `chatInfo.providers`, so
-      // an empty array (not a bare []) keeps it from throwing.
-      providers: async () => ({ providers: [], active: null, effective: null, reason: null }),
+      // Real shape is { providers: [...], active: id, effective, reason,
+      // none } — the Preferences assistant section iterates
+      // `chatInfo.providers`, so an empty array (not a bare []) keeps it
+      // from throwing. `none: true` is a fresh profile: no provider picked
+      // yet (the P3.1 no-default state the chat pane's send gate keys on).
+      providers: async () => ({ providers: [], active: null, effective: null, reason: null, none: true }),
       complete: async () => '',
       keySet: asyncNoop,
       providerSet: asyncNoop,
