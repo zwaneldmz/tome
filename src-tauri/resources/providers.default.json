@@ -1,0 +1,99 @@
+[
+  {
+    "id": "kimi",
+    "label": "Kimi (Moonshot)",
+    "wire": "openai",
+    "auth": "bearer",
+    "baseUrl": "https://api.moonshot.ai/v1",
+    "model": "kimi-k3",
+    "models": ["kimi-k3"],
+    "modelsUrl": null,
+    "alternates": [
+      { "label": "International", "baseUrl": "https://api.moonshot.ai/v1" },
+      { "label": "China", "baseUrl": "https://api.moonshot.cn/v1" }
+    ],
+    "keyEnv": ["MOONSHOT_API_KEY"],
+    "maxOutputTokens": null,
+    "betas": [],
+    "builtin": true
+  },
+  {
+    "id": "glm",
+    "label": "GLM (Z.ai)",
+    "wire": "openai",
+    "auth": "bearer",
+    "baseUrl": "https://api.z.ai/api/paas/v4",
+    "model": "glm-5.3",
+    "models": ["glm-5.3", "glm-5.2", "glm-5-turbo", "glm-4.7", "glm-4.7-flash"],
+    "modelsUrl": null,
+    "alternates": [
+      { "label": "International (z.ai)", "baseUrl": "https://api.z.ai/api/paas/v4" },
+      { "label": "China (Zhipu)", "baseUrl": "https://open.bigmodel.cn/api/paas/v4" },
+      { "label": "Anthropic-Messages shim", "baseUrl": "https://api.z.ai/api/anthropic" }
+    ],
+    "keyEnv": ["ZAI_API_KEY", "ZHIPU_API_KEY"],
+    "maxOutputTokens": null,
+    "betas": [],
+    "builtin": true
+  },
+  {
+    "id": "deepseek",
+    "label": "DeepSeek",
+    "wire": "openai",
+    "auth": "bearer",
+    "baseUrl": "https://api.deepseek.com",
+    "model": "deepseek-v4-pro",
+    "models": ["deepseek-v4-pro", "deepseek-v4-flash"],
+    "modelsUrl": null,
+    "alternates": [],
+    "keyEnv": ["DEEPSEEK_API_KEY"],
+    "maxOutputTokens": null,
+    "betas": [],
+    "builtin": true
+  },
+  {
+    "id": "claude",
+    "label": "Claude (Anthropic)",
+    "wire": "anthropic",
+    "auth": "x-api-key",
+    "baseUrl": "https://api.anthropic.com",
+    "model": "claude-opus-5",
+    "models": ["claude-opus-5"],
+    "modelsUrl": null,
+    "alternates": [],
+    "keyEnv": ["ANTHROPIC_API_KEY"],
+    "maxOutputTokens": null,
+    "betas": [],
+    "builtin": true
+  },
+  {
+    "id": "openai",
+    "label": "OpenAI",
+    "wire": "openai",
+    "auth": "bearer",
+    "baseUrl": "https://api.openai.com/v1",
+    "model": "gpt-5.6",
+    "models": ["gpt-5.6"],
+    "modelsUrl": null,
+    "alternates": [],
+    "keyEnv": ["OPENAI_API_KEY"],
+    "maxOutputTokens": null,
+    "betas": [],
+    "builtin": true
+  },
+  {
+    "id": "openrouter",
+    "label": "OpenRouter (any model)",
+    "wire": "openai",
+    "auth": "bearer",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "model": "anthropic/claude-opus-5",
+    "models": ["anthropic/claude-opus-5"],
+    "modelsUrl": null,
+    "alternates": [],
+    "keyEnv": ["OPENROUTER_API_KEY"],
+    "maxOutputTokens": null,
+    "betas": [],
+    "builtin": true
+  }
+]
