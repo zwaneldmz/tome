@@ -51,4 +51,32 @@ test.describe('@panes pane spawning', () => {
       'network-contained only'
     )
   })
+
+  // P2.1 containment-only ceiling: with the pref on, the ＋ menu drops the
+  // unsandboxed Terminal row and the egress-default toggle (a default, not
+  // a ceiling), and agent rows stay — forced gapped.
+  test('@containment containment-only removes unsandboxed spawns from the ＋ menu', async ({
+    page,
+  }) => {
+    await boot(page, () => {
+      window.__tomeMock.store['containment-only'] = true
+      // Off-by-default: the ceiling must force agents gapped even when the
+      // egress-default DEFAULT is off.
+      window.__tomeMock.store['egress-default'] = false
+    })
+    await openAddMenu(page)
+
+    await expect(page.getByRole('menuitem', { name: /Terminal/ })).toHaveCount(0)
+    await expect(page.getByRole('menuitem', { name: /spawn agents contained/ })).toHaveCount(0)
+    // Agent rows survive — and are marked contained.
+    await expect(page.getByRole('menuitem', { name: /⛨ claude/ })).toBeVisible()
+
+    // Spawning one still records a GAPPED pty.create: the ceiling forces
+    // egress on even though the menu no longer offers the toggle.
+    await page.getByRole('menuitem', { name: /⛨ claude/ }).click()
+    const calls = await ptyCreateCalls(page)
+    expect(calls).toHaveLength(1)
+    expect(calls[0].kind).toBe('claude')
+    expect(calls[0].egress).toBe(true)
+  })
 })

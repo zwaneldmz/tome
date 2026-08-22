@@ -516,6 +516,16 @@ fn type_in_terminal(c: &Conductor, env: &ConductorEnv, input: &Value) -> String 
 
 fn open_pane(env: &ConductorEnv, input: &Value, chat_id: &str) -> String {
     let kind = input.get("kind").and_then(Value::as_str).unwrap_or("");
+    // P2.1 containment-only ceiling: a plain terminal is the one
+    // inherently-UNSANDBOXED pane this tool can propose (agent kinds spawn
+    // gapped under containment-only — the renderer forces it, and the IPC
+    // layer would refuse them otherwise). Refuse to even propose it rather
+    // than hand the renderer a request its own backend must reject —
+    // defense in depth; `pty_create`'s check is the real wall.
+    if kind == "terminal" && (env.containment_only)() {
+        return "Refused: containment-only mode is on — unsandboxed terminal panes are disabled."
+            .to_string();
+    }
     (env.send)("conductor:open", json!({ "kind": kind, "source": chat_id }));
     "Requested.".to_string()
 }

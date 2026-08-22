@@ -105,6 +105,15 @@ pub struct ConductorEnv {
     /// Returns the serialized answer value the tool loop appends as the
     /// tool result; `Err` carries a same-shaped fallback string.
     pub gate_question: Arc<dyn Fn(Value) -> BoxFuture<Result<String, String>> + Send + Sync>,
+    /// P2.1 containment-only ceiling, as the tools see it: `true` while the
+    /// `containment-only` store key is on. `open_pane` reads this to refuse
+    /// proposing an inherently-unsandboxed pane (a plain terminal) instead
+    /// of sending the renderer a request its own backend would reject —
+    /// defense in depth; the IPC layer's `pty:create` check is the real wall.
+    /// A closure (not a boot-time bool) because the pref can flip mid-
+    /// session through the store, and `production_env` is built fresh per
+    /// `chat:send` anyway.
+    pub containment_only: Arc<dyn Fn() -> bool + Send + Sync>,
 }
 
 /// `run_command`'s timeout — the process is SIGKILLed via `kill_on_drop`
@@ -313,6 +322,24 @@ pub fn production_env(
                 let app = app.clone();
                 Box::pin(async move { gate_question_impl(&app, payload).await })
                     as BoxFuture<Result<String, String>>
+            })
+        },
+        containment_only: {
+            let app = app.clone();
+            Arc::new(move || {
+                // Same read pty_create performs for its own IPC-layer check:
+                // the store key, not any renderer-sent value. `locked` comes
+                // from AppState so a locked app still reads the key the same
+                // way (`store::get` gates on lock state per key — this key is
+                // not a lock-screen key, so a locked app reads Null and the
+                // ceiling reads off until unlock; the IPC wall has the same
+                // property, so the two can never disagree).
+                let state = app.state::<AppState>();
+                let Ok(dir) = app.path().app_data_dir() else {
+                    return false;
+                };
+                let locked = *state.locked.read().expect("AppState.locked lock poisoned");
+                crate::store::get(&dir, "containment-only", locked) == json!(true)
             })
         },
     }

@@ -85,6 +85,12 @@ mark('module evaluation start')
     prefs.conductorRun = true
     tome.conductor.allowRun(true)
   }
+  // Containment-only (P2.1): the UI mirror of a backend-enforced ceiling.
+  // The real wall is in pty_create — the renderer is a threat-model actor;
+  // this flag only hides what the backend would refuse anyway.
+  if (await tome.store.get('containment-only')) {
+    prefs.containmentOnly = true
+  }
   tome.egress.state().then((s) => Object.assign(agState, s))
   syncFolders() // main starts with an empty confinement list
   wsState.activeRoot = activeWorkspace()?.folders[0] || null

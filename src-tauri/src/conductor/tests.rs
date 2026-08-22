@@ -72,6 +72,7 @@ fn fake_env() -> (ConductorEnv, Sent, Logged) {
         gate_question: Arc::new(|_payload: Value| {
             unimplemented!("gate_question not faked for this test")
         }),
+        containment_only: Arc::new(|| false),
     };
     (env, sent, logged)
 }
@@ -726,6 +727,52 @@ fn type_in_terminal_reports_a_dead_or_unknown_pane() {
 fn open_pane_requests_the_renderer_open_a_new_pane() {
     let c = Conductor::new();
     let (env, sent, _logged) = fake_env();
+    let out = run_tool(
+        &c,
+        &env,
+        "open_pane",
+        &json!({ "kind": "claude" }),
+        "chat-9",
+    );
+    assert_eq!(out, "Requested.");
+    assert_eq!(
+        sent_channel(&sent, "conductor:open"),
+        vec![json!({ "kind": "claude", "source": "chat-9" })]
+    );
+}
+
+#[test]
+fn open_pane_refuses_an_unsandboxed_terminal_when_containment_only_is_on() {
+    // P2.1: containment-only is a ceiling the conductor also honors — a
+    // plain terminal is the one inherently-unsandboxed pane it could
+    // propose, so nothing reaches the renderer for it.
+    let c = Conductor::new();
+    let (mut env, sent, _logged) = fake_env();
+    env.containment_only = Arc::new(|| true);
+    let out = run_tool(
+        &c,
+        &env,
+        "open_pane",
+        &json!({ "kind": "terminal" }),
+        "chat-9",
+    );
+    assert_eq!(
+        out,
+        "Refused: containment-only mode is on — unsandboxed terminal panes are disabled."
+    );
+    assert!(
+        sent.lock().unwrap().is_empty(),
+        "a refused proposal must never reach the renderer"
+    );
+}
+
+#[test]
+fn open_pane_still_proposes_agent_panes_when_containment_only_is_on() {
+    // Agent panes spawn gapped under containment-only (the renderer forces
+    // the ceiling over egress-default), so proposing them stays legitimate.
+    let c = Conductor::new();
+    let (mut env, sent, _logged) = fake_env();
+    env.containment_only = Arc::new(|| true);
     let out = run_tool(
         &c,
         &env,

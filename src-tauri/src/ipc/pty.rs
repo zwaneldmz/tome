@@ -458,6 +458,29 @@ fn verify_real_app_data_dir(app_data_dir: &Path) -> Result<(), String> {
     }
 }
 
+/// P2.1 (launch hardening): the containment-only ceiling's pure decision
+/// core. When the pref is on, an ungapped spawn — agent OR plain terminal —
+/// is refused with a message naming the mode; a gapped spawn passes. Split
+/// out of `pty_create`'s body because the real decision is a two-boolean
+/// predicate worth unit-testing without a live `AppHandle`/store (this
+/// crate enables no tauri `test` feature, so nothing outside a running app
+/// can construct one — see `ipc::egress::EgressEnv`'s own doc comment for
+/// the same seam's rationale).
+///
+/// The renderer is a threat-model actor: its menu removal (spawn-policy.js)
+/// is convenience, THIS check is the wall — it runs at the IPC layer, after
+/// the store read, before anything spawns.
+fn containment_only_refuses(containment_only: bool, gapped: bool) -> Option<&'static str> {
+    if containment_only && !gapped {
+        Some(
+            "containment-only mode is on — unsandboxed pane spawns are disabled. \
+             Turn it off in Preferences → Security to spawn unsandboxed panes.",
+        )
+    } else {
+        None
+    }
+}
+
 /// The TOME-001 re-auth ceremony's three possible outcomes — see this
 /// module's doc comment and [`evaluate_reauth`]. `pub(crate)`: reused
 /// verbatim (not duplicated) by `ipc::runs::runs_start`'s own re-auth
@@ -624,6 +647,36 @@ pub async fn pty_create(
     };
     let effective_docker =
         effective_gapped && docker_gateway_store == json!(true) && opts.docker.unwrap_or(false);
+
+    // P2.1 containment-only ceiling — enforced HERE, at the IPC layer,
+    // never in the renderer (the renderer is a threat-model actor; its menu
+    // removal is convenience, this is the actual wall). Read the store key
+    // like every other policy key; when on, ANY ungapped spawn — agent or
+    // terminal — fails closed with an error naming the mode, before the
+    // reauth ceremony could even prompt (no misleading prompt for a spawn
+    // that will never happen).
+    let containment_only = {
+        let co_dir = dir.clone();
+        tokio::task::spawn_blocking(move || store::get(&co_dir, "containment-only", locked))
+            .await
+            .map_err(|e| e.to_string())?
+    } == json!(true);
+    if let Some(reason) = containment_only_refuses(containment_only, effective_gapped) {
+        events::append(
+            &app,
+            eventlog::make_event(
+                "pty:blocked",
+                vec![
+                    ("paneId", json!(opts.id)),
+                    ("kind", json!(opts.kind)),
+                    ("gapped", json!(effective_gapped)),
+                    ("reason", json!(reason)),
+                ],
+                None,
+            ),
+        );
+        return Err(reason.to_string());
+    }
 
     // ---- TOME-001 re-auth ceremony (before resolving cwd — matches
     // createPty's own order) ----
@@ -1897,6 +1950,41 @@ mod tests {
         assert!(
             err.contains("could not verify"),
             "a missing dir must fail closed with an honest message: {err}"
+        );
+    }
+
+    // ================= containment_only_refuses — P2.1's IPC-layer ceiling ================
+
+    #[test]
+    fn containment_only_refuses_every_ungapped_spawn_when_the_pref_is_on() {
+        // The predicate does not distinguish agent from terminal: an
+        // ungapped pty is an ungapped pty, and containment-only forbids
+        // the whole class (the IPC layer must not rely on the renderer's
+        // menu having removed the Terminal row).
+        assert!(containment_only_refuses(true, false).is_some());
+    }
+
+    #[test]
+    fn containment_only_never_refuses_a_gapped_spawn() {
+        assert_eq!(containment_only_refuses(true, true), None);
+    }
+
+    #[test]
+    fn containment_only_refuses_nothing_when_the_pref_is_off() {
+        assert_eq!(containment_only_refuses(false, false), None);
+        assert_eq!(containment_only_refuses(false, true), None);
+    }
+
+    #[test]
+    fn containment_only_refusal_message_names_the_mode_and_the_way_out() {
+        let reason = containment_only_refuses(true, false).expect("must refuse");
+        assert!(
+            reason.contains("containment-only"),
+            "the error must name the mode that blocked the spawn: {reason}"
+        );
+        assert!(
+            reason.contains("Preferences → Security"),
+            "the error must tell the user where to lift the ceiling: {reason}"
         );
     }
 

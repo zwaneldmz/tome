@@ -25,6 +25,7 @@ import { HistoryPanel } from './history.js'
 import { renderStatusbar, setStatusbarDock } from './statusbar.js'
 import { plusIcon, popoutIcon } from './icons.js'
 import { AGENTS } from '../shared/pane-kinds.js'
+import { spawnPolicy } from './spawn-policy.js'
 import { VOICE_CHAT_ID } from './chat-lifecycle.js'
 import { createFlow } from '../shared/flow-model.js'
 import { stripControlChars } from '../shared/terminal-text.js'
@@ -757,7 +758,11 @@ export function spawnTerminal({ kind, cwd, egress, wsName, saved, target, model,
   cwd = cwd || paneCwd()
   const name = cwd.split('/').pop() || cwd
   const isAgent = kind !== 'terminal'
-  const gapped = egress !== undefined ? !!egress : isAgent && prefs.egressDefault
+  // Containment-only is a ceiling (P2.1): agents force gapped even when
+  // egress-default is off — the backend refuses ungapped spawns anyway,
+  // so sending one would just fail with an error. See spawn-policy.js.
+  const gapped =
+    egress !== undefined ? !!egress : isAgent && spawnPolicy(prefs).agentsGapped
   // Sandboxed Docker is only ever meaningful for a gapped pane (an ungapped
   // pane already has full host access) and only when both the global master
   // and the per-pane spawn mode are on.

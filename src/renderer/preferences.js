@@ -1631,6 +1631,16 @@ export async function preferencesModal({ section } = {}) {
     )
     toggleRow(
       section,
+      'Containment only',
+      'no unsandboxed panes anywhere — a ceiling, not a default: the ＋ menu drops unsandboxed spawns, the assistant stops proposing them, and the backend refuses them',
+      () => prefs.containmentOnly,
+      (v) => {
+        prefs.containmentOnly = v
+        tome.store.set('containment-only', v)
+      }
+    )
+    toggleRow(
+      section,
       'Assistant may run commands',
       null,
       () => prefs.conductorRun,
