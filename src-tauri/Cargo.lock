@@ -4920,7 +4920,7 @@ dependencies = [
 
 [[package]]
 name = "tome"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "base32",
  "block2",
