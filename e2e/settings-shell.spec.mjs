@@ -68,6 +68,7 @@ test.describe('slice 3a settings shell', () => {
       'sidebar',
       'assistant',
       'agents',
+      'opencode',
       'security',
       'export',
       'schedules',
@@ -108,11 +109,12 @@ test.describe('slice 3a settings shell', () => {
   test('search indexes hint text, placeholders, and non-row content', async ({ page }) => {
     await openSettings(page)
     await page.locator('.prefs-search').fill('key')
-    // assistant: the provider cards' key fields and key hints.
+    // assistant: the provider cards' key fields and key hints; opencode:
+    // the credential rows' key inputs and 'API key set' hints.
     const visible = await page
       .locator('.prefs-section:not(.prefs-section-hidden)')
       .evaluateAll((ns) => ns.map((n) => n.dataset.section))
-    expect(visible).toEqual(['assistant'])
+    expect(visible).toEqual(['assistant', 'opencode'])
   })
 
   test('rail click scrolls; scroll sync sets aria-current; "/" focuses search', async ({ page }) => {

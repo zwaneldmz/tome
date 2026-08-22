@@ -385,7 +385,9 @@ async fn refuses_a_structurally_broken_graph_rather_than_running_the_good_half()
 async fn refuses_the_whole_run_naming_the_node_with_no_headless_template() {
     let root = workspace();
     let mut doc = flow_doc("mixed", &["n1", "n2"], &[("n1", "n2")]);
-    doc["nodes"][1]["kind"] = json!("opencode");
+    // A plain terminal has no headless template (only the three agent
+    // CLIs background) — naming one refuses the WHOLE run.
+    doc["nodes"][1]["kind"] = json!("terminal");
     doc["nodes"][1]["name"] = json!("Summarizer");
     let path = write_flow(&root, &doc);
     let runs = new_runs();

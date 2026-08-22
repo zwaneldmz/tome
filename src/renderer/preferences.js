@@ -12,6 +12,7 @@ import { showOnboarding } from './onboarding.js'
 import { activeWorkspace } from './workspaces.js'
 import { mentorState, saveMentorSettings, setUq, uq } from './mentor.js'
 import { GROUPS, normalize, filterRows, sectionToGroup } from './settings-nav.js'
+import { addCommandTerminal } from './panes.js'
 
 const THEME_LABEL = { system: 'Match system', light: 'Light', dark: 'Dark' }
 const SIDEBAR_DEFAULT = 236
@@ -194,6 +195,197 @@ export async function buildAgentsSection() {
   form.append(idIn, labelIn, binIn, argsIn, add)
   section.appendChild(form)
   section.appendChild(err)
+  return section
+}
+
+// ---- opencode ----
+// Credentials, subscriptions, and the default model for the `opencode`
+// agent CLI — reading/writing opencode's OWN files (auth.json + opencode
+// config), never a Tome-side mirror, so whatever is configured here is
+// exactly what a spawned opencode pane sees. Keys are write-only (the
+// same contract as the Assistant provider cards): status reports
+// credential TYPES only, and the key field always comes back empty.
+export async function buildOpencodeSection(openLogin) {
+  const section = el('section', 'prefs-section')
+  section.append(el('h4', '', 'opencode'))
+
+  const status = await tome.opencode.status().catch((e) => {
+    row(section, 'Status', el('span', 'prefs-hint', `error: ${e.message}`))
+    return null
+  })
+  if (!status) return section
+
+  if (!status.installed) {
+    const hint = el('p', 'prefs-note', `opencode is not installed (${status.reason}). Install it from opencode.ai, then relaunch Tome.`)
+    section.appendChild(hint)
+    return section
+  }
+
+  // ---- version / account -------
+  row(section, 'Status', el('span', 'prefs-hint', status.version || 'installed'), 'agent CLI on PATH')
+  const login = el('button', 'ag-btn', 'Log in (subscription / OAuth)…')
+  login.type = 'button'
+  login.addEventListener('click', () => openLogin())
+  row(section, 'Account', login, 'opens an interactive terminal pane')
+
+  // ---- default model -------
+  const modelSel = el('select', 'prefs-input')
+  modelSel.setAttribute('aria-label', 'opencode default model')
+  const cliDefault = el('option', null, 'CLI default')
+  cliDefault.value = ''
+  modelSel.appendChild(cliDefault)
+  modelSel.disabled = true
+  const paintModel = () => {
+    const cur = status.defaultModel
+    const ids = new Set([...(cur ? [cur] : [])])
+    for (const o of [...modelSel.options].slice(1)) ids.add(o.value)
+    for (const id of ids) {
+      if ([...modelSel.options].some((o) => o.value === id)) continue
+      const o = el('option', null, id)
+      o.value = id
+      modelSel.appendChild(o)
+    }
+    modelSel.value = cur || ''
+    modelSel.disabled = false
+  }
+  // The full model catalog loads async; the select starts with just the
+  // current default and fills in as `opencode models` answers. A failed
+  // fetch (CLI missing, timeout) leaves the select usable with whatever
+  // the user types into the default — the select is never the only way.
+  paintModel()
+  tome.opencode
+    .models()
+    .then((models) => {
+      for (const id of models) {
+        if ([...modelSel.options].some((o) => o.value === id)) continue
+        const o = el('option', null, id)
+        o.value = id
+        modelSel.appendChild(o)
+      }
+      modelSel.disabled = false
+    })
+    .catch(() => {
+      modelSel.disabled = false
+    })
+  modelSel.addEventListener('change', async () => {
+    try {
+      await tome.opencode.setModel(modelSel.value)
+      status.defaultModel = modelSel.value || null
+      toast(modelSel.value ? `default model: ${modelSel.value}` : 'CLI default restored', 'ok')
+    } catch (e) {
+      toast(e.message)
+    }
+  })
+  row(section, 'Default model', modelSel, 'what opencode runs when nothing pins one')
+
+  // ---- credentials -------
+  const auth = new Map(status.auth.map((a) => [a.id, a.cred_type]))
+  const ids = [...new Set([...auth.keys(), ...status.providers])].sort()
+  const list = el('div', 'prefs-agents')
+  const renderCreds = () => {
+    list.innerHTML = ''
+    if (!ids.length) {
+      list.appendChild(el('div', 'prefs-hint', 'No providers yet — add a key below, or log in.'))
+    }
+    for (const id of ids) {
+      const r = el('div', 'prefs-row')
+      const text = el('div', 'prefs-text')
+      const head = el('span', 'prefs-label')
+      const cred = auth.get(id)
+      head.append(id)
+      text.append(head)
+      text.append(
+        el(
+          'span',
+          'prefs-hint',
+          cred
+            ? cred === 'api'
+              ? 'API key set'
+              : `${cred} credential`
+            : 'no credential'
+        )
+      )
+      const ctrl = el('div', 'prov-line')
+      const keyIn = el('input', 'prefs-input prov-key')
+      keyIn.type = 'password'
+      keyIn.placeholder = cred ? 'replace key…' : 'API key…'
+      keyIn.setAttribute('aria-label', `${id} API key`)
+      keyIn.autocomplete = 'off'
+      keyIn.spellcheck = false
+      const save = el('button', 'ag-btn ghost', 'Save')
+      save.type = 'button'
+      save.addEventListener('click', async () => {
+        try {
+          await tome.opencode.keySet(id, keyIn.value.trim())
+          keyIn.value = ''
+          auth.set(id, 'api')
+          renderCreds()
+          toast(`${id} key saved`, 'ok')
+        } catch (e) {
+          toast(e.message)
+        }
+      })
+      ctrl.append(keyIn, save)
+      if (cred) {
+        const remove = el('button', 'ag-btn ghost', 'Remove')
+        remove.type = 'button'
+        remove.addEventListener('click', async () => {
+          try {
+            await tome.opencode.keySet(id, '')
+            auth.delete(id)
+            renderCreds()
+            toast(`${id} credential removed`, 'ok')
+          } catch (e) {
+            toast(e.message)
+          }
+        })
+        ctrl.appendChild(remove)
+      }
+      r.append(text, ctrl)
+      list.appendChild(r)
+    }
+  }
+  renderCreds()
+  section.appendChild(list)
+
+  // ---- add a key for a provider opencode knows about -------
+  const form = el('div', 'prefs-agent-form')
+  const mk = (placeholder) => {
+    const i = el('input')
+    i.type = 'text'
+    i.placeholder = placeholder
+    i.setAttribute('aria-label', placeholder)
+    i.spellcheck = false
+    i.autocomplete = 'off'
+    return i
+  }
+  const addId = mk('provider id — e.g. deepseek')
+  const addKey = mk('API key…')
+  addKey.type = 'password'
+  const addBtn = el('button', 'ag-btn ghost', 'Add key')
+  addBtn.type = 'button'
+  const addErr = el('div', 'prefs-hint')
+  addBtn.addEventListener('click', async () => {
+    const id = addId.value.trim()
+    addErr.textContent = ''
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(id)) {
+      addErr.textContent = 'provider id: 1–64 chars of [a-z0-9-]'
+      return
+    }
+    try {
+      await tome.opencode.keySet(id, addKey.value.trim())
+      auth.set(id, 'api')
+      if (!ids.includes(id)) ids.push(id)
+      ids.sort()
+      renderCreds()
+      addId.value = addKey.value = ''
+      toast(`${id} key saved`, 'ok')
+    } catch (e) {
+      toast(e.message)
+    }
+  })
+  form.append(addId, addKey, addBtn)
+  section.append(form, addErr)
   return section
 }
 
@@ -1675,6 +1867,13 @@ export async function preferencesModal({ section } = {}) {
   mount(buildSidebar(), 'sidebar')
   startAsync('assistant', 'Assistant', buildAssistant)
   startAsync('agents', 'Agents', () => buildAgentsSection())
+  startAsync('opencode', 'opencode', () =>
+    buildOpencodeSection(() => {
+      m.close() // Settings yields to the login pane so it is actually visible
+      addCommandTerminal('opencode providers login')
+      toast('opencode login opened in a terminal pane', 'ok')
+    })
+  )
   mount(buildSecurity(), 'security')
   startAsync('export', 'Export destinations', () => buildExportSection(closeReopeningAt('integrations')))
   startAsync('schedules', 'Schedules', () => buildSchedulesSection())
