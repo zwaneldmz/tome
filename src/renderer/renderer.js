@@ -15,7 +15,7 @@ import { dock, addChat, addBrain, openFile, restoreLayout } from './panes.js'
 import { markdownLangExt } from './cm-lang.js'
 import { renderAll } from './menus.js'
 import { startGitPolling, initGitMenu } from './git.js'
-import { activeWorkspace, syncFolders } from './workspaces.js'
+import { activeWorkspace, syncFolders, syncAssistantRoot } from './workspaces.js'
 import { checkRepoEgress } from './repo-egress.js'
 import { bootAuth } from './lock.js'
 import { maybeShowOnboarding } from './onboarding.js'
@@ -24,6 +24,7 @@ import { bootChrome } from './chrome.js'
 import { initVoice, voiceActive, VOICE_CHAT_ID } from './voice.js'
 import { loadEditorPrefs, warmLanguages } from './panels/editor.js'
 import './egress-ui.js' // wires the egress event listeners + strip ticker
+import { initPlanTracker } from './plan-tracker.js' // the execution HUD
 import './viibi.js' // the mascot: status-bar sprite + processing-state wiring
 import './mentor.js' // mentor mode: gate subscription + per-workspace uq/verbose
 import './keys.js' // the keyboard spine: pane keys, quick open, zoom, reference
@@ -46,6 +47,8 @@ tome.chat.onDone(
   ({ id, error, aborted }) => !voiceOwns(id) && chats.get(id)?.finish(error, aborted)
 )
 tome.chat.onTool(({ id, tool, hint }) => !voiceOwns(id) && chats.get(id)?.toolNote(tool, hint))
+tome.conductor.onAgent(({ chatId, kind, status }) => !voiceOwns(chatId) && chats.get(chatId)?.agentNote(kind, status))
+initPlanTracker()
 tome.brain.onChanged(({ ws: bws, index }) => brains.get(bws)?.onChanged(index))
 
 // ---------- boot ----------
@@ -85,6 +88,7 @@ mark('module evaluation start')
   tome.egress.state().then((s) => Object.assign(agState, s))
   syncFolders() // main starts with an empty confinement list
   wsState.activeRoot = activeWorkspace()?.folders[0] || null
+  syncAssistantRoot() // the assistant starts AT the project root
   renderAll()
   try {
     await restoreLayout()
