@@ -151,7 +151,14 @@ fn current_linux_sandbox_strategy() -> crate::egress::linux::SandboxStrategy {
 /// (`agent_spawn::build_headless_spawn`'s output) — threaded straight into
 /// the Linux wrap's `GappedSpawnSpec::inner_argv` with `headless: true`
 /// (THE first headless caller of `egress::linux` in this tree).
-async fn build_production_agent_env(
+/// The real sandbox/gap/proxy builder behind a flow node's headless
+/// spawn — `pub(crate)` so `crate::agent_run` (the assistant's `run_agent`
+/// tool backend) reuses the identical containment path rather than
+/// re-deriving it.
+///
+/// (`app.state().inner()` in the body is `State::inner` — see the import
+/// list at the top of this file.)
+pub(crate) async fn build_production_agent_env(
     app: &AppHandle,
     pane_id: &str,
     gapped: bool,

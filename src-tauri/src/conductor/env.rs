@@ -58,6 +58,12 @@ pub struct ConductorEnv {
     pub write_pty: Arc<dyn Fn(&str, &str) -> bool + Send + Sync>,
     /// `getRoots()` — open workspace folders, `[]` until `ws:sync` lands.
     pub roots: Arc<dyn Fn() -> Vec<String> + Send + Sync>,
+    /// The ACTIVE workspace root the renderer synced via `conductor:cwd` —
+    /// the folder the assistant's workspace-relative tools should operate
+    /// at, preferred over `roots`' first entry (which is the first folder of
+    /// the FIRST workspace, not the one you are looking at). `None` until
+    /// the renderer's first sync.
+    pub cwd: Arc<dyn Fn() -> Option<String> + Send + Sync>,
     /// One `(system, messages, tools) -> streamed reply` call — the
     /// wire-agnostic shape `chat::sse::stream_chat` already normalizes to,
     /// with the resolved provider/betas/fallbacks baked in by
@@ -89,6 +95,11 @@ pub struct ConductorEnv {
     /// `run_command`'s backend — `(cwd, cmd) -> combined stdout+stderr`
     /// (capped, with a timeout), or an `Err` describing the failure.
     pub run_command: Arc<dyn Fn(&str, &str) -> BoxFuture<Result<String, String>> + Send + Sync>,
+    /// `run_agent`'s backend — one headless agent run (sandboxed + gapped,
+    /// bounded by the backend's own timeout), or an `Err` describing the
+    /// refusal/failure. See `crate::agent_run` for the containment story.
+    pub run_agent:
+        Arc<dyn Fn(crate::agent_run::RunAgentRequest, PathBuf) -> BoxFuture<Result<String, String>> + Send + Sync>,
     /// `gate_question`'s backend — registers a comprehension gate, emits
     /// `mentor:check`, and awaits the user's `mentor_answer` (or times out).
     /// Returns the serialized answer value the tool loop appends as the
@@ -234,6 +245,10 @@ pub fn production_env(
                 folders
             })
         },
+        cwd: {
+            let app = app.clone();
+            Arc::new(move || app.state::<AppState>().conductor.cwd())
+        },
         stream_chat: Arc::new(
             move |system: Option<String>,
                   messages: Vec<Value>,
@@ -284,6 +299,14 @@ pub fn production_env(
             Box::pin(async move { run_command_impl(&cwd, &cmd).await })
                 as BoxFuture<Result<String, String>>
         }),
+        run_agent: {
+            let app = app.clone();
+            Arc::new(move |req: crate::agent_run::RunAgentRequest, cwd: PathBuf| {
+                let app = app.clone();
+                Box::pin(async move { crate::agent_run::run_headless_agent(&app, &req, &cwd).await })
+                    as BoxFuture<Result<String, String>>
+            })
+        },
         gate_question: {
             let app = app.clone();
             Arc::new(move |payload: Value| {
