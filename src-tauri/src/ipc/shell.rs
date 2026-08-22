@@ -40,7 +40,8 @@ fn confinement_error(what: &str, folders_synced: bool) -> String {
 /// on the Rust side; `Err` is reserved for `lock_gate::guard` alone, the
 /// one real throw path the Electron handler actually had.
 ///
-/// `confine::confined_real_path` (`crate::confine`, S3's slice) has since
+/// `confine::confined_real_path_in_store` (`crate::confine`'s display form,
+/// which additionally admits the store-named core vault — P5.4) has since
 /// landed as a real, tested implementation. This command was originally
 /// written against only its signature (`fn(&State<AppState>, &Path) ->
 /// Result<PathBuf, String>`) while S3's body was still in flight, and needed
@@ -55,7 +56,7 @@ pub async fn shell_open_path(
     path: String,
 ) -> Result<serde_json::Value, String> {
     lock_gate::guard(&state, "shell:openPath")?;
-    let real = match confine::confined_real_path(&state, Path::new(&path)) {
+    let real = match confine::confined_real_path_in_store(&app, &state, Path::new(&path)) {
         Ok(p) => p,
         Err(_) => {
             let synced = *state
