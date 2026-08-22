@@ -108,3 +108,38 @@ jobs:
       - name: cargo audit (Rust supply-chain)
         working-directory: src-tauri
         run: cargo audit
+
+  # P5.3 (launch hardening): the macOS seatbelt half of the in-house
+  # dynamic escape suite — spawns REAL sandbox-exec processes under the
+  # production-built SBPL profile (egress::seatbelt::seatbelt_profile, the
+  # exact builder ipc::pty::pty_create uses) and attempts the THREATMODEL
+  # escape list: raw TCP egress (80/443/non-standard + the F-01
+  # loopback-other-port leg), in-sandbox DNS, SSH, config-dir reads and
+  # writes (incl. the seatbelt canonical-path symlink caveat, reproduced
+  # live and documented), the Docker socket (+ docker-CLI leg, where a CLI
+  # exists), the proxy allowlist across lock/unlock/relock (incl. the
+  # TOME-002 live-tunnel relock sweep), and .tome/egress.json validation
+  # rejections. Every attempt must be BLOCKED — an escape fails this job.
+  # sandbox-exec runs fine on hosted macos runners (verified locally while
+  # landing this job); if it ever proves flaky on the runner image, gate
+  # this job behind workflow_dispatch and say so in SECURITY.md. The
+  # Linux counterpart runs in linux-sandbox.yml's ubuntu legs (real
+  # bwrap + tome-shim).
+  escape-suite-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # No sidecar staging needed: the suite depends only on tome-flow
+      # (the production egress builders), not on the tauri crate.
+      - name: Escape suite (macOS seatbelt — sandbox-exec under the production profile)
+        working-directory: src-tauri
+        run: cargo run -p tome-escape-suite --locked

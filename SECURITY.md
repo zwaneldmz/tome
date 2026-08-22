@@ -105,6 +105,32 @@ Two independent reviews scored the codebase **8.0 / 10**:
 Findings from both are tracked in
 [docs/IMPROVEMENTS-STATUS.md](docs/IMPROVEMENTS-STATUS.md).
 
+## Dynamic escape suite
+
+The static review was well-hardened; the dynamic proof lives in the
+in-house escape suite (`src-tauri/crates/tome-escape-suite`). It spawns
+REAL contained panes through the production spawn seams — on macOS
+`/usr/bin/sandbox-exec` under the production-built SBPL profile
+(`egress::seatbelt::seatbelt_profile`), on Linux the real `bwrap` +
+`tome-shim` wrap assembled by `egress::linux::build_bwrap_argv` with a
+real `PaneProxy` — and attempts the THREATMODEL escape list, asserting
+every attempt is blocked: raw TCP egress on ports 80/443 and non-standard
+ports (plus the F-01 loopback-other-port leg), in-sandbox DNS resolution,
+SSH, config-dir reads and writes (with the seatbelt canonical-path
+symlink caveat exercised live and its result documented honestly), the
+Docker socket at every known path and the `docker run -v /:/host` escape
+class, the proxy allowlist across providers/unlock/relock including the
+TOME-002 live-tunnel relock sweep, `.tome/egress.json` validation
+rejections, and (delegated to in-crate IPC-layer unit tests, which this
+separate crate cannot reach) the second-factor gate on uncontained
+spawns. Any escape fails the suite and the CI gate: it runs on every push
+and PR in `.github/workflows/linux-sandbox.yml` (bwrap, Ubuntu 22.04 and
+24.04) and the `escape-suite-macos` job in `.github/workflows/build.yml`
+(sandbox-exec, macOS). To run it locally: `cargo run -p tome-escape-suite`
+from `src-tauri/` (on Linux, install bubblewrap and build the sidecar
+first — `cargo build -p tome-shim --release` — or point `TOME_SHIM_BIN`
+at it).
+
 ## Reporting a vulnerability
 
 - Use **GitHub Security Advisories** on
