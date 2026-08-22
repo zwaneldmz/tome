@@ -421,6 +421,43 @@ fn shim_path_in(dir: &Path, target_triple: Option<&str>) -> PathBuf {
     }
 }
 
+/// P1.1 (launch hardening, fail closed): `app_data_dir` must resolve to
+/// ITSELF before any contained pane spawns. SBPL `subpath` rules match the
+/// path `sandbox-exec` canonicalizes the operation's target to — through
+/// symlinks (see `egress::seatbelt`'s module doc comment, "Canonical-path
+/// caveat", verified live against `sandbox-exec`) — so a config directory
+/// reached through a symlinked ancestor would silently escape the
+/// profile's config-dir confinement (and the Linux rungs' config-dir
+/// tmpfs/Landlock exclusion, which name the spelled path the same way).
+/// Enforced HERE, at the one caller that hands `app_data_dir` to the
+/// confinement builders: a contained spawn with a symlinked config dir is
+/// refused with an error naming the problem, never launched into a
+/// profile that looks confined and isn't.
+///
+/// `std::fs::canonicalize` requires the directory to exist — boot creates
+/// it (`lib.rs::boot_auth_and_egress`'s `create_dir_all`), so a missing
+/// dir here is already an abnormal state; failing closed with an honest
+/// message is the right answer for that too, not a silent proceed.
+fn verify_real_app_data_dir(app_data_dir: &Path) -> Result<(), String> {
+    match std::fs::canonicalize(app_data_dir) {
+        Ok(real) if real == app_data_dir => Ok(()),
+        Ok(real) => Err(format!(
+            "contained pane refused: Tome's config directory {} is reached \
+             through a symlink (it resolves to {}). Sandbox rules match the real \
+             path, so a symlinked config directory would silently escape file \
+             confinement. Point Tome's data directory at a real path (no \
+             symlinked ancestors) and try again.",
+            app_data_dir.display(),
+            real.display(),
+        )),
+        Err(e) => Err(format!(
+            "contained pane refused: could not verify that Tome's config directory \
+             {} is a real path with no symlinked ancestors: {e}",
+            app_data_dir.display(),
+        )),
+    }
+}
+
 /// The TOME-001 re-auth ceremony's three possible outcomes — see this
 /// module's doc comment and [`evaluate_reauth`]. `pub(crate)`: reused
 /// verbatim (not duplicated) by `ipc::runs::runs_start`'s own re-auth
@@ -665,6 +702,27 @@ pub async fn pty_create(
     // gateway socket is bind-mounted to a fixed in-namespace path.
     let mut docker_env_socket: Option<PathBuf> = None;
     if effective_gapped {
+        // P1.1: fail closed on a symlinked config dir BEFORE any proxy or
+        // profile work — the seatbelt/Linux confinement rules name the
+        // spelled path, so a symlinked `app_data_dir` would silently escape
+        // them (see `verify_real_app_data_dir`'s doc comment and
+        // `egress::seatbelt`'s "Canonical-path caveat").
+        if let Err(reason) = verify_real_app_data_dir(&dir) {
+            events::append(
+                &app,
+                eventlog::make_event(
+                    "pty:blocked",
+                    vec![
+                        ("paneId", json!(opts.id)),
+                        ("kind", json!(opts.kind)),
+                        ("gapped", json!(true)),
+                        ("reason", json!(reason.clone())),
+                    ],
+                    None,
+                ),
+            );
+            return Err(reason);
+        }
         let host_os = if cfg!(target_os = "macos") {
             HostOs::MacOs
         } else if cfg!(target_os = "linux") {
@@ -1708,6 +1766,57 @@ mod tests {
             "test precondition: expected USER or LOGNAME to be set in the test process"
         );
         assert!(cmd.get_env("USER").is_none() || std::env::var("USER").is_err());
+    }
+
+    // ================= verify_real_app_data_dir — P1.1 fail-closed caller
+    // invariant (a symlinked config dir would silently escape the subpath
+    // confinement — see seatbelt.rs's "Canonical-path caveat") ============
+
+    #[test]
+    fn verify_real_app_data_dir_accepts_a_directory_that_resolves_to_itself() {
+        // Canonicalize the fixture first: on macOS `tempdir()`'s path runs
+        // through `/var` -> `/private/var`, so the literal tempdir path is
+        // already a symlinked spelling there — the ACCEPT path is "the dir
+        // resolves to itself", which the canonical form exercises exactly.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap();
+        assert_eq!(verify_real_app_data_dir(&dir), Ok(()));
+    }
+
+    #[test]
+    fn verify_real_app_data_dir_accepts_a_nested_real_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = std::fs::canonicalize(tmp.path()).unwrap().join("a/b");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(verify_real_app_data_dir(&dir), Ok(()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn verify_real_app_data_dir_refuses_a_symlinked_directory_naming_the_problem() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = std::fs::canonicalize(tmp.path()).unwrap().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let err = verify_real_app_data_dir(&link).unwrap_err();
+        assert!(err.contains("symlink"), "error must name the problem: {err}");
+        assert!(
+            err.contains("escape"),
+            "error must name the confinement escape: {err}"
+        );
+        // The real path is in the message so the user can see what to fix.
+        assert!(err.contains(real.to_string_lossy().as_ref()));
+    }
+
+    #[test]
+    fn verify_real_app_data_dir_refuses_an_unverifiable_directory_fail_closed() {
+        let err = verify_real_app_data_dir(Path::new("/definitely/not/here/tome-config"))
+            .unwrap_err();
+        assert!(
+            err.contains("could not verify"),
+            "a missing dir must fail closed with an honest message: {err}"
+        );
     }
 
     // ================= evaluate_reauth — TOME-001's three-way outcome =================

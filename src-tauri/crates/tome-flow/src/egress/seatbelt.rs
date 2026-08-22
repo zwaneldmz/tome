@@ -56,7 +56,13 @@
 //! symlinked ancestors, so production is unaffected, but a caller that
 //! ever handed this builder a symlinked directory would get a profile that
 //! silently fails to confine it. Do not canonicalize `app_data_dir` here
-//! on macOS; that is the caller's invariant to preserve.
+//! on macOS; the caller's invariant — never hand this builder a symlinked
+//! directory — is now **enforced at the caller**, not merely preserved:
+//! `ipc::pty::pty_create` realpath-checks `app_data_dir`
+//! (`std::fs::canonicalize` and compare to itself, via its own
+//! `verify_real_app_data_dir`) at every contained-pane spawn and refuses
+//! the spawn with an error naming the problem when the directory does not
+//! resolve to itself.
 
 // Real and tested (see `#[cfg(test)]` below), with one real call site
 // (`ipc::pty::pty_create` builds the profile AFTER creating the pane's
