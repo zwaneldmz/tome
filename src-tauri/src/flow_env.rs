@@ -185,9 +185,18 @@ pub(crate) async fn build_production_agent_env(
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
 
     if cfg!(target_os = "macos") {
-        let proxy = crate::ipc::egress::create_gapped_pane_proxy(app, state.inner(), pane_id, None)
-            .await
-            .map_err(|e| e.to_string())?;
+        let proxy = crate::ipc::egress::create_gapped_pane_proxy(
+            app,
+            state.inner(),
+            pane_id,
+            None,
+            // macOS always reports full confinement (P1.2): seatbelt
+            // enforces network AND config-dir file rules in one profile,
+            // no fail-open rung.
+            crate::egress::ConfinementLevel::Full,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         extras.proxy_port = Some(proxy.port());
         let env = crate::agent_env::compose_agent_env(&process_env, &extras)
             .into_iter()
@@ -217,12 +226,27 @@ pub(crate) async fn build_production_agent_env(
         if let Some(parent) = sock_path.parent() {
             crate::egress::linux::ensure_pane_socket_dir(parent).map_err(|e| e.to_string())?;
         }
+        // P1.2 rung-2 honesty: bwrap reports full (tmpfs hides the config
+        // dir); the self-unshare rung reports network-only — its Landlock
+        // file confinement fails open, and the headless run path has no
+        // strip watcher to upgrade it on the shim's `.landlock` marker, so
+        // it stays conservatively under-reported. Remove the marker
+        // (nothing here ever polls it) so a stale "ok" from a previous
+        // session can never survive.
+        let confinement_level = match &strategy {
+            crate::egress::linux::SandboxStrategy::Bwrap => crate::egress::ConfinementLevel::Full,
+            _ => crate::egress::ConfinementLevel::NetworkOnly,
+        };
+        if matches!(&strategy, crate::egress::linux::SandboxStrategy::SelfUnshare) {
+            let _ = std::fs::remove_file(crate::egress::linux::landlock_marker_path(&sock_path));
+        }
         let shim_path = resolve_shim_path()?;
         let proxy = crate::ipc::egress::create_gapped_pane_proxy(
             app,
             state.inner(),
             pane_id,
             Some(sock_path.clone()),
+            confinement_level,
         )
         .await
         .map_err(|e| e.to_string())?;

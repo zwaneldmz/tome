@@ -60,6 +60,15 @@
     calls,
     emit: (event, payload) => (handlers[event] || []).forEach((cb) => cb(payload)),
     graphify: { available: true, built: false },
+    // Mutable egress snapshot — `tome.egress.state()` returns it and specs
+    // can seed panes (e.g. a low-confinement rung-2 state) by assigning
+    // `window.__tomeMock.egress` before boot or emitting egress:state.
+    egress: {
+      panes: {},
+      defaultMinutes: 15,
+      repo: [],
+      auth: { configured: false, totp: false },
+    },
     opencode: {
       installed: true,
       version: '1.18.19',
@@ -201,12 +210,7 @@
     openPath: asyncNoop,
 
     egress: {
-      state: async () => ({
-        panes: {},
-        defaultMinutes: 15,
-        repo: [],
-        auth: { configured: false, totp: false },
-      }),
+      state: async () => window.__tomeMock.egress,
       unlock: async () => ({ ok: true }),
       relock: asyncNoop,
       setup: async () => ({ ok: true }),

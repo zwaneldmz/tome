@@ -159,6 +159,34 @@ impl PaneMode {
     }
 }
 
+/// How much OS-level confinement a gapped pane actually has — the P1.2
+/// "rung-2 honesty" fact the backend reports per pane so the renderer's
+/// egress strip can say so when it matters. `Serialize`d into the
+/// `egress:state` wire shape as `"full"`/`"network-only"` (kebab-case —
+/// the same lowercase wire style as `PaneMode::as_str`).
+///
+/// `Full` is the only level macOS ever reports (seatbelt gives network
+/// gapping AND config-dir file confinement in one profile). On Linux:
+/// the bwrap rung is `Full` (netns + a tmpfs over the config dir), while
+/// the self-unshare rung starts at `NetworkOnly` — its file confinement
+/// is Landlock, which fails OPEN on kernels without it (see
+/// `tome-shim`'s `linux.rs` module doc comment) — and is upgraded to
+/// `Full` only when the shim confirms Landlock actually applied (a
+/// marker file the host polls; see `egress::linux::landlock_marker_path`).
+/// Never overclaim: a pane must not report `Full` until a real mechanism
+/// enforced it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ConfinementLevel {
+    /// Network gapping AND file confinement (config dir hidden) are both
+    /// enforced by a real mechanism this pane runs under.
+    Full,
+    /// Network gapping holds (netns / seatbelt network deny) but file
+    /// confinement does not — the config dir remains readable/writable
+    /// from inside the pane.
+    NetworkOnly,
+}
+
 #[derive(Debug, Clone)]
 struct PaneRecord {
     mode: PaneMode,
@@ -166,6 +194,11 @@ struct PaneRecord {
     /// `minutes * 60_000` produces in the JS original. `None` in
     /// `Providers` mode, mirroring `expiresAt: null`.
     expires_at: Option<i64>,
+    /// The pane's honest OS-confinement level (P1.2) — see
+    /// [`ConfinementLevel`]. Set at registration, upgraded by
+    /// [`EgressState::set_pane_confinement`] when a mechanism that failed
+    /// open later confirms itself (rung-2 Landlock).
+    confinement: ConfinementLevel,
 }
 
 // ---- repo allowlist consent ----
@@ -246,6 +279,10 @@ pub struct PaneStateView {
     pub mode: &'static str,
     #[serde(rename = "expiresAt")]
     pub expires_at: Option<i64>,
+    /// The pane's honest OS-confinement level (P1.2) — `"full"` or
+    /// `"network-only"`. Serialized from
+    /// [`ConfinementLevel`]'s `#[serde(rename_all = "kebab-case")]`.
+    pub confinement: ConfinementLevel,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -341,18 +378,50 @@ impl EgressState {
     /// once its real loopback proxy (`egress::proxy`, slice A1) is actually
     /// listening; this module has no proxy of its own to wait on.
     ///
+    /// `confinement` is the spawn's honest starting level (P1.2): the
+    /// integrator KNOWS which enforcement mechanism it just wrapped the
+    /// pane in (macOS seatbelt / Linux bwrap = [`ConfinementLevel::Full`];
+    /// Linux self-unshare, whose Landlock file confinement fails open,
+    /// starts at [`ConfinementLevel::NetworkOnly`] until the shim confirms
+    /// — see [`EgressState::set_pane_confinement`]).
+    ///
     /// Like `Map.set`, re-registering an already-live id overwrites the
     /// existing record — the original has the same behavior (`panes.set`
     /// unconditionally), and pane ids are renderer-generated fresh per
     /// spawn, so this should never observe a real collision in practice.
-    pub fn register_pane(&self, id: &str) {
+    pub fn register_pane(&self, id: &str, confinement: ConfinementLevel) {
         self.lock().panes.insert(
             id.to_string(),
             PaneRecord {
                 mode: PaneMode::Providers,
                 expires_at: None,
+                confinement,
             },
         );
+    }
+
+    /// Upgrades a pane's reported confinement level — the P1.2 rung-2
+    /// honesty seam: the host registers a self-unshare pane as
+    /// [`ConfinementLevel::NetworkOnly`] and upgrades it to
+    /// [`ConfinementLevel::Full`] only once the shim's Landlock marker
+    /// proves file confinement actually applied. Returns `false` (and
+    /// changes nothing) for an unknown id, so a pane that died before its
+    /// shim confirmed never resurrects a state entry.
+    pub fn set_pane_confinement(&self, id: &str, level: ConfinementLevel) -> bool {
+        let mut inner = self.lock();
+        match inner.panes.get_mut(id) {
+            Some(record) => {
+                record.confinement = level;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The pane's current reported confinement level — `None` for an
+    /// unknown (or never-registered, i.e. ungapped) pane.
+    pub fn pane_confinement(&self, id: &str) -> Option<ConfinementLevel> {
+        self.lock().panes.get(id).map(|r| r.confinement)
     }
 
     /// `closePane` — drops the pane's state entry. No-op (returns `false`)
@@ -483,6 +552,7 @@ impl EgressState {
                     PaneStateView {
                         mode: r.mode.as_str(),
                         expires_at: r.expires_at,
+                        confinement: r.confinement,
                     },
                 )
             })
@@ -866,7 +936,7 @@ mod tests {
     #[test]
     fn register_pane_starts_in_providers_mode_with_no_expiry() {
         let state = EgressState::new();
-        state.register_pane("pty-1");
+        state.register_pane("pty-1", ConfinementLevel::Full);
         assert_eq!(state.pane_mode("pty-1"), Some(PaneMode::Providers));
         assert_eq!(state.pane_state("pty-1"), Some((PaneMode::Providers, None)));
     }
@@ -881,10 +951,10 @@ mod tests {
     #[test]
     fn re_registering_an_id_overwrites_the_existing_record() {
         let state = EgressState::new();
-        state.register_pane("pty-1");
+        state.register_pane("pty-1", ConfinementLevel::Full);
         state.unlock_pane("pty-1", 15, 0);
         assert_eq!(state.pane_mode("pty-1"), Some(PaneMode::Open));
-        state.register_pane("pty-1");
+        state.register_pane("pty-1", ConfinementLevel::Full);
         assert_eq!(state.pane_state("pty-1"), Some((PaneMode::Providers, None)));
     }
 
@@ -893,7 +963,7 @@ mod tests {
     #[test]
     fn close_pane_drops_the_state_entry() {
         let state = EgressState::new();
-        state.register_pane("pty-1");
+        state.register_pane("pty-1", ConfinementLevel::Full);
         assert!(state.pane_state("pty-1").is_some());
         assert!(state.close_pane("pty-1"));
         assert_eq!(state.pane_state("pty-1"), None);
@@ -908,8 +978,8 @@ mod tests {
     #[test]
     fn close_all_reaps_every_pane() {
         let state = EgressState::new();
-        state.register_pane("pty-a");
-        state.register_pane("pty-b");
+        state.register_pane("pty-a", ConfinementLevel::Full);
+        state.register_pane("pty-b", ConfinementLevel::Full);
         let mut ids = state.close_all();
         ids.sort();
         assert_eq!(ids, vec!["pty-a".to_string(), "pty-b".to_string()]);
@@ -920,7 +990,7 @@ mod tests {
     #[test]
     fn close_all_is_idempotent() {
         let state = EgressState::new();
-        state.register_pane("pty-a");
+        state.register_pane("pty-a", ConfinementLevel::Full);
         assert_eq!(state.close_all().len(), 1);
         assert_eq!(state.close_all().len(), 0); // will-quit AND window-all-closed both call it
     }
@@ -938,7 +1008,7 @@ mod tests {
         // analog — see ALLOWED_UNLOCK_MINUTES's doc comment.
         for bad in [0, -1, 999] {
             let state = EgressState::new();
-            state.register_pane("pty-1");
+            state.register_pane("pty-1", ConfinementLevel::Full);
             assert_eq!(state.unlock_pane("pty-1", bad, 0), None, "minutes={bad}");
             assert_eq!(state.pane_state("pty-1"), Some((PaneMode::Providers, None)));
         }
@@ -954,7 +1024,7 @@ mod tests {
     fn accepts_each_allowed_value_opens_the_pane_and_relocks_by_the_deadline() {
         for minutes in ALLOWED_UNLOCK_MINUTES {
             let state = EgressState::new();
-            state.register_pane("pty-1");
+            state.register_pane("pty-1", ConfinementLevel::Full);
             let now = 1_700_000_000_000_i64;
             let deadline = state.unlock_pane("pty-1", minutes, now);
             let expected_deadline = now + minutes * 60_000;
@@ -991,7 +1061,7 @@ mod tests {
     #[test]
     fn relock_pane_is_immediate_unlike_sweep_expired() {
         let state = EgressState::new();
-        state.register_pane("pty-1");
+        state.register_pane("pty-1", ConfinementLevel::Full);
         state.unlock_pane("pty-1", 15, 0);
         assert!(state.relock_pane("pty-1"));
         assert_eq!(state.pane_state("pty-1"), Some((PaneMode::Providers, None)));
@@ -1000,7 +1070,7 @@ mod tests {
     #[test]
     fn sweep_expired_leaves_providers_mode_panes_alone() {
         let state = EgressState::new();
-        state.register_pane("pty-1"); // never unlocked
+        state.register_pane("pty-1", ConfinementLevel::Full); // never unlocked
         assert_eq!(state.sweep_expired(i64::MAX), Vec::<String>::new());
         assert_eq!(state.pane_mode("pty-1"), Some(PaneMode::Providers));
     }
@@ -1008,8 +1078,8 @@ mod tests {
     #[test]
     fn sweep_expired_only_relocks_panes_whose_deadline_has_actually_passed() {
         let state = EgressState::new();
-        state.register_pane("a");
-        state.register_pane("b");
+        state.register_pane("a", ConfinementLevel::Full);
+        state.register_pane("b", ConfinementLevel::Full);
         state.unlock_pane("a", 15, 0); // deadline 900_000
         state.unlock_pane("b", 60, 0); // deadline 3_600_000
         assert_eq!(state.sweep_expired(1_000_000), vec!["a".to_string()]);
@@ -1022,7 +1092,7 @@ mod tests {
     #[test]
     fn state_snapshot_serializes_with_camelcase_expires_at_and_default_minutes() {
         let state = EgressState::new();
-        state.register_pane("pty-1");
+        state.register_pane("pty-1", ConfinementLevel::Full);
         state.unlock_pane("pty-1", 15, 1_000);
         let value = serde_json::to_value(state.state_snapshot()).unwrap();
         assert_eq!(value["panes"]["pty-1"]["mode"], json!("open"));
@@ -1037,10 +1107,50 @@ mod tests {
     #[test]
     fn state_snapshot_reports_a_null_expiry_for_a_providers_mode_pane() {
         let state = EgressState::new();
-        state.register_pane("pty-1");
+        state.register_pane("pty-1", ConfinementLevel::Full);
         let value = serde_json::to_value(state.state_snapshot()).unwrap();
         assert_eq!(value["panes"]["pty-1"]["mode"], json!("providers"));
         assert_eq!(value["panes"]["pty-1"]["expiresAt"], json!(null));
+    }
+
+    // ---- confinement level (P1.2 rung-2 honesty) ----
+
+    #[test]
+    fn state_snapshot_reports_the_panes_confinement_level_on_the_wire() {
+        let state = EgressState::new();
+        state.register_pane("full-pane", ConfinementLevel::Full);
+        state.register_pane("rung2-pane", ConfinementLevel::NetworkOnly);
+        let value = serde_json::to_value(state.state_snapshot()).unwrap();
+        assert_eq!(value["panes"]["full-pane"]["confinement"], json!("full"));
+        assert_eq!(
+            value["panes"]["rung2-pane"]["confinement"],
+            json!("network-only")
+        );
+    }
+
+    #[test]
+    fn set_pane_confinement_upgrades_an_existing_pane_and_reports_false_for_an_unknown_one() {
+        let state = EgressState::new();
+        state.register_pane("pty-1", ConfinementLevel::NetworkOnly);
+        assert_eq!(
+            state.pane_confinement("pty-1"),
+            Some(ConfinementLevel::NetworkOnly)
+        );
+        assert!(state.set_pane_confinement("pty-1", ConfinementLevel::Full));
+        assert_eq!(
+            state.pane_confinement("pty-1"),
+            Some(ConfinementLevel::Full)
+        );
+        // A pane that already closed must never come back just because its
+        // shim's Landlock marker arrived late.
+        assert!(!state.set_pane_confinement("ghost", ConfinementLevel::Full));
+        assert_eq!(state.pane_confinement("ghost"), None);
+    }
+
+    #[test]
+    fn pane_confinement_is_none_for_a_pane_that_was_never_registered() {
+        let state = EgressState::new();
+        assert_eq!(state.pane_confinement("pty-9"), None);
     }
 
     // ==== sha1_hex ====

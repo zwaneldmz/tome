@@ -71,7 +71,13 @@
 //! kernel negotiated away), [`apply_landlock`] returns an `Err` NOTE that
 //! `run` prints to stderr and the pane continues with the
 //! network-namespace egress kill alone — the load-bearing control either
-//! way. The still-missing cases are the price of the whitelist and are
+//! way. The pane is reported to the host as **network-contained only** in
+//! that state (P1.2 rung-2 honesty): `run` opens a `.landlock` marker file
+//! next to the pane socket BEFORE applying the ruleset and writes `"ok"`
+//! through that already-open descriptor only when the ruleset took effect
+//! — the host upgrades the pane's reported confinement level to full only
+//! on that confirmation, never otherwise. The still-missing cases are the
+//! price of the whitelist and are
 //! documented in `default_landlock_allow_set`'s doc comment (e.g.
 //! `~/.claude.json` is not writable). `--deny-write`/`--deny-read` remain
 //! on the wire for compatibility and name the excluded roots; the
@@ -156,6 +162,24 @@ pub fn run(args: ShimArgs) -> ! {
     if args.self_unshare {
         let mut allow_read = args.allow_read.clone();
         let mut allow_write = args.allow_write.clone();
+        // P1.2 rung-2 honesty: open the Landlock confirmation marker NOW,
+        // before the ruleset below can block the path (Landlock restricts
+        // path resolution at open(2) time, not writes to an already-open
+        // file). The host polled the same path for `"ok"` — the file
+        // stays empty (never confirmed) unless the `else if` arm below
+        // actually applied a ruleset. `--sock` is the pane's loopback
+        // socket at its REAL host path on this rung (no mount namespace
+        // to remap it into), so `<sock>.landlock` is host-visible;
+        // `egress::linux::landlock_marker_path` (sibling crate) derives
+        // the identical path. Best-effort: if the open fails, the host
+        // keeps reporting this pane as network-contained-only — a
+        // conservative under-report, never an overclaim.
+        let mut landlock_marker = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(args.sock.with_extension("landlock"))
+            .ok();
         // TMPDIR may name a private temp root (the pane's env carries it
         // through the host's allowlist); grant it write access at runtime
         // rather than baking an env-dependent path into the host-built
@@ -191,6 +215,19 @@ pub fn run(args: ShimArgs) -> ! {
                  sandbox. Network egress IS confined by the fresh network namespace.",
                 args.deny_write, args.deny_read
             );
+        } else if let Some(marker) = landlock_marker.as_mut() {
+            // Landlock applied to THIS process (and is inherited by the
+            // child across the spawn below). Confirm it to the host
+            // through the descriptor opened BEFORE the ruleset existed:
+            // Landlock restricts path resolution at open(2) time, not
+            // writes to an already-open file, so this write succeeds even
+            // though the marker's own path is outside the allow set. The
+            // host registered this pane as network-contained-only and
+            // upgrades it to full confinement only on this marker (P1.2
+            // rung-2 honesty). Best-effort: a missing marker leaves the
+            // host's conservative report in place — never an overclaim.
+            let _ = io::Write::write_all(marker, b"ok");
+            let _ = io::Write::flush(marker);
         }
     }
 

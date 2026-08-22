@@ -697,6 +697,14 @@ pub async fn pty_create(
     let mut proxy_port: Option<u16> = None;
     let mut sandbox: Option<SandboxWrap> = None;
     let mut docker_socket: Option<PathBuf> = None;
+    // P1.2 rung-2 honesty: the Landlock confirmation marker this pane's
+    // shim writes `"ok"` into when its Landlock ruleset actually applied —
+    // `Some` only on the self-unshare rung (bwrap/macOS need no
+    // confirmation: their file confinement cannot fail open). Polled by
+    // the watcher spawned after a successful spawn, which upgrades the
+    // pane's reported confinement level from network-only to full ONLY on
+    // that real confirmation.
+    let mut landlock_marker: Option<PathBuf> = None;
     // The socket path as the PANE will see it in `DOCKER_HOST`. Differs from
     // `docker_socket` (the host path) only on the bwrap rung, where the
     // gateway socket is bind-mounted to a fixed in-namespace path.
@@ -744,9 +752,18 @@ pub async fn pty_create(
         // built from its real port. If the spawn fails afterward, the
         // existing cleanup (`close_pane_and_proxy`) tears it down.
         if host_os == HostOs::MacOs {
-            let proxy = create_gapped_pane_proxy(&app, &state, &opts.id, None)
-                .await
-                .map_err(|e| e.to_string())?;
+            let proxy = create_gapped_pane_proxy(
+                &app,
+                &state,
+                &opts.id,
+                None,
+                // macOS always reports full confinement: seatbelt enforces
+                // BOTH the network gap and the config-dir file rules in one
+                // profile, with no fail-open rung (P1.2).
+                egress::ConfinementLevel::Full,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
             proxy_port = Some(proxy.port());
         }
         match resolve_gapped_spawn(
@@ -788,10 +805,23 @@ pub async fn pty_create(
                 }
 
                 // Rung 1 (bwrap) or rung 2 (self-unshare): real enforcement.
+                // P1.2 rung-2 honesty decides what confinement this pane can
+                // REPORT: bwrap hides the config dir behind a tmpfs — full.
+                // The self-unshare rung's Landlock file confinement FAILS
+                // OPEN (no Landlock → config dir stays readable), so it
+                // starts at network-only and is upgraded only on the shim's
+                // `.landlock` marker (see `landlock_marker` above). `Refuse`
+                // was already returned above, so the `_` arm is really
+                // "SelfUnshare or impossible", same reasoning as
+                // `docker_env_socket`'s own `_` arm below.
+                let confinement_level = match strategy {
+                    egress::linux::SandboxStrategy::Bwrap => egress::ConfinementLevel::Full,
+                    _ => egress::ConfinementLevel::NetworkOnly,
+                };
                 // The pane sees the gateway socket at the bind-mounted
                 // in-namespace path under bwrap, and at its real host path
                 // under self-unshare (no mount namespace to remap it into).
-                docker_env_socket = match strategy {
+                docker_env_socket = match &strategy {
                     egress::linux::SandboxStrategy::Bwrap => {
                         Some(PathBuf::from(egress::linux::CONTAINER_DOCKER_SOCK_PATH))
                     }
@@ -811,10 +841,28 @@ pub async fn pty_create(
                 }
                 let shim_path = resolve_shim_path()?;
 
-                let proxy =
-                    create_gapped_pane_proxy(&app, &state, &opts.id, Some(sock_path.clone()))
-                        .await
-                        .map_err(|e| e.to_string())?;
+                // P1.2: on the self-unshare rung, truncate the shim's
+                // `.landlock` marker HERE — before the spawn — so the
+                // watcher after it can never misread a stale "ok" left by a
+                // previous session's pane with the same id (pane ids restart
+                // at `pty-1` every boot). Remove-then-create, so even a
+                // crashed prior session's file cannot survive.
+                if matches!(strategy, egress::linux::SandboxStrategy::SelfUnshare) {
+                    let marker = egress::linux::landlock_marker_path(&sock_path);
+                    let _ = std::fs::remove_file(&marker);
+                    let _ = std::fs::write(&marker, b"");
+                    landlock_marker = Some(marker);
+                }
+
+                let proxy = create_gapped_pane_proxy(
+                    &app,
+                    &state,
+                    &opts.id,
+                    Some(sock_path.clone()),
+                    confinement_level,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
                 proxy_port = Some(proxy.port());
 
                 // Cached (`tokio::sync::OnceCell`) — see `login_env.rs`'s
@@ -1038,6 +1086,39 @@ pub async fn pty_create(
         &spawn_cwd.to_string_lossy(),
         effective_gapped,
     );
+    // P1.2 rung-2 honesty: the shim writes "ok" into the marker the moment
+    // its Landlock ruleset applies — if it applies at all. Poll briefly and
+    // upgrade the pane's reported confinement (the strip flips from
+    // "network-contained only" to full) ONLY on that real confirmation. On
+    // timeout — Landlock unavailable, shim crashed before writing — the
+    // pane honestly stays network-only. If the pane closed before the poll
+    // resolves, `set_pane_confinement` returns false and the upgrade is
+    // dropped silently: a dead pane must not resurrect a state entry.
+    if let Some(marker) = landlock_marker {
+        let watcher_app = app.clone();
+        let watcher_id = opts.id.clone();
+        tauri::async_runtime::spawn(async move {
+            // 10s budget: the write happens milliseconds after the shim
+            // starts; the poll just has to outlast a loaded scheduler or a
+            // slow dev build's first exec.
+            for _ in 0..100 {
+                let confirmed = std::fs::read_to_string(&marker)
+                    .map(|s| s.trim() == "ok")
+                    .unwrap_or(false);
+                if confirmed {
+                    let watcher_state = watcher_app.state::<AppState>();
+                    if watcher_state.egress.set_pane_confinement(
+                        &watcher_id,
+                        egress::ConfinementLevel::Full,
+                    ) {
+                        crate::ipc::egress::push_state_event(&watcher_app, &watcher_state);
+                    }
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        });
+    }
     Ok(json!({}))
 }
 

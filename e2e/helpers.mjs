@@ -1,8 +1,12 @@
 import { expect } from '@playwright/test'
 
 // Injects the window.tome mock and boots the renderer to a ready grid.
-export async function boot(page) {
+// `seed` is an optional second init-script callback, registered AFTER the
+// mock so it can pre-seed `window.__tomeMock` (store values, egress state)
+// before any app module evaluates.
+export async function boot(page, seed) {
   await page.addInitScript({ path: 'e2e/tome-mock.js' })
+  if (seed) await page.addInitScript(seed)
   await page.goto('/')
   await expect(page.locator('#btn-add')).toBeVisible()
 }
