@@ -2,12 +2,25 @@
 
 ## Dev setup
 
+Use **bun** (CI pins 1.3.10 in `.github/workflows/build.yml`) — the repo
+has no `package-lock.json`, so `npm install` cannot resolve it at all.
+
 ```bash
-bun install     # installs the renderer deps
+bun install --frozen-lockfile   # install deps; byte-for-byte what CI runs
+bun run lint    # eslint over src/ — CI's hygiene gate
 bun run dev     # run the app
 bun run test    # vitest
 bun run build   # vite build — must stay green after every change
 ```
+
+Install troubleshooting: if a package 403s from the registry (this bit
+`eslint` once, 2026-08-07), a machine- or user-level registry override is
+diverting installs to a mirror that doesn't carry the tarball. The project
+`.npmrc` pins `registry=https://registry.npmjs.org/` (bun and npm both
+honor it), so check for stale `~/.npmrc`/`~/.bunfig.toml` overrides
+(`npm config get registry`) before anything else. `xlsx` comes from an
+explicit `https://cdn.sheetjs.com/...` tarball URL, not the registry, so
+the pin cannot affect it.
 
 ## The golden rules
 
@@ -34,7 +47,7 @@ bun run build   # vite build — must stay green after every change
   bypass for dev screenshots and must never be reachable in a packaged build.
 - **Comments explain *why***, including the bugs a naive approach would hit.
   See `src/renderer/panes.js` for the house style.
-- `bun run build` green after every change; `bun run test` before committing.
+- `bun run lint` and `bun run build` green after every change; `bun run test` before committing.
 
 ## Where the specs live
 
