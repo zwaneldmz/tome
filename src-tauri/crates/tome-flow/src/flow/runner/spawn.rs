@@ -26,6 +26,9 @@ use tokio::process::Command;
 /// 'pipe']`, `detached: true` — are NOT part of this request: they are
 /// [`spawn_process`]'s own unconditional behavior (see its doc comment),
 /// not something any caller should vary.
+// `Clone` so a test-side recording seam (see `agent_run.rs`'s tests) can
+// keep a copy of the exact request the real `spawn_process` received.
+#[derive(Clone)]
 pub struct SpawnRequest {
     pub cmd: String,
     pub args: Vec<String>,
