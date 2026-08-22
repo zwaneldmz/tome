@@ -165,6 +165,45 @@ pub(crate) async fn build_production_agent_env(
     inner_argv: Vec<String>,
     cwd: &std::path::Path,
 ) -> Result<BuiltEnv, String> {
+    if !gapped {
+        let login = crate::login_env::login_env().await;
+        let mut process_env: std::collections::HashMap<String, String> =
+            std::env::vars().collect();
+        process_env.insert("PATH".to_string(), login.path.clone());
+        let extras = crate::agent_env::AgentEnvExtras {
+            is_agent: true,
+            secrets: login.secrets.clone(),
+            ..Default::default()
+        };
+        let env = crate::agent_env::compose_agent_env(&process_env, &extras)
+            .into_iter()
+            .collect();
+        return Ok(BuiltEnv { env, sandbox: None });
+    }
+
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    build_production_agent_env_for(app, &dir, pane_id, inner_argv, cwd).await
+}
+
+/// [`build_production_agent_env`]'s AppHandle-free core — the ENTIRE gapped
+/// branch, generic over the same [`EgressEnv`] seam
+/// `create_gapped_pane_proxy`/`close_pane_and_proxy` already are, with the
+/// app-data dir resolved by the CALLER instead of a live `AppHandle`
+/// (nothing outside a running app can construct one: this crate enables no
+/// tauri `test` feature — `ipc::egress`'s own `EgressEnv` doc comment spells
+/// out exactly that). `crate::agent_run`'s tests need the REAL production
+/// env — real `PaneProxy` on a real loopback port, real seatbelt profile,
+/// real bwrap argv — so they drive THIS function against an owned
+/// `AppState::new()` and a tempdir config dir. Production is the wrapper
+/// above; every piece inside is the exact code that was in its body before
+/// the split, byte for byte.
+pub(crate) async fn build_production_agent_env_for<E: crate::ipc::egress::EgressEnv>(
+    env: &E,
+    app_data_dir: &Path,
+    pane_id: &str,
+    inner_argv: Vec<String>,
+    cwd: &std::path::Path,
+) -> Result<BuiltEnv, String> {
     let login = crate::login_env::login_env().await;
     let mut process_env: std::collections::HashMap<String, String> = std::env::vars().collect();
     process_env.insert("PATH".to_string(), login.path.clone());
@@ -174,20 +213,13 @@ pub(crate) async fn build_production_agent_env(
         ..Default::default()
     };
 
-    if !gapped {
-        let env = crate::agent_env::compose_agent_env(&process_env, &extras)
-            .into_iter()
-            .collect();
-        return Ok(BuiltEnv { env, sandbox: None });
-    }
-
-    let state = app.state::<AppState>();
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let state = env.app_state();
+    let dir = app_data_dir;
 
     if cfg!(target_os = "macos") {
         let proxy = crate::ipc::egress::create_gapped_pane_proxy(
-            app,
-            state.inner(),
+            env,
+            state,
             pane_id,
             None,
             // macOS always reports full confinement (P1.2): seatbelt
@@ -203,7 +235,7 @@ pub(crate) async fn build_production_agent_env(
             .collect();
         let profile = {
             let home = std::env::home_dir().unwrap_or_default();
-            crate::egress::seatbelt::seatbelt_profile(&dir, proxy.port(), &home)
+            crate::egress::seatbelt::seatbelt_profile(dir, proxy.port(), &home)
         };
         return Ok(BuiltEnv {
             env,
@@ -242,8 +274,8 @@ pub(crate) async fn build_production_agent_env(
         }
         let shim_path = resolve_shim_path()?;
         let proxy = crate::ipc::egress::create_gapped_pane_proxy(
-            app,
-            state.inner(),
+            env,
+            state,
             pane_id,
             Some(sock_path.clone()),
             confinement_level,
@@ -275,7 +307,7 @@ pub(crate) async fn build_production_agent_env(
             // Sandboxed Docker is a per-pane (interactive) capability; the
             // headless flow-runner path does not grant it yet.
             docker_gateway_socket: None,
-            app_config_dir: dir,
+            app_config_dir: dir.to_path_buf(),
             shim_path,
             inner_argv,
             // The flag ipc::pty.rs's own doc comment anticipated: THIS is
