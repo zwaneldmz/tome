@@ -177,10 +177,9 @@ fn agent_egress(base_url: &str) -> &'static str {
 /// `chat:providers` (`ipcMain.handle('chat:providers', ...)`). The full
 /// provider list for Preferences: every merged row (id, label, model,
 /// models, host, alternates, egress reachability, last-send error), the
-/// stored pick, the resolved `effective` row + `reason` when nothing is
-/// resolved, and — as a wire-compat shim until slice 3b replaces the old
-/// UI — the legacy `keySet`/`keyEnv` fields. The key ITSELF never crosses
-/// IPC: only `keyOrigin` (kind + name) and booleans.
+/// stored pick, and the resolved `effective` row + `reason` when nothing
+/// is resolved. The key ITSELF never crosses IPC: only `keyOrigin`
+/// (kind + name) and a presence boolean.
 #[tauri::command]
 pub async fn chat_providers(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
     lock_gate::guard(&state, "chat:providers")?;
@@ -221,9 +220,6 @@ pub async fn chat_providers(app: AppHandle, state: State<'_, AppState>) -> Resul
     let list: Vec<Value> = rows
         .iter()
         .map(|p| {
-            // Legacy shim (deleted in slice 3b, when the old radio-group
-            // UI goes away): keyEnv = first env name, keySet = any rung
-            // of the ladder holds a key.
             let found = keys.key_for(p);
             json!({
                 "id": p.id,
@@ -232,8 +228,6 @@ pub async fn chat_providers(app: AppHandle, state: State<'_, AppState>) -> Resul
                 "models": p.models,
                 "baseUrl": p.base_url,
                 "alternates": p.alternates,
-                "keyEnv": p.key_env.first().map(|s| Value::String(s.clone())).unwrap_or(Value::Null),
-                "keySet": found.is_some(),
                 "keyOrigin": key_origin_value(found.map(|(_, o)| o)),
                 "active": stored_str == Some(p.id.as_str()),
                 "agentEgress": agent_egress(&p.base_url),
