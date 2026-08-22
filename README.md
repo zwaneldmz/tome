@@ -133,6 +133,13 @@ domains and nothing else**.
   it and asks you to approve it before using it; editing it later re-asks.
 - A **security event log** records unlocks, blocked hosts, and assistant
   actions (what happened, never the contents). Open it from the `＋` menu.
+- **Containment-only mode** (Preferences → Security) deletes the uncontained
+  escape hatch entirely: the option disappears from the `＋` menu and the
+  backend refuses uncontained spawns — a ceiling, enforced outside the
+  renderer, not just a default.
+- On Linux where Landlock can't back file confinement (fail-open rung), a
+  contained pane's strip says **network-contained only** — the claim is
+  never stronger than the mechanism.
 
 ## Flows
 
@@ -175,7 +182,7 @@ The chat pane talks to a model provider you pick in Preferences:
 
 | Provider | Key to set | Notes |
 |---|---|---|
-| **Kimi** (Moonshot) | `MOONSHOT_API_KEY` | the default |
+| **Kimi** (Moonshot) | `MOONSHOT_API_KEY` | |
 | **GLM** (Zhipu) | `ZHIPU_API_KEY` | |
 | **Claude** (Anthropic) | `ANTHROPIC_API_KEY` | |
 | **DeepSeek** (V4 Pro / Flash) | `DEEPSEEK_API_KEY` | pick Pro or Flash in Preferences |
@@ -184,6 +191,10 @@ Two shortcuts: set `REQUESTY_API_KEY` to route Claude Opus through the
 Requesty router instead, or set `TOME_CHAT_BASE_URL` / `TOME_CHAT_MODEL` to
 point at any OpenAI- or Anthropic-compatible endpoint. Your key stays in the
 main process and never reaches the browser layer.
+
+**There is no default provider.** A fresh install makes zero provider
+requests until you pick one — your first message opens the picker, and the
+choice sticks from then on.
 
 **Any provider:** Preferences → Assistant → *Custom provider* lets you point
 the assistant at any OpenAI- or Anthropic-compatible endpoint (base URL +
