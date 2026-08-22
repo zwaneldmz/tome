@@ -46,3 +46,7 @@ planning/
 # Playwright E2E artifacts
 test-results/
 playwright-report/
+
+# graphify knowledge-graph output — generated per workspace by the
+# Code graph pane, regenerable with one click
+graphify-out/
