@@ -172,7 +172,9 @@ fn parse_wav(wav: &[u8]) -> Result<(Vec<f32>, u32), String> {
     }
     let sample_rate = u32::from_le_bytes([wav[24], wav[25], wav[26], wav[27]]);
     let samples: Vec<f32> = wav[44..]
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| {
             // int16 LE → [-1, 1]; the clamp is a no-op for int16 input but
             // keeps the invariant explicit if a stray sample ever overflows.
@@ -386,7 +388,9 @@ static SESSION: std::sync::Mutex<Option<Session>> = std::sync::Mutex::new(None);
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn pcm16_to_f32(bytes: &[u8]) -> Vec<f32> {
     bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)
         .collect()
 }

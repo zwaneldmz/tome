@@ -516,9 +516,7 @@ fn apply_patch(
         match region {
             Some(r) => {
                 if !row.alternates.iter().any(|a| &a.base_url == r) {
-                    return Err(
-                        "That region is not available for this provider.".to_string()
-                    );
+                    return Err("That region is not available for this provider.".to_string());
                 }
                 ov.region.insert(id.to_string(), r.clone());
             }
@@ -684,10 +682,7 @@ pub(crate) async fn resolve_chat(
     let (betas, fallbacks): (Option<Vec<String>>, Option<String>) = if provider.betas.is_empty() {
         (None, None)
     } else {
-        (
-            Some(provider.betas.clone()),
-            Some("default".to_string()),
-        )
+        (Some(provider.betas.clone()), Some("default".to_string()))
     };
 
     Ok((provider, betas, fallbacks))
@@ -768,7 +763,8 @@ pub async fn chat_send(
     } else {
         state.conductor.system_prompt()
     };
-    let conductor_env = conductor::env::production_env(app.clone(), provider.clone(), betas, fallbacks);
+    let conductor_env =
+        conductor::env::production_env(app.clone(), provider.clone(), betas, fallbacks);
 
     // `run_chat` owns the whole multi-turn loop, including the abort race
     // and its OWN `chat:done` emit for every internal exit path (refusal,
@@ -1006,7 +1002,10 @@ mod tests {
         };
         assert_eq!(
             keys.key_for(&row),
-            Some(("zhipu-shell".to_string(), KeyOrigin::Shell("ZHIPU_API_KEY".to_string())))
+            Some((
+                "zhipu-shell".to_string(),
+                KeyOrigin::Shell("ZHIPU_API_KEY".to_string())
+            ))
         );
 
         // Secrets absent → process env.
@@ -1018,7 +1017,10 @@ mod tests {
         };
         assert_eq!(
             keys.key_for(&row),
-            Some(("zai-env".to_string(), KeyOrigin::Env("ZAI_API_KEY".to_string())))
+            Some((
+                "zai-env".to_string(),
+                KeyOrigin::Env("ZAI_API_KEY".to_string())
+            ))
         );
     }
 
@@ -1153,7 +1155,10 @@ mod tests {
         assert_eq!(agent_egress("https://api.anthropic.com"), "allowed");
         assert_eq!(agent_egress("https://openrouter.ai/api/v1"), "allowed");
         // not in DEFAULT_ALLOW (frozen at 16 — plan Q3)
-        assert_eq!(agent_egress("https://api.z.ai/api/paas/v4"), "not-allowlisted");
+        assert_eq!(
+            agent_egress("https://api.z.ai/api/paas/v4"),
+            "not-allowlisted"
+        );
         assert_eq!(agent_egress("https://api.groq.com"), "allowed");
         assert_eq!(agent_egress("not a url"), "not-allowlisted");
     }
@@ -1272,7 +1277,10 @@ mod tests {
     #[test]
     fn mint_added_id_slugifies_the_label() {
         let ov = registry::Overlay::default();
-        assert_eq!(mint_added_id(&rows(), &ov, "My Local vLLM"), "my-local-vllm");
+        assert_eq!(
+            mint_added_id(&rows(), &ov, "My Local vLLM"),
+            "my-local-vllm"
+        );
         assert_eq!(mint_added_id(&rows(), &ov, "Groq!"), "groq");
     }
 

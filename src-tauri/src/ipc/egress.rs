@@ -772,7 +772,9 @@ mod tests {
     #[tokio::test]
     async fn schedule_unlock_widens_both_egress_state_and_the_live_proxy() {
         let env = TestEnv::new();
-        env.state.egress.register_pane("pty-1", crate::egress::ConfinementLevel::Full);
+        env.state
+            .egress
+            .register_pane("pty-1", crate::egress::ConfinementLevel::Full);
         let proxy = Arc::new(
             crate::egress::proxy::PaneProxy::spawn(vec![], None, |_| {})
                 .await
@@ -819,7 +821,9 @@ mod tests {
     #[tokio::test]
     async fn relock_now_narrows_both_egress_state_and_the_live_proxy() {
         let env = TestEnv::new();
-        env.state.egress.register_pane("pty-1", crate::egress::ConfinementLevel::Full);
+        env.state
+            .egress
+            .register_pane("pty-1", crate::egress::ConfinementLevel::Full);
         let proxy = Arc::new(
             crate::egress::proxy::PaneProxy::spawn(vec![], None, |_| {})
                 .await
@@ -982,7 +986,9 @@ mod tests {
         // drives `claim_timer_if_current` — the EXACT primitive both the
         // real timer task and this test call — directly.
         let env = TestEnv::new();
-        env.state.egress.register_pane("pty-1", crate::egress::ConfinementLevel::Full);
+        env.state
+            .egress
+            .register_pane("pty-1", crate::egress::ConfinementLevel::Full);
 
         schedule_unlock(&env, &env.state, "pty-1", 15);
         let stale_generation = env

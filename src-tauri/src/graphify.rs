@@ -153,24 +153,18 @@ pub async fn build(ws: &Path, mut on_line: impl FnMut(String) + Send) -> Result<
     let _guard = build_lock().lock().await;
     let ws_str = ws.to_string_lossy().into_owned();
 
-    on_line(format!("graphify — building the workspace graph ({ws_str})"));
+    on_line(format!(
+        "graphify — building the workspace graph ({ws_str})"
+    ));
     on_line("[1/2] extracting code with tree-sitter (offline, no LLM)".to_string());
-    run_stage(
-        ws,
-        &[&ws_str, "--code-only"],
-        &mut on_line,
-    )
-    .await
-    .map_err(|e| format!("extract failed: {e}"))?;
+    run_stage(ws, &[&ws_str, "--code-only"], &mut on_line)
+        .await
+        .map_err(|e| format!("extract failed: {e}"))?;
 
     on_line("[2/2] clustering communities and writing report + graph.html".to_string());
-    run_stage(
-        ws,
-        &["cluster-only", &ws_str, "--no-label"],
-        &mut on_line,
-    )
-    .await
-    .map_err(|e| format!("cluster failed: {e}"))?;
+    run_stage(ws, &["cluster-only", &ws_str, "--no-label"], &mut on_line)
+        .await
+        .map_err(|e| format!("cluster failed: {e}"))?;
 
     on_line("done".to_string());
     let json = graph_json(ws);
@@ -180,7 +174,10 @@ pub async fn build(ws: &Path, mut on_line: impl FnMut(String) + Send) -> Result<
 /// Kills the in-flight graphify process, if any. Returns whether there was
 /// one to kill (the renderer uses it to decide what to say).
 pub async fn cancel() -> bool {
-    let pid = running_pid().lock().expect("graphify RUNNING_PID poisoned").take();
+    let pid = running_pid()
+        .lock()
+        .expect("graphify RUNNING_PID poisoned")
+        .take();
     let Some(pid) = pid else { return false };
     // Reap via the OS kill binary — the Child object is owned by the
     // stream loop, so there is no handle to kill it with from here.
@@ -224,7 +221,11 @@ pub async fn ask(ws: &Path, args: &[&str]) -> Result<String, String> {
     if out.status.success() {
         Ok(text)
     } else {
-        Err(format!("exit {}:\n{}", out.status.code().unwrap_or(-1), text))
+        Err(format!(
+            "exit {}:\n{}",
+            out.status.code().unwrap_or(-1),
+            text
+        ))
     }
 }
 
@@ -352,7 +353,10 @@ mod tests {
         let ws = Path::new("/tmp/ws");
         assert_eq!(graph_json(ws), Path::new("/tmp/ws/graphify-out/graph.json"));
         assert_eq!(graph_html(ws), Path::new("/tmp/ws/graphify-out/graph.html"));
-        assert_eq!(report(ws), Path::new("/tmp/ws/graphify-out/GRAPH_REPORT.md"));
+        assert_eq!(
+            report(ws),
+            Path::new("/tmp/ws/graphify-out/GRAPH_REPORT.md")
+        );
         assert_eq!(out_dir(ws), Path::new("/tmp/ws/graphify-out"));
     }
 }

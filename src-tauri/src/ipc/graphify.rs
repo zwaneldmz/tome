@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 use tauri::ipc::Channel;
-use tauri::{State};
+use tauri::State;
 
 use crate::{confine, graphify, lock_gate, state::AppState};
 
@@ -35,10 +35,7 @@ fn confine_ws(state: &State<'_, AppState>, ws: &str) -> Result<PathBuf, String> 
 /// `graphify:status` (`{ ws }`) -> [`graphify::Status`]. Never errors:
 /// unavailability is data, not a rejection.
 #[tauri::command]
-pub async fn graphify_status(
-    state: State<'_, AppState>,
-    ws: String,
-) -> Result<Value, String> {
+pub async fn graphify_status(state: State<'_, AppState>, ws: String) -> Result<Value, String> {
     lock_gate::guard(&state, "graphify:status")?;
     let ws = confine_ws(&state, &ws)?;
     serde_json::to_value(graphify::status(&ws).await).map_err(|e| e.to_string())
@@ -76,11 +73,7 @@ pub async fn graphify_cancel(state: State<'_, AppState>) -> Result<Value, String
 /// Shared impl for the four read-only queries: confine, then `ask` with
 /// the right arg vector. Returns the CLI's plain text (already
 /// output-capped by the domain module).
-async fn ask(
-    state: &State<'_, AppState>,
-    ws: String,
-    args: Vec<String>,
-) -> Result<String, String> {
+async fn ask(state: &State<'_, AppState>, ws: String, args: Vec<String>) -> Result<String, String> {
     let ws = confine_ws(state, &ws)?;
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     graphify::ask(&ws, &refs).await

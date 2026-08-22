@@ -542,9 +542,7 @@ async fn stream_openai(
     let url = openai_chat_completions_url(&provider.base_url);
     let body = build_openai_request_body(&provider.model, system, messages, tools);
 
-    let req = client
-        .post(&url)
-        .header("content-type", "application/json");
+    let req = client.post(&url).header("content-type", "application/json");
     let res = apply_auth(req, provider.auth, &provider.api_key)
         .json(&body)
         .send()
@@ -771,7 +769,11 @@ impl AnthropicSseState {
 /// (`fallbacks`) to the GA endpoint 400s. Shipping rows with empty
 /// `betas` keeps the GA path; rows that opt in get the beta endpoint.
 fn anthropic_messages_url(base_url: &str, beta: bool) -> String {
-    format!("{}/v1/messages{}", base_url.trim_end_matches('/'), if beta { "?beta=true" } else { "" })
+    format!(
+        "{}/v1/messages{}",
+        base_url.trim_end_matches('/'),
+        if beta { "?beta=true" } else { "" }
+    )
 }
 
 /// `betas.join(',')` for the `anthropic-beta` header — `None` when empty,
@@ -1418,8 +1420,14 @@ mod tests {
 
     #[test]
     fn build_anthropic_request_body_includes_system_and_fallbacks_when_given() {
-        let body =
-            build_anthropic_request_body("claude-opus-5", Some("sys"), &[], &[], Some("default"), 64_000);
+        let body = build_anthropic_request_body(
+            "claude-opus-5",
+            Some("sys"),
+            &[],
+            &[],
+            Some("default"),
+            64_000,
+        );
         assert_eq!(body["model"], json!("claude-opus-5"));
         assert_eq!(body["max_tokens"], json!(64_000));
         assert_eq!(body["system"], json!("sys"));
@@ -1512,7 +1520,14 @@ mod tests {
     #[ignore]
     async fn live_openai_wire_tool_call_probe() {
         use crate::chat::registry::KeyOrigin;
-        let key = std::env::var("TOME_PROBE_KEY").expect("TOME_PROBE_KEY not set");
+        // Skip (not fail) when the key is absent: CI's `--ignored` sweep
+        // reaches every ignored test, and this one is only meaningful when
+        // a human opts in with a real key (same discipline as the docker
+        // gateway and bwrap-userns skips).
+        let Ok(key) = std::env::var("TOME_PROBE_KEY") else {
+            eprintln!("SKIP: TOME_PROBE_KEY not set — live probe runs only with a real key");
+            return;
+        };
         let model = std::env::var("TOME_PROBE_MODEL").unwrap_or_else(|_| "glm-5.2".to_string());
         let provider = ResolvedProvider {
             id: "probe".to_string(),
@@ -1560,8 +1575,14 @@ mod tests {
             .iter()
             .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
             .collect();
-        assert_eq!(resp.stop_reason, "tool_use", "probe should end on a tool call");
-        assert!(!tool_uses.is_empty(), "probe should contain a tool_use block");
+        assert_eq!(
+            resp.stop_reason, "tool_use",
+            "probe should end on a tool call"
+        );
+        assert!(
+            !tool_uses.is_empty(),
+            "probe should contain a tool_use block"
+        );
         let name = tool_uses[0].get("name").and_then(Value::as_str);
         assert_eq!(name, Some("list_panes"), "probe should call list_panes");
 
@@ -1569,10 +1590,7 @@ mod tests {
         // conductor's run_loop does — assistant tool_use message + one
         // user message of tool_result blocks. The loop is broken iff this
         // second turn errors (a wire-shape refusal would 400 here).
-        let tool_id = tool_uses[0]
-            .get("id")
-            .cloned()
-            .unwrap_or(Value::Null);
+        let tool_id = tool_uses[0].get("id").cloned().unwrap_or(Value::Null);
         let mut msgs2 = messages.clone();
         msgs2.push(json!({ "role": "assistant", "content": resp.content.clone() }));
         msgs2.push(json!({
@@ -1583,7 +1601,9 @@ mod tests {
             &client,
             &provider,
             StreamChatArgs {
-                system: Some("You are a test probe. After the tool result, answer with one short sentence."),
+                system: Some(
+                    "You are a test probe. After the tool result, answer with one short sentence.",
+                ),
                 messages: &msgs2,
                 tools: &tools,
                 betas: None,
@@ -1603,6 +1623,9 @@ mod tests {
             .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
             .filter_map(|b| b.get("text").and_then(Value::as_str))
             .collect();
-        assert!(!text.is_empty(), "turn 2 should produce a text answer, got: {resp2:?}");
+        assert!(
+            !text.is_empty(),
+            "turn 2 should produce a text answer, got: {resp2:?}"
+        );
     }
 }

@@ -90,11 +90,18 @@ fn fake_env() -> (ConductorEnv, Sent, Logged) {
 #[tokio::test]
 #[ignore]
 async fn live_conductor_tool_loop_probe() {
-    use crate::chat::registry::{Auth, KeyOrigin, ResolvedProvider, Wire};
-    use crate::chat::sse::{StreamChatArgs, stream_chat};
     use super::chat::run_chat;
+    use crate::chat::registry::{Auth, KeyOrigin, ResolvedProvider, Wire};
+    use crate::chat::sse::{stream_chat, StreamChatArgs};
 
-    let key = std::env::var("TOME_PROBE_KEY").expect("TOME_PROBE_KEY not set");
+    // Skip (not fail) when the key is absent: CI's `--ignored` sweep
+    // reaches every ignored test, and this one is only meaningful when
+    // a human opts in with a real key (same discipline as the docker
+    // gateway and bwrap-userns skips).
+    let Ok(key) = std::env::var("TOME_PROBE_KEY") else {
+        eprintln!("SKIP: TOME_PROBE_KEY not set — live probe runs only with a real key");
+        return;
+    };
     let model = std::env::var("TOME_PROBE_MODEL").unwrap_or_else(|_| "glm-5.2".to_string());
     let provider = ResolvedProvider {
         id: "probe".to_string(),
@@ -143,8 +150,7 @@ async fn live_conductor_tool_loop_probe() {
         &env,
         "probe-chat".to_string(),
         Some(
-            "You are the Tome assistant probe. Use list_panes when asked about panes."
-                .to_string(),
+            "You are the Tome assistant probe. Use list_panes when asked about panes.".to_string(),
         ),
         messages,
     )
@@ -963,7 +969,12 @@ fn is_tool_failure_catches_every_failure_prefix_and_spares_real_output() {
     ] {
         assert!(tools::is_tool_failure(bad), "{bad:?} must read as failure");
     }
-    for ok in ["[]", "{}", "graph built — /ws/graphify-out/graph.json", "the agent output tail"] {
+    for ok in [
+        "[]",
+        "{}",
+        "graph built — /ws/graphify-out/graph.json",
+        "the agent output tail",
+    ] {
         assert!(!tools::is_tool_failure(ok), "{ok:?} must read as success");
     }
 }
@@ -1003,7 +1014,10 @@ async fn the_assistant_prefers_the_synced_active_root_over_the_first_open_folder
     assert_eq!(out, "out");
     {
         let logs = logged.lock().unwrap();
-        let run = logs.iter().find(|(k, _)| k == "conductor:runAgent").unwrap();
+        let run = logs
+            .iter()
+            .find(|(k, _)| k == "conductor:runAgent")
+            .unwrap();
         assert!(run.1.contains(&("kind".to_string(), json!("claude"))));
     }
 
@@ -1064,12 +1078,18 @@ async fn a_refused_tool_emits_chat_tool_done_with_ok_false_and_an_honest_audit()
             "run_command",
             json!({ "cwd": "/tmp", "cmd": "ls" }),
         )],
-        usage: Usage { input: 1, output: 1 },
+        usage: Usage {
+            input: 1,
+            output: 1,
+        },
     };
     let end_resp = NormalizedResponse {
         stop_reason: "end".to_string(),
         content: vec![json!({ "type": "text", "text": "done" })],
-        usage: Usage { input: 1, output: 1 },
+        usage: Usage {
+            input: 1,
+            output: 1,
+        },
     };
     env.stream_chat = {
         let calls = calls.clone();
@@ -1084,9 +1104,15 @@ async fn a_refused_tool_emits_chat_tool_done_with_ok_false_and_an_honest_audit()
         })
     };
 
-    chat::run_chat(&c, &env, "fail-test".to_string(), Some("sys".to_string()), vec![])
-        .await
-        .expect("run_chat ok");
+    chat::run_chat(
+        &c,
+        &env,
+        "fail-test".to_string(),
+        Some("sys".to_string()),
+        vec![],
+    )
+    .await
+    .expect("run_chat ok");
 
     // the completion event carries the honest outcome + timing
     let done_events = sent_channel(&sent, "chat:tool-done");
@@ -1106,8 +1132,14 @@ async fn run_agent_vets_the_kind_and_requires_a_prompt() {
     let (env, _sent, _logged) = fake_env();
 
     // unknown kind — refused before the seam is touched
-    let out = tools::run_tool(&c, &env, "run_agent", &json!({ "kind": "terminal", "prompt": "hi" }), "c1")
-        .await;
+    let out = tools::run_tool(
+        &c,
+        &env,
+        "run_agent",
+        &json!({ "kind": "terminal", "prompt": "hi" }),
+        "c1",
+    )
+    .await;
     assert!(out.contains("not a headless-capable agent kind"), "{out}");
 
     // empty prompt — refused
@@ -1115,8 +1147,14 @@ async fn run_agent_vets_the_kind_and_requires_a_prompt() {
     assert!(out.contains("non-empty kind and prompt"), "{out}");
 
     // no workspace — refused (fake_env roots is empty)
-    let out = tools::run_tool(&c, &env, "run_agent", &json!({ "kind": "claude", "prompt": "hi" }), "c1")
-        .await;
+    let out = tools::run_tool(
+        &c,
+        &env,
+        "run_agent",
+        &json!({ "kind": "claude", "prompt": "hi" }),
+        "c1",
+    )
+    .await;
     assert!(out.contains("No workspace folder is open"), "{out}");
 }
 
@@ -1147,12 +1185,18 @@ async fn run_agent_hands_the_seam_the_vetted_request_and_returns_its_output() {
 
     // audited with kind + chat id, never the prompt
     let logged = logged.lock().unwrap();
-    let run = logged.iter().find(|(k, _)| k == "conductor:runAgent").expect("audit missing");
+    let run = logged
+        .iter()
+        .find(|(k, _)| k == "conductor:runAgent")
+        .expect("audit missing");
     let fields = &run.1;
     assert!(fields.contains(&("kind".to_string(), json!("claude"))));
     assert!(fields.contains(&("chatId".to_string(), json!("c1"))));
     let serialized = serde_json::to_string(&fields).unwrap();
-    assert!(!serialized.contains("summarize"), "prompt must not enter the audit log");
+    assert!(
+        !serialized.contains("summarize"),
+        "prompt must not enter the audit log"
+    );
 }
 
 // ================= mentor persona / gate_question =================

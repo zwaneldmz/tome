@@ -1841,7 +1841,6 @@ mod tests {
     // ==== pane_socket_path ====
 
     #[test]
-    #[test]
     fn landlock_marker_path_swaps_the_socket_extension_keeping_the_pane_dir() {
         let sock = PathBuf::from("/run/user/1000/tome/pane-pty-1.sock");
         assert_eq!(

@@ -98,8 +98,11 @@ pub struct ConductorEnv {
     /// `run_agent`'s backend — one headless agent run (sandboxed + gapped,
     /// bounded by the backend's own timeout), or an `Err` describing the
     /// refusal/failure. See `crate::agent_run` for the containment story.
-    pub run_agent:
-        Arc<dyn Fn(crate::agent_run::RunAgentRequest, PathBuf) -> BoxFuture<Result<String, String>> + Send + Sync>,
+    pub run_agent: Arc<
+        dyn Fn(crate::agent_run::RunAgentRequest, PathBuf) -> BoxFuture<Result<String, String>>
+            + Send
+            + Sync,
+    >,
     /// `gate_question`'s backend — registers a comprehension gate, emits
     /// `mentor:check`, and awaits the user's `mentor_answer` (or times out).
     /// Returns the serialized answer value the tool loop appends as the
@@ -310,11 +313,14 @@ pub fn production_env(
         }),
         run_agent: {
             let app = app.clone();
-            Arc::new(move |req: crate::agent_run::RunAgentRequest, cwd: PathBuf| {
-                let app = app.clone();
-                Box::pin(async move { crate::agent_run::run_headless_agent(&app, &req, &cwd).await })
-                    as BoxFuture<Result<String, String>>
-            })
+            Arc::new(
+                move |req: crate::agent_run::RunAgentRequest, cwd: PathBuf| {
+                    let app = app.clone();
+                    Box::pin(
+                        async move { crate::agent_run::run_headless_agent(&app, &req, &cwd).await },
+                    ) as BoxFuture<Result<String, String>>
+                },
+            )
         },
         gate_question: {
             let app = app.clone();

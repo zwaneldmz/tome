@@ -63,7 +63,9 @@ pub fn summarize_log(id: &str, payload: &str, mtime_ms: u64) -> Option<Value> {
     if count == 0 {
         return None;
     }
-    let snippet = first_user.map(|s| truncate(s.trim(), 90)).unwrap_or_else(|| "(no user message)".to_string());
+    let snippet = first_user
+        .map(|s| truncate(s.trim(), 90))
+        .unwrap_or_else(|| "(no user message)".to_string());
     Some(summary_value(id, count, &snippet, mtime_ms))
 }
 
@@ -132,7 +134,12 @@ mod tests {
     #[test]
     fn summarize_truncates_long_snippets_on_a_char_boundary() {
         let long = "x".repeat(120);
-        let v = summarize_log("c", &format!(r#"[{{"role":"user","content":"{long}"}}]"#), 1).unwrap();
+        let v = summarize_log(
+            "c",
+            &format!(r#"[{{"role":"user","content":"{long}"}}]"#),
+            1,
+        )
+        .unwrap();
         let s = v["snippet"].as_str().unwrap();
         assert!(s.ends_with('…'));
         assert_eq!(s.chars().count(), 91);
@@ -164,10 +171,7 @@ mod tests {
             summary_value("b", 1, "mid", 200),
         ];
         sort_newest_first(&mut entries);
-        let ids: Vec<&str> = entries
-            .iter()
-            .map(|e| e["id"].as_str().unwrap())
-            .collect();
+        let ids: Vec<&str> = entries.iter().map(|e| e["id"].as_str().unwrap()).collect();
         assert_eq!(ids, vec!["c", "b", "a"]);
 
         let mut tie = vec![
@@ -180,8 +184,14 @@ mod tests {
 
     #[test]
     fn file_names_are_vetted_before_anything_is_read() {
-        assert_eq!(chat_id_of_file_name("chat-log-chat-1"), Some("chat-1".to_string()));
-        assert_eq!(chat_id_of_file_name("chat-log-voice"), Some("voice".to_string()));
+        assert_eq!(
+            chat_id_of_file_name("chat-log-chat-1"),
+            Some("chat-1".to_string())
+        );
+        assert_eq!(
+            chat_id_of_file_name("chat-log-voice"),
+            Some("voice".to_string())
+        );
         assert_eq!(chat_id_of_file_name("chat-log-"), None);
         assert_eq!(chat_id_of_file_name("chat-log-A-B"), None);
         assert_eq!(chat_id_of_file_name("chat-log-a..b"), None);

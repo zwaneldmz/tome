@@ -91,7 +91,8 @@ mod tests {
     fn overlay_round_trips_through_save_and_load() {
         let dir = tempdir().unwrap();
         let mut ov = Overlay::default();
-        ov.model.insert("glm".to_string(), "glm-5-turbo".to_string());
+        ov.model
+            .insert("glm".to_string(), "glm-5-turbo".to_string());
         ov.hidden.push("openai".to_string());
 
         save_overlay(dir.path(), &ov).unwrap();
@@ -116,11 +117,10 @@ mod tests {
     fn load_rows_merges_defaults_with_the_overlay() {
         let dir = tempdir().unwrap();
         let mut ov = Overlay::default();
-        ov.model.insert("deepseek".to_string(), "deepseek-v4-flash".to_string());
-        ov.region.insert(
-            "kimi".to_string(),
-            "https://api.moonshot.cn/v1".to_string(),
-        );
+        ov.model
+            .insert("deepseek".to_string(), "deepseek-v4-flash".to_string());
+        ov.region
+            .insert("kimi".to_string(), "https://api.moonshot.cn/v1".to_string());
         save_overlay(dir.path(), &ov).unwrap();
 
         let rows = load_rows(dir.path());

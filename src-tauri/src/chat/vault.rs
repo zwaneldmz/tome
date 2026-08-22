@@ -142,8 +142,7 @@ impl Vault {
         fs::create_dir_all(&self.dir).map_err(|e| e.to_string())?;
         let path = self.dir.join(FILE_NAME);
         fs::write(&path, blob).map_err(|e| e.to_string())?;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-            .map_err(|e| e.to_string())?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
         Ok(Kind::File)
     }
 
@@ -233,7 +232,10 @@ mod tests {
         let map = keys(&[("kimi", "m-key")]);
 
         assert_eq!(vault.save(&map).unwrap(), Kind::Keychain);
-        assert!(!dir.path().join(FILE_NAME).exists(), "keyring took it; no file");
+        assert!(
+            !dir.path().join(FILE_NAME).exists(),
+            "keyring took it; no file"
+        );
         assert_eq!(vault.load(), (map, Kind::Keychain));
     }
 

@@ -773,13 +773,12 @@ mod tests {
         }
         for bad in [
             "gpt-5", // no provider segment
-            "A/b", // uppercase
+            "A/b",   // uppercase
             "a/b c", // space
             "a/b;c", // semicolon
-            "a//b", // empty segment
-            "a/", // trailing slash
-            "$(id)/x",
-            "x/../y",
+            "a//b",  // empty segment
+            "a/",    // trailing slash
+            "$(id)/x", "x/../y",
         ] {
             assert!(
                 vet_model("opencode", bad, "test").is_err(),
@@ -800,7 +799,10 @@ mod tests {
         // claude has a non-empty allowlist, so the provider/model shape is
         // NOT accepted for it — only its own aliases are.
         assert!(vet_model("claude", "anthropic/claude-sonnet", "test").is_err());
-        assert_eq!(vet_model("claude", "sonnet", "test"), Ok("sonnet".to_string()));
+        assert_eq!(
+            vet_model("claude", "sonnet", "test"),
+            Ok("sonnet".to_string())
+        );
     }
 
     #[test]

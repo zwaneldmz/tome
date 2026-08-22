@@ -48,7 +48,11 @@ pub fn config_file() -> PathBuf {
 pub fn auth_file() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::home_dir().unwrap_or_default().join(".local/share"))
+        .unwrap_or_else(|| {
+            std::env::home_dir()
+                .unwrap_or_default()
+                .join(".local/share")
+        })
         .join("opencode")
         .join("auth.json")
 }
@@ -81,8 +85,7 @@ pub fn read_auth(path: &Path) -> Vec<Credential> {
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
-    let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&text)
-    else {
+    let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&text) else {
         return Vec::new();
     };
     let mut out: Vec<Credential> = map
@@ -196,10 +199,17 @@ pub async fn probe() -> (bool, Option<String>, Option<String>) {
                 Ok(Ok(out)) => (
                     false,
                     None,
-                    Some(format!("opencode --version exited {}", out.status.code().unwrap_or(-1))),
+                    Some(format!(
+                        "opencode --version exited {}",
+                        out.status.code().unwrap_or(-1)
+                    )),
                 ),
                 Ok(Err(e)) => (false, None, Some(e.to_string())),
-                Err(_) => (false, None, Some("opencode --version timed out".to_string())),
+                Err(_) => (
+                    false,
+                    None,
+                    Some("opencode --version timed out".to_string()),
+                ),
             }
         }
         Err(e) => (false, None, Some(format!("opencode not found ({e})"))),
@@ -229,7 +239,10 @@ pub async fn models(provider: Option<&str>) -> Result<Vec<String>, String> {
     .map_err(|_| "opencode models timed out".to_string())?
     .map_err(|e| format!("spawn opencode: {e}"))?;
     if !out.status.success() {
-        return Err(format!("opencode models exited {}", out.status.code().unwrap_or(-1)));
+        return Err(format!(
+            "opencode models exited {}",
+            out.status.code().unwrap_or(-1)
+        ));
     }
     let text = String::from_utf8_lossy(&out.stdout);
     if text.len() > MODELS_CAP {
@@ -254,7 +267,9 @@ pub async fn models(provider: Option<&str>) -> Result<Vec<String>, String> {
 /// vets (lowercase segments, `-._` allowed after the first `/`).
 fn is_model_id(s: &str) -> bool {
     let mut segs = s.split('/');
-    let Some(first) = segs.next() else { return false };
+    let Some(first) = segs.next() else {
+        return false;
+    };
     if first.is_empty()
         || !first
             .chars()
@@ -266,9 +281,9 @@ fn is_model_id(s: &str) -> bool {
     for seg in segs {
         if seg.is_empty()
             || matches!(seg, "." | "..")
-            || !seg
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '.' | '_'))
+            || !seg.chars().all(|c| {
+                c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '.' | '_')
+            })
         {
             return false;
         }
@@ -315,27 +330,45 @@ mod tests {
         assert_eq!(
             read_auth(&path),
             vec![
-                Credential { id: "deepseek".to_string(), cred_type: "api".to_string() },
-                Credential { id: "eurouter".to_string(), cred_type: "api".to_string() },
+                Credential {
+                    id: "deepseek".to_string(),
+                    cred_type: "api".to_string()
+                },
+                Credential {
+                    id: "eurouter".to_string(),
+                    cred_type: "api".to_string()
+                },
             ]
         );
         // empty key clears the slot
         set_key(&path, "deepseek", "").unwrap();
         assert_eq!(
             read_auth(&path),
-            vec![Credential { id: "eurouter".to_string(), cred_type: "api".to_string() }]
+            vec![Credential {
+                id: "eurouter".to_string(),
+                cred_type: "api".to_string()
+            }]
         );
         // oauth entries survive untouched
         let map = load_json_object(&path).unwrap();
         let mut map = map;
-        map.insert("anthropic".to_string(), serde_json::json!({ "type": "oauth", "account": "x" }));
+        map.insert(
+            "anthropic".to_string(),
+            serde_json::json!({ "type": "oauth", "account": "x" }),
+        );
         save_json_object(&path, map).unwrap();
         set_key(&path, "eurouter", "sk-c").unwrap();
         assert_eq!(
             read_auth(&path),
             vec![
-                Credential { id: "anthropic".to_string(), cred_type: "oauth".to_string() },
-                Credential { id: "eurouter".to_string(), cred_type: "api".to_string() },
+                Credential {
+                    id: "anthropic".to_string(),
+                    cred_type: "oauth".to_string()
+                },
+                Credential {
+                    id: "eurouter".to_string(),
+                    cred_type: "api".to_string()
+                },
             ]
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -358,7 +391,10 @@ mod tests {
         assert_eq!(read_default_model(&path), None);
 
         set_default_model(&path, "deepseek/deepseek-chat").unwrap();
-        assert_eq!(read_default_model(&path), Some("deepseek/deepseek-chat".to_string()));
+        assert_eq!(
+            read_default_model(&path),
+            Some("deepseek/deepseek-chat".to_string())
+        );
         // everything else survives
         let (ids, _) = read_config_providers(&path);
         assert_eq!(ids.len(), 2);
@@ -369,7 +405,11 @@ mod tests {
 
     #[test]
     fn model_id_shape_matches_the_agent_spawn_vet() {
-        for ok in ["deepseek/deepseek-chat", "eurouter/glm-5.2", "lmstudio/openai/gpt-oss-20b"] {
+        for ok in [
+            "deepseek/deepseek-chat",
+            "eurouter/glm-5.2",
+            "lmstudio/openai/gpt-oss-20b",
+        ] {
             assert!(is_model_id(ok), "{ok}");
         }
         for bad in ["gpt-5", "A/b", "a/b c", "a//b", "a/", "x/../y", "README.md"] {

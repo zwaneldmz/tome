@@ -613,7 +613,8 @@ pub async fn pty_create(
     // (a cached, but first-call-EXPENSIVE shell-out, deliberately NOT
     // moved for exactly that reason — see the gapped Linux branch below),
     // this is a plain allowlist lookup with no cost worth guarding.
-    let mut agent_cmd = agent_spawn::build_agent_spawn_from(&agents, &opts.kind, opts.model.as_deref());
+    let mut agent_cmd =
+        agent_spawn::build_agent_spawn_from(&agents, &opts.kind, opts.model.as_deref());
     if opts.kind == "terminal" {
         agent_cmd = opts
             .cmd
@@ -1160,10 +1161,10 @@ pub async fn pty_create(
                     .unwrap_or(false);
                 if confirmed {
                     let watcher_state = watcher_app.state::<AppState>();
-                    if watcher_state.egress.set_pane_confinement(
-                        &watcher_id,
-                        egress::ConfinementLevel::Full,
-                    ) {
+                    if watcher_state
+                        .egress
+                        .set_pane_confinement(&watcher_id, egress::ConfinementLevel::Full)
+                    {
                         crate::ipc::egress::push_state_event(&watcher_app, &watcher_state);
                     }
                     return;
@@ -1269,10 +1270,7 @@ const AGENT_PROVIDER_KEYS: &[(&str, &str, &str)] = &[("claude", "claude", "ANTHR
 /// and the vault snapshot, the `(env_name, key)` pair the pane's env
 /// gains — at most one, only for a kind with a mapping, and never an
 /// empty/whitespace key (empty is falsy at every vault rung).
-fn chat_key_injection(
-    kind: &str,
-    chat_keys: &HashMap<String, String>,
-) -> Option<(String, String)> {
+fn chat_key_injection(kind: &str, chat_keys: &HashMap<String, String>) -> Option<(String, String)> {
     let (_, provider_id, env_name) = AGENT_PROVIDER_KEYS.iter().find(|(k, _, _)| *k == kind)?;
     let key = chat_keys.get(*provider_id)?.clone();
     (!key.trim().is_empty()).then(|| ((*env_name).to_string(), key))
@@ -1934,7 +1932,10 @@ mod tests {
         let link = tmp.path().join("link");
         std::os::unix::fs::symlink(&real, &link).unwrap();
         let err = verify_real_app_data_dir(&link).unwrap_err();
-        assert!(err.contains("symlink"), "error must name the problem: {err}");
+        assert!(
+            err.contains("symlink"),
+            "error must name the problem: {err}"
+        );
         assert!(
             err.contains("escape"),
             "error must name the confinement escape: {err}"
@@ -1945,8 +1946,8 @@ mod tests {
 
     #[test]
     fn verify_real_app_data_dir_refuses_an_unverifiable_directory_fail_closed() {
-        let err = verify_real_app_data_dir(Path::new("/definitely/not/here/tome-config"))
-            .unwrap_err();
+        let err =
+            verify_real_app_data_dir(Path::new("/definitely/not/here/tome-config")).unwrap_err();
         assert!(
             err.contains("could not verify"),
             "a missing dir must fail closed with an honest message: {err}"

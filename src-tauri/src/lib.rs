@@ -438,8 +438,7 @@ pub fn run() {
                         return;
                     };
                     let login = login_env::login_env().await;
-                    let env: std::collections::HashMap<String, String> =
-                        std::env::vars().collect();
+                    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
                     let dir_for_job = dir.clone();
                     let secrets = login.secrets.clone();
                     let report = tokio::task::spawn_blocking(move || {

@@ -334,9 +334,7 @@ pub fn resolve(rows: &[ProviderRow], pick: Option<&str>, keys: &dyn KeySource) -
             id: pick.to_string(),
         };
     };
-    let Some((api_key, key_origin)) =
-        keys.key_for(row).filter(|(key, _)| !key.is_empty())
-    else {
+    let Some((api_key, key_origin)) = keys.key_for(row).filter(|(key, _)| !key.is_empty()) else {
         return Resolution::NoKey {
             id: row.id.clone(),
             label: row.label.clone(),
@@ -475,13 +473,21 @@ mod tests {
         for row in default_rows() {
             assert!(row.builtin, "{} must be builtin", row.id);
             assert!(row.betas.is_empty(), "{} betas must be empty", row.id);
-            assert!(row.models_url.is_none(), "{} modelsUrl must be null", row.id);
+            assert!(
+                row.models_url.is_none(),
+                "{} modelsUrl must be null",
+                row.id
+            );
             assert!(
                 row.max_output_tokens.is_none(),
                 "{} maxOutputTokens must be null",
                 row.id
             );
-            assert!(!row.base_url.is_empty(), "{} baseUrl must be concrete", row.id);
+            assert!(
+                !row.base_url.is_empty(),
+                "{} baseUrl must be concrete",
+                row.id
+            );
         }
     }
 
@@ -661,7 +667,10 @@ mod tests {
     #[test]
     fn resolve_none_or_blank_pick_is_none_chosen() {
         let keys = FakeKeys(HashMap::from([("glm".to_string(), "k".to_string())]));
-        assert_eq!(resolve(&default_rows(), None, &keys), Resolution::NoneChosen);
+        assert_eq!(
+            resolve(&default_rows(), None, &keys),
+            Resolution::NoneChosen
+        );
         assert_eq!(
             resolve(&default_rows(), Some(""), &keys),
             Resolution::NoneChosen
@@ -708,12 +717,13 @@ mod tests {
 
     #[test]
     fn resolve_ready_defaults_max_output_tokens_and_trims_the_base_url() {
-        let keys = FakeKeys(HashMap::from([("claude".to_string(), "sk-ant".to_string())]));
+        let keys = FakeKeys(HashMap::from([(
+            "claude".to_string(),
+            "sk-ant".to_string(),
+        )]));
         let mut rows = default_rows();
-        rows.iter_mut()
-            .find(|r| r.id == "claude")
-            .unwrap()
-            .base_url = "https://api.anthropic.com/".to_string();
+        rows.iter_mut().find(|r| r.id == "claude").unwrap().base_url =
+            "https://api.anthropic.com/".to_string();
 
         let res = resolve(&rows, Some(" claude "), &keys);
         let Resolution::Ready(p) = res else {
@@ -819,9 +829,7 @@ mod tests {
             KeyOrigin::File
         );
         // a named kind without its name is malformed, not silently defaulted
-        assert!(
-            serde_json::from_value::<KeyOrigin>(serde_json::json!({"kind": "shell"})).is_err()
-        );
+        assert!(serde_json::from_value::<KeyOrigin>(serde_json::json!({"kind": "shell"})).is_err());
     }
 
     // ================= vet_base_url =================

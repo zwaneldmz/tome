@@ -173,7 +173,11 @@ pub fn run(
         .filter(|s| !s.is_empty());
     if let (Some(base), Some(model)) = (env_base, env_model) {
         if !ov.added.iter().any(|r| r.id == "imported-env") {
-            ov.added.push(imported_env_row(&base, &model, env.get("TOME_CHAT_WIRE").map(String::as_str)));
+            ov.added.push(imported_env_row(
+                &base,
+                &model,
+                env.get("TOME_CHAT_WIRE").map(String::as_str),
+            ));
         }
     }
 
@@ -274,8 +278,16 @@ fn imported_env_row(base: &str, model: &str, wire_env: Option<&str>) -> Provider
     ProviderRow {
         id: "imported-env".to_string(),
         label: "Imported from TOME_CHAT_*".to_string(),
-        wire: if anthropic { Wire::Anthropic } else { Wire::OpenAi },
-        auth: if anthropic { Auth::XApiKey } else { Auth::Bearer },
+        wire: if anthropic {
+            Wire::Anthropic
+        } else {
+            Wire::OpenAi
+        },
+        auth: if anthropic {
+            Auth::XApiKey
+        } else {
+            Auth::Bearer
+        },
         base_url: base.trim_end_matches('/').to_string(),
         model: model.to_string(),
         models: vec![model.to_string()],
@@ -287,7 +299,6 @@ fn imported_env_row(base: &str, model: &str, wire_env: Option<&str>) -> Provider
         builtin: false,
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -355,10 +366,7 @@ mod tests {
         store_set(dir.path(), "chat-provider", &json!("glm"));
         let v = test_vault(dir.path());
         run(dir.path(), &HashMap::new(), &HashMap::new(), &v);
-        assert_eq!(
-            store::get(dir.path(), "chat-provider", false),
-            json!("glm")
-        );
+        assert_eq!(store::get(dir.path(), "chat-provider", false), json!("glm"));
         let ov = overlay::load_overlay(dir.path());
         assert!(ov.region.is_empty());
     }
@@ -503,11 +511,7 @@ mod tests {
     #[test]
     fn an_incomplete_custom_provider_file_is_left_alone() {
         let dir = tempdir().unwrap();
-        fs::write(
-            dir.path().join("custom-provider.json"),
-            r#"{"label": "x"}"#,
-        )
-        .unwrap();
+        fs::write(dir.path().join("custom-provider.json"), r#"{"label": "x"}"#).unwrap();
         let v = test_vault(dir.path());
         let report = run(dir.path(), &HashMap::new(), &HashMap::new(), &v);
         assert!(!report.moved_keys);
@@ -525,10 +529,7 @@ mod tests {
         assert!(report.requesty_notice);
         let ov = overlay::load_overlay(dir.path());
         assert!(ov.added.is_empty());
-        assert_eq!(
-            store::get(dir.path(), "chat-provider", false),
-            Value::Null
-        );
+        assert_eq!(store::get(dir.path(), "chat-provider", false), Value::Null);
     }
 
     // ================= rule 7: TOME_CHAT_* import =================
@@ -548,10 +549,7 @@ mod tests {
         assert_eq!(row.auth, Auth::XApiKey);
         assert_eq!(row.key_env, vec!["ANTHROPIC_API_KEY".to_string()]);
         // never auto-selected
-        assert_eq!(
-            store::get(dir.path(), "chat-provider", false),
-            Value::Null
-        );
+        assert_eq!(store::get(dir.path(), "chat-provider", false), Value::Null);
     }
 
     #[test]
@@ -593,10 +591,7 @@ mod tests {
         store_set(dir.path(), "chat-provider", &json!("glm"));
         run(dir.path(), &HashMap::new(), &HashMap::new(), &v);
         assert_eq!(overlay::load_overlay(dir.path()), ov_after_first);
-        assert_eq!(
-            store::get(dir.path(), "chat-provider", false),
-            json!("glm")
-        );
+        assert_eq!(store::get(dir.path(), "chat-provider", false), json!("glm"));
     }
 
     #[test]

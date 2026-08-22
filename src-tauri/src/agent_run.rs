@@ -198,20 +198,10 @@ async fn run_headless<E: AgentRunEnv>(
     let run = async {
         // Stream both pipes into one capped buffer; then wait for the exit.
         let mut text = String::new();
-        let mut out = BufReader::new(
-            spawned
-                .stdout
-                .take()
-                .ok_or("agent stdout pipe missing")?,
-        )
-        .lines();
-        let mut err = BufReader::new(
-            spawned
-                .stderr
-                .take()
-                .ok_or("agent stderr pipe missing")?,
-        )
-        .lines();
+        let mut out =
+            BufReader::new(spawned.stdout.take().ok_or("agent stdout pipe missing")?).lines();
+        let mut err =
+            BufReader::new(spawned.stderr.take().ok_or("agent stderr pipe missing")?).lines();
         let (mut out_done, mut err_done) = (false, false);
         while !(out_done && err_done) {
             tokio::select! {

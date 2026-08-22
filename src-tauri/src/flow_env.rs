@@ -167,8 +167,7 @@ pub(crate) async fn build_production_agent_env(
 ) -> Result<BuiltEnv, String> {
     if !gapped {
         let login = crate::login_env::login_env().await;
-        let mut process_env: std::collections::HashMap<String, String> =
-            std::env::vars().collect();
+        let mut process_env: std::collections::HashMap<String, String> = std::env::vars().collect();
         process_env.insert("PATH".to_string(), login.path.clone());
         let extras = crate::agent_env::AgentEnvExtras {
             is_agent: true,
@@ -269,7 +268,10 @@ pub(crate) async fn build_production_agent_env_for<E: crate::ipc::egress::Egress
             crate::egress::linux::SandboxStrategy::Bwrap => crate::egress::ConfinementLevel::Full,
             _ => crate::egress::ConfinementLevel::NetworkOnly,
         };
-        if matches!(&strategy, crate::egress::linux::SandboxStrategy::SelfUnshare) {
+        if matches!(
+            &strategy,
+            crate::egress::linux::SandboxStrategy::SelfUnshare
+        ) {
             let _ = std::fs::remove_file(crate::egress::linux::landlock_marker_path(&sock_path));
         }
         let shim_path = resolve_shim_path()?;
