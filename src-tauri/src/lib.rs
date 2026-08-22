@@ -74,6 +74,54 @@ fn truthy_env(name: &str) -> bool {
     std::env::var(name).map(|v| !v.is_empty()).unwrap_or(false)
 }
 
+/// P2.2 (launch hardening): shot mode's two-variable witness gate. BOTH
+/// `TOME_SHOT` AND `TOME_SHOT_ACK` must be set and non-empty, AND the
+/// build must be a dev build — a single-var build (the pre-P2.2 state,
+/// `truthy_env("TOME_SHOT") && tauri::is_dev()`) no longer enters shot
+/// mode, so a stray `TOME_SHOT` left in some shell profile cannot
+/// silently disable the lock gate. Pure so the whole truth table is
+/// unit-testable without touching the real process environment or the
+/// `tauri` dev flag.
+fn shot_mode_gate(shot: bool, shot_ack: bool, dev: bool) -> bool {
+    shot && shot_ack && dev
+}
+
+/// [`shot_mode_gate`] resolved against the REAL process environment and
+/// build — the one call sites (the boot plugin's `shotMode` flag and
+/// [`boot_auth_and_egress`]'s initial lock-gate state) read, so neither
+/// can ever drift to a single-variable check again. `tauri::is_dev()` is
+/// the Tauri analog of the JS original's `!app.isPackaged`.
+fn shot_mode_active() -> bool {
+    shot_mode_gate(
+        truthy_env("TOME_SHOT"),
+        truthy_env("TOME_SHOT_ACK"),
+        tauri::is_dev(),
+    )
+}
+
+/// The loud multi-line startup warning P2.2 requires when shot mode IS
+/// active: stderr, unmissable, naming exactly what the witness disables.
+/// It exists so nobody runs a screenshot/dev session believing the lock
+/// gate still stands. Also prints the (single-line) diagnostic when
+/// `TOME_SHOT` is set but the gate did NOT arm — the two-variable witness
+/// failing silently would look exactly like a bug.
+fn warn_shot_mode(active: bool) {
+    if active {
+        eprintln!(
+            "\n\
+             ⚠️  TOME_SHOT MODE IS ACTIVE — TOME_SHOT + TOME_SHOT_ACK set in a dev build.\n\
+             ⚠️  The lock gate is DISABLED: every gated IPC command runs without login,\n\
+             ⚠️  including pty spawns, store access, and egress unlock/relock.\n\
+             ⚠️  This must never appear in a packaged build (dev builds only).\n"
+        );
+    } else if truthy_env("TOME_SHOT") {
+        eprintln!(
+            "note: TOME_SHOT is set but shot mode is NOT active — TOME_SHOT_ACK is also \
+             required (and only in dev builds)."
+        );
+    }
+}
+
 /// Builds the plugin that injects `window.__TOME_BOOT__` before any page
 /// script runs, on every window (including the config-declared main
 /// window). Mirrors `src/preload/index.js`'s `home`/`shotMode`/`profile`
@@ -163,7 +211,11 @@ fn boot_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
         .unwrap_or_default();
     let boot = serde_json::json!({
         "home": home,
-        "shotMode": truthy_env("TOME_SHOT"),
+        // P2.2: the SAME two-variable gate the backend's lock-gate state
+        // uses — a renderer badge claiming shot mode while the backend
+        // refused to arm it (missing TOME_SHOT_ACK) would be a lie the
+        // lock screen itself would then act on.
+        "shotMode": shot_mode_active(),
         "profile": truthy_env("TOME_PROFILE"),
     });
     tauri::plugin::Builder::new("tome-boot")
@@ -206,7 +258,13 @@ fn boot_auth_and_egress<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let _ = std::fs::create_dir_all(&dir);
 
     let auth = authlock::AuthLock::load(&dir);
-    let shot_mode = truthy_env("TOME_SHOT") && tauri::is_dev();
+    // P2.2: shot mode now needs BOTH TOME_SHOT and TOME_SHOT_ACK (and a
+    // dev build) — see `shot_mode_gate`'s doc comment for why the
+    // single-variable check it replaced was a hole. The warning is loud
+    // on purpose: shot mode means the lock gate is OFF, and nobody should
+    // discover that by surprise from a screenshot session.
+    let shot_mode = shot_mode_active();
+    warn_shot_mode(shot_mode);
     let locked = lock_gate::is_locked(auth.status().configured, false, shot_mode);
 
     let state = app.state::<AppState>();
@@ -685,4 +743,61 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{shot_mode_gate, truthy_env};
+
+    // ---- shot_mode_gate — P2.2's two-variable witness, whole truth table ----
+
+    #[test]
+    fn shot_mode_requires_both_env_vars_and_a_dev_build() {
+        assert!(shot_mode_gate(true, true, true));
+    }
+
+    #[test]
+    fn shot_mode_is_refused_with_only_tome_shot_set() {
+        // The exact pre-P2.2 hole: `TOME_SHOT` alone (with a dev build)
+        // used to arm shot mode. The witness requires BOTH.
+        assert!(!shot_mode_gate(true, false, true));
+    }
+
+    #[test]
+    fn shot_mode_is_refused_with_only_tome_shot_ack_set() {
+        assert!(!shot_mode_gate(false, true, true));
+    }
+
+    #[test]
+    fn shot_mode_is_refused_in_a_packaged_build_even_with_both_vars() {
+        // `!app.isPackaged` in the JS original — the dev-build arm of the
+        // gate must win: a shipped binary must never bypass its lock gate
+        // over an environment variable a launcher could set.
+        assert!(!shot_mode_gate(true, true, false));
+    }
+
+    #[test]
+    fn shot_mode_is_refused_with_neither_var() {
+        assert!(!shot_mode_gate(false, false, true));
+        assert!(!shot_mode_gate(false, false, false));
+    }
+
+    // ---- truthy_env — the `!!process.env.X` semantics the gate reads ----
+
+    #[test]
+    fn truthy_env_is_true_only_for_a_set_non_empty_value() {
+        // `std::env::set_var` mutates real, process-global state; these two
+        // names are read by no other test in this crate (only the app's own
+        // boot path, never exercised under `cargo test`), so this stays
+        // deterministic under parallel test execution. `set_var` is safe to
+        // call in tests on edition 2021.
+        std::env::set_var("TOME_SHOT_TEST_PROBE", "1");
+        assert!(truthy_env("TOME_SHOT_TEST_PROBE"));
+
+        std::env::set_var("TOME_SHOT_TEST_PROBE", "");
+        assert!(!truthy_env("TOME_SHOT_TEST_PROBE"));
+
+        std::env::remove_var("TOME_SHOT_TEST_PROBE");
+        assert!(!truthy_env("TOME_SHOT_TEST_PROBE"));
+    }
 }
