@@ -80,7 +80,7 @@ test.describe('slice 3a settings shell', () => {
 
   test('live search: filters rows, hides empty sections, dims groups, Esc restores', async ({ page }) => {
     await openSettings(page)
-    await expect(page.locator('[data-section="security"] .prefs-row')).toHaveCount(4)
+    await expect(page.locator('[data-section="security"] .prefs-row')).toHaveCount(5) // + containment-only ceiling (P2.1)
     const search = page.locator('.prefs-search')
     await search.fill('2fa')
 
