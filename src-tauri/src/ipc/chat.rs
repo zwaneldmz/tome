@@ -178,7 +178,10 @@ fn agent_egress(base_url: &str) -> &'static str {
 /// provider list for Preferences: every merged row (id, label, model,
 /// models, host, alternates, egress reachability, last-send error), the
 /// stored pick, and the resolved `effective` row + `reason` when nothing
-/// is resolved. The key ITSELF never crosses IPC: only `keyOrigin`
+/// is resolved. `none` is the explicit never-picked flag (launch
+/// hardening P3.1): the renderer's first-send consent gate keys off it,
+/// so it is a field, not something inferred from `active`/`effective`.
+/// The key ITSELF never crosses IPC: only `keyOrigin`
 /// (kind + name) and a presence boolean.
 #[tauri::command]
 pub async fn chat_providers(app: AppHandle, state: State<'_, AppState>) -> Result<Value, String> {
@@ -248,15 +251,30 @@ pub async fn chat_providers(app: AppHandle, state: State<'_, AppState>) -> Resul
             })),
             Value::Null,
         ),
-        registry::Resolution::NoneChosen => (
-            None,
-            json!("No provider chosen — pick one and paste a key."),
-        ),
-        registry::Resolution::Unknown { id } => (
-            None,
-            json!(format!(
-                "The provider you saved ({id}) is no longer in your list."
-            )),
+        other => (None, json!(reason_for(other))),
+    };
+
+    Ok(json!({
+        "providers": list,
+        "active": stored_str,
+        "effective": effective,
+        "reason": reason,
+        "none": matches!(&resolution, registry::Resolution::NoneChosen),
+    }))
+}
+
+/// The user-facing answer to a non-Ready resolution — ONE string per
+/// state, shared by `chat_providers`' `reason`, the Settings banner, and
+/// `resolve_chat`'s send error, so the three surfaces can never drift
+/// apart. The `NoneChosen` text is the launch-hardening P3.1 wording
+/// verbatim ("No provider — pick one"): the header, banner, and refusal
+/// all name the none state, never a broken default. `Ready` is not a
+/// reason — callers filter it out first.
+fn reason_for(res: &registry::Resolution) -> String {
+    match res {
+        registry::Resolution::NoneChosen => "No provider — pick one.".to_string(),
+        registry::Resolution::Unknown { id } => format!(
+            "The provider you saved ({id}) is no longer in your list — pick another in \u{2318}, \u{2192} Assistant."
         ),
         registry::Resolution::NoKey {
             label, key_env, ..
@@ -269,21 +287,14 @@ pub async fn chat_providers(app: AppHandle, state: State<'_, AppState>) -> Resul
                     key_env.join(" / ")
                 )
             };
-            (
-                None,
-                json!(format!(
-                    "{label} needs a key — paste one in \u{2318}, \u{2192} Assistant{env_hint}."
-                )),
+            format!(
+                "{label} needs a key — paste one in \u{2318}, \u{2192} Assistant{env_hint}."
             )
         }
-    };
-
-    Ok(json!({
-        "providers": list,
-        "active": stored_str,
-        "effective": effective,
-        "reason": reason,
-    }))
+        registry::Resolution::Ready(_) => {
+            unreachable!("reason_for is only called for non-Ready resolutions")
+        }
+    }
 }
 
 /// `KeyOrigin`'s UI shape: `{ kind, name }`, `name` null for the nameless
@@ -619,7 +630,9 @@ pub async fn chat_provider_delete(
 /// registry. Mirrors `chat_send`'s inline resolution, factored out so
 /// `chat_send`, `complete_once`, and `mentor_judge` share one resolution
 /// path. Returns a friendly error string for the three non-Ready states
-/// (NoneChosen / Unknown / NoKey). The 3-tuple return shape is preserved
+/// (NoneChosen / Unknown / NoKey), built by [`reason_for`] — the same
+/// strings `chat_providers` reports, so a refused send and the Settings
+/// banner say the same thing. The 3-tuple return shape is preserved
 /// verbatim for `review.rs`/`mentor.rs`; `betas`/`fallbacks` are built
 /// from the row's `betas` (empty in every shipped row — the old
 /// wire-predicate `beta: matches!(wire, Anthropic)` attached beta-only
@@ -664,33 +677,8 @@ pub(crate) async fn resolve_chat(
     };
 
     let provider = match registry::resolve(&rows, stored_str, &keys) {
-        registry::Resolution::NoneChosen => {
-            return Err(
-                "No provider chosen — pick one in \u{2318}, \u{2192} Assistant and paste a key."
-                    .to_string(),
-            );
-        }
-        registry::Resolution::Unknown { id } => {
-            return Err(format!(
-                "The provider you saved ({id}) is no longer in your list — pick another in \u{2318}, \u{2192} Assistant."
-            ));
-        }
-        registry::Resolution::NoKey {
-            label, key_env, ..
-        } => {
-            let env_hint = if key_env.is_empty() {
-                String::new()
-            } else {
-                format!(
-                    " (or set {} in your shell and restart)",
-                    key_env.join(" / ")
-                )
-            };
-            return Err(format!(
-                "{label} needs a key — paste one in \u{2318}, \u{2192} Assistant{env_hint}."
-            ));
-        }
         registry::Resolution::Ready(p) => p,
+        other => return Err(reason_for(&other)),
     };
 
     let (betas, fallbacks): (Option<Vec<String>>, Option<String>) = if provider.betas.is_empty() {
@@ -1058,6 +1046,104 @@ mod tests {
             env: &env(&[("OPENAI_API_KEY", "sk-x")]),
         };
         assert_eq!(keys.key_for(&row), None);
+    }
+
+    // ================= no-default resolution (launch hardening P3.1) =================
+
+    #[test]
+    fn a_fresh_install_resolves_none_chosen_even_with_ambient_keys_everywhere() {
+        // P3.1's core property, through the production ladder: keys in the
+        // vault, the login shell, and process env may fill a SELECTED row,
+        // never select one. A fresh profile with no stored pick must make
+        // zero requests, no matter what keys the environment happens to
+        // carry.
+        let keys = Keys {
+            vault_keys: &env(&[("kimi", "m-key"), ("glm", "z-key")]),
+            kind: Kind::File,
+            secrets: &env(&[("MOONSHOT_API_KEY", "m-shell")]),
+            env: &env(&[("OPENAI_API_KEY", "sk-x"), ("ZAI_API_KEY", "z-env")]),
+        };
+        assert_eq!(
+            registry::resolve(&overlay::load_defaults(), None, &keys),
+            registry::Resolution::NoneChosen
+        );
+    }
+
+    #[test]
+    fn env_fills_a_selected_rows_key_and_never_selects_the_row() {
+        // The same ambient MOONSHOT_API_KEY that must not select kimi on
+        // its own DOES fill the kimi row once the user has picked it —
+        // the rework's precedence ladder is preserved under the no-default
+        // rule.
+        let rows = overlay::load_defaults();
+        let keys = Keys {
+            vault_keys: &HashMap::new(),
+            kind: Kind::File,
+            secrets: &env(&[("MOONSHOT_API_KEY", "m-shell")]),
+            env: &HashMap::new(),
+        };
+        assert_eq!(
+            registry::resolve(&rows, None, &keys),
+            registry::Resolution::NoneChosen
+        );
+        match registry::resolve(&rows, Some("kimi"), &keys) {
+            registry::Resolution::Ready(p) => {
+                assert_eq!(p.id, "kimi");
+                assert!(matches!(
+                    p.key_origin,
+                    KeyOrigin::Shell(ref n) if n == "MOONSHOT_API_KEY"
+                ));
+            }
+            other => panic!("expected Ready, got {other:?}"),
+        }
+    }
+
+    // ================= reason_for — one string per non-Ready state =================
+
+    #[test]
+    fn reason_for_none_chosen_is_the_pick_one_line() {
+        // The exact P3.1 wording the chat header and the picker banner
+        // both surface for the never-picked state.
+        assert_eq!(
+            reason_for(&registry::Resolution::NoneChosen),
+            "No provider — pick one."
+        );
+    }
+
+    #[test]
+    fn reason_for_unknown_points_back_at_the_picker() {
+        assert_eq!(
+            reason_for(&registry::Resolution::Unknown {
+                id: "bogus".to_string()
+            }),
+            "The provider you saved (bogus) is no longer in your list — pick another in \u{2318}, \u{2192} Assistant."
+        );
+    }
+
+    #[test]
+    fn reason_for_no_key_names_the_row_and_its_env_names() {
+        let res = registry::Resolution::NoKey {
+            id: "glm".to_string(),
+            label: "GLM (Z.ai)".to_string(),
+            key_env: vec!["ZAI_API_KEY".to_string(), "ZHIPU_API_KEY".to_string()],
+        };
+        assert_eq!(
+            reason_for(&res),
+            "GLM (Z.ai) needs a key — paste one in \u{2318}, \u{2192} Assistant (or set ZAI_API_KEY / ZHIPU_API_KEY in your shell and restart)."
+        );
+    }
+
+    #[test]
+    fn reason_for_no_key_omits_the_shell_hint_when_the_row_names_no_env_vars() {
+        let res = registry::Resolution::NoKey {
+            id: "myai".to_string(),
+            label: "My AI".to_string(),
+            key_env: vec![],
+        };
+        assert_eq!(
+            reason_for(&res),
+            "My AI needs a key — paste one in \u{2318}, \u{2192} Assistant."
+        );
     }
 
     // ================= agent_egress =================

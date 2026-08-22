@@ -7,6 +7,7 @@ import { activeWorkspace } from '../workspaces.js'
 import { encodeWav } from '../../shared/wav.js'
 import { loadHistory, persistHistory, flushHistory, openChatHistory } from '../chat-history.js'
 import { shouldAbortOnDispose } from '../chat-lifecycle.js'
+import { providerLineText, needsProviderPick } from '../chat-gate.js'
 import { voiceActive } from '../voice.js'
 import { isVerbose, mentorState } from '../mentor.js'
 
@@ -74,9 +75,7 @@ export class ChatPanel {
     // Settings → Assistant; the dynamic import avoids a static cycle
     // (preferences.js imports panels/terminal.js and panels/editor.js).
     this.providerLine = this.element.querySelector('.chat-provider-line')
-    this.providerLine.addEventListener('click', () =>
-      import('../preferences.js').then((m) => m.preferencesModal({ section: 'assistant' }))
-    )
+    this.providerLine.addEventListener('click', () => this.openPicker())
     this.refreshProviderLine()
     this.input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -267,22 +266,43 @@ export class ChatPanel {
   }
   // The one-line answer to "where will my next message go", painted from
   // the same resolution the send path uses — a UI-vs-backend divergence is
-  // visible the moment it exists. Warns (and points at ⌘,) when nothing
-  // is resolved.
+  // visible the moment it exists. P3.1: the never-picked state shows
+  // "No provider — pick one" (not a reason string), so the header names
+  // the consent gap while the picker is one click away.
   async refreshProviderLine() {
     const info = await tome.chat.providers().catch(() => null)
     const e = info?.effective
-    this.providerLine.textContent = e
-      ? `${e.label} · ${e.model} · ${e.host}`
-      : info?.reason || 'No provider — pick one in ⌘,'
+    this.providerLine.textContent = providerLineText(info)
     this.providerLine.classList.toggle('chat-provider-warn', !e)
   }
 
-  send() {
+  openPicker() {
+    return import('../preferences.js').then((m) =>
+      m.preferencesModal({ section: 'assistant' })
+    )
+  }
+
+  // The consent gate (launch hardening P3.1): with no provider picked, a
+  // send must not become ANY request — open the picker instead of letting
+  // the backend refuse after the fact. The backend refusal stays (defense
+  // in depth, and it covers voice.js's own send path); the picker just
+  // beats an error bubble as the first-run experience. The draft stays in
+  // the composer, so the pick costs nothing.
+  async pickIfNone() {
+    const info = await tome.chat.providers().catch(() => null)
+    if (!needsProviderPick(info)) return false
+    this.refreshProviderLine()
+    await this.openPicker()
+    toast('Pick an assistant provider — nothing is sent until you do.')
+    return true
+  }
+
+  async send() {
     const text = this.input.value.trim()
     // `busy` also covers a voice-session turn in flight (voice.js sets it):
     // typed messages only join the shared history while voice is idle.
     if (!text || this.busy) return
+    if (await this.pickIfNone()) return
     this.busy = true
     this.refreshProviderLine()
     this.stopBtn.classList.remove('hidden')
