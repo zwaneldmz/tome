@@ -24,7 +24,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::chat::providers::ResolvedProvider;
+use crate::chat::registry::ResolvedProvider;
 use crate::chat::sse::{self, ChatError, NormalizedResponse};
 use crate::{confine, skills, state::AppState};
 

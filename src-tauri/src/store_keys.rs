@@ -48,6 +48,14 @@ pub const RESERVED_KEYS: &[&str] = &[
     "export-destinations",
     "flow-schedules",
     "remote-sources",
+    // Main-owned chat files (plan §4.3/§4.5): the user overlay
+    // (chat-providers.json) may only be written through chat_provider_set/
+    // chat_provider_delete (a `store_set` on it could redirect a built-in
+    // row), and the vault fallback file (chat-secrets.json) holds keys in
+    // plaintext — it must never be readable back through store:get, even
+    // when the keyring is unavailable.
+    "chat-providers",
+    "chat-secrets",
 ];
 
 /// The only store key any pre-auth UI actually reads: the renderer boots

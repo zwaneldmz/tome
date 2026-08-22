@@ -65,7 +65,7 @@
 
 use serde_json::{json, Map, Value};
 
-use super::providers::{ResolvedProvider, Wire};
+use super::registry::{Auth, ResolvedProvider, Wire};
 
 // ============================= shared shapes =============================
 
@@ -487,6 +487,18 @@ fn bearer_header(api_key: &str) -> String {
     format!("Bearer {api_key}")
 }
 
+/// Applies the row's auth choice to a request: `Bearer` →
+/// `Authorization: Bearer <key>`, `XApiKey` → `x-api-key: <key>`. Auth is
+/// per ROW, not per wire — Anthropic proper wants `x-api-key`, while most
+/// Anthropic-*compatible* gateways want `Authorization: Bearer`, and until
+/// the registry gained an `auth` field there was no way to configure one.
+fn apply_auth(req: reqwest::RequestBuilder, auth: Auth, api_key: &str) -> reqwest::RequestBuilder {
+    match auth {
+        Auth::Bearer => req.header("authorization", bearer_header(api_key)),
+        Auth::XApiKey => req.header("x-api-key", api_key),
+    }
+}
+
 fn openai_chat_completions_url(base_url: &str) -> String {
     format!("{base_url}/chat/completions")
 }
@@ -527,15 +539,13 @@ async fn stream_openai(
     tools: &[Value],
     mut on_text: impl FnMut(&str) + Send,
 ) -> Result<NormalizedResponse, ChatError> {
-    let base_url = provider.base_url.as_deref().unwrap_or("");
-    let url = openai_chat_completions_url(base_url);
+    let url = openai_chat_completions_url(&provider.base_url);
     let body = build_openai_request_body(&provider.model, system, messages, tools);
-    let api_key = provider.api_key.as_deref().unwrap_or("");
 
-    let res = client
+    let req = client
         .post(&url)
-        .header("content-type", "application/json")
-        .header("authorization", bearer_header(api_key))
+        .header("content-type", "application/json");
+    let res = apply_auth(req, provider.auth, &provider.api_key)
         .json(&body)
         .send()
         .await
@@ -562,15 +572,13 @@ async fn stream_openai(
 
 // ============================= Anthropic wire =============================
 
-const ANTHROPIC_API_BASE: &str = "https://api.anthropic.com";
 /// The Messages API's stable required version header — long-unchanged
 /// public surface, distinct from the one-off `anthropic-beta` flags a
 /// specific request may additionally opt into.
 const ANTHROPIC_VERSION: &str = "2023-06-01";
-/// `max_tokens: 64000` — hardcoded in `streamAnthropic`, not
-/// provider-configurable; ported as the same fixed constant.
-const ANTHROPIC_MAX_TOKENS: u64 = 64000;
-
+/// `max_tokens` fallback when a row doesn't set one — `registry::resolve`
+/// already applies this default, so the wire functions just receive the
+/// resolved value.
 enum OpenBlock {
     Text(String),
     ToolUse {
@@ -757,8 +765,13 @@ impl AnthropicSseState {
     }
 }
 
-fn anthropic_messages_url(base_url: Option<&str>) -> String {
-    format!("{}/v1/messages", base_url.unwrap_or(ANTHROPIC_API_BASE))
+/// `{base}/v1/messages`, with `?beta=true` appended when `beta` is set.
+/// The pinned SDK posts beta requests to `/v1/messages?beta=true` while
+/// this client always posts GA — and attaching beta-only body params
+/// (`fallbacks`) to the GA endpoint 400s. Shipping rows with empty
+/// `betas` keeps the GA path; rows that opt in get the beta endpoint.
+fn anthropic_messages_url(base_url: &str, beta: bool) -> String {
+    format!("{}/v1/messages{}", base_url.trim_end_matches('/'), if beta { "?beta=true" } else { "" })
 }
 
 /// `betas.join(',')` for the `anthropic-beta` header — `None` when empty,
@@ -771,21 +784,24 @@ fn anthropic_beta_header(betas: &[String]) -> Option<String> {
     }
 }
 
-/// `{ model, max_tokens: 64000, stream: true, system?, messages, tools,
+/// `{ model, max_tokens, stream: true, system?, messages, tools,
 /// fallbacks? }` — see the module doc comment's note on `fallbacks`' wire
-/// placement. `system`/`fallbacks` are omitted entirely when absent
-/// (`if (provider.betas) args.betas = ...` — the JS original only ever
-/// conditionally ADDS a key, never sets it to an explicit null).
+/// placement. `max_tokens` is per-row now (the old model-blind
+/// `ANTHROPIC_MAX_TOKENS` const is gone). `system`/`fallbacks` are omitted
+/// entirely when absent (`if (provider.betas) args.betas = ...` — the JS
+/// original only ever conditionally ADDS a key, never sets it to an
+/// explicit null).
 fn build_anthropic_request_body(
     model: &str,
     system: Option<&str>,
     messages: &[Value],
     tools: &[Value],
     fallbacks: Option<&str>,
+    max_tokens: u64,
 ) -> Value {
     let mut body = Map::new();
     body.insert("model".to_string(), json!(model));
-    body.insert("max_tokens".to_string(), json!(ANTHROPIC_MAX_TOKENS));
+    body.insert("max_tokens".to_string(), json!(max_tokens));
     body.insert("stream".to_string(), json!(true));
     if let Some(sys) = system {
         body.insert("system".to_string(), json!(sys));
@@ -812,15 +828,21 @@ async fn stream_anthropic(
     fallbacks: Option<&str>,
     mut on_text: impl FnMut(&str) + Send,
 ) -> Result<NormalizedResponse, ChatError> {
-    let url = anthropic_messages_url(provider.base_url.as_deref());
-    let body = build_anthropic_request_body(&provider.model, system, messages, tools, fallbacks);
-    let api_key = provider.api_key.as_deref().unwrap_or("");
+    let url = anthropic_messages_url(&provider.base_url, betas.is_some_and(|b| !b.is_empty()));
+    let body = build_anthropic_request_body(
+        &provider.model,
+        system,
+        messages,
+        tools,
+        fallbacks,
+        provider.max_output_tokens,
+    );
 
-    let mut req = client
+    let req = client
         .post(&url)
         .header("content-type", "application/json")
-        .header("x-api-key", api_key)
         .header("anthropic-version", ANTHROPIC_VERSION);
+    let mut req = apply_auth(req, provider.auth, &provider.api_key);
     if let Some(header_val) = betas.and_then(anthropic_beta_header) {
         req = req.header("anthropic-beta", header_val);
     }
@@ -1397,16 +1419,24 @@ mod tests {
     #[test]
     fn build_anthropic_request_body_includes_system_and_fallbacks_when_given() {
         let body =
-            build_anthropic_request_body("claude-opus-5", Some("sys"), &[], &[], Some("default"));
+            build_anthropic_request_body("claude-opus-5", Some("sys"), &[], &[], Some("default"), 64_000);
         assert_eq!(body["model"], json!("claude-opus-5"));
-        assert_eq!(body["max_tokens"], json!(ANTHROPIC_MAX_TOKENS));
+        assert_eq!(body["max_tokens"], json!(64_000));
         assert_eq!(body["system"], json!("sys"));
         assert_eq!(body["fallbacks"], json!("default"));
     }
 
     #[test]
+    fn build_anthropic_request_body_uses_the_rows_max_tokens() {
+        // per-row max_output_tokens replaces the model-blind
+        // ANTHROPIC_MAX_TOKENS const (plan §4.1)
+        let body = build_anthropic_request_body("m", None, &[], &[], None, 8_192);
+        assert_eq!(body["max_tokens"], json!(8_192));
+    }
+
+    #[test]
     fn build_anthropic_request_body_omits_system_and_fallbacks_when_absent() {
-        let body = build_anthropic_request_body("claude-opus-5", None, &[], &[], None);
+        let body = build_anthropic_request_body("claude-opus-5", None, &[], &[], None, 64_000);
         assert!(body.get("system").is_none());
         assert!(body.get("fallbacks").is_none());
         assert_eq!(body["tools"], json!([]));
@@ -1422,14 +1452,47 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_messages_url_defaults_to_the_real_api_and_honors_an_override() {
+    fn anthropic_messages_url_posts_ga_by_default_and_beta_only_when_flagged() {
         assert_eq!(
-            anthropic_messages_url(None),
+            anthropic_messages_url("https://api.anthropic.com", false),
             "https://api.anthropic.com/v1/messages"
         );
         assert_eq!(
-            anthropic_messages_url(Some("https://router.requesty.ai")),
+            anthropic_messages_url("https://router.requesty.ai", false),
             "https://router.requesty.ai/v1/messages"
         );
+        assert_eq!(
+            anthropic_messages_url("https://api.anthropic.com", true),
+            "https://api.anthropic.com/v1/messages?beta=true"
+        );
+        // a row's base_url is trailing-slash-trimmed at resolve time, but
+        // the URL builder must not double up if one ever sneaks through
+        assert_eq!(
+            anthropic_messages_url("https://api.anthropic.com/", true),
+            "https://api.anthropic.com/v1/messages?beta=true"
+        );
+    }
+
+    #[test]
+    fn apply_auth_puts_bearer_in_authorization_and_x_api_key_in_its_own_header() {
+        let bearer = apply_auth(
+            reqwest::Client::new().post("https://example.com"),
+            Auth::Bearer,
+            "sk-b",
+        );
+        let xkey = apply_auth(
+            reqwest::Client::new().post("https://example.com"),
+            Auth::XApiKey,
+            "sk-ant",
+        );
+        let dump = |r: &reqwest::RequestBuilder| {
+            format!("{:?}", r.try_clone().unwrap().build().unwrap().headers())
+        };
+        let bearer_h = dump(&bearer);
+        let xkey_h = dump(&xkey);
+        assert!(bearer_h.contains("authorization") && bearer_h.contains("Bearer sk-b"));
+        assert!(!bearer_h.to_lowercase().contains("x-api-key"));
+        assert!(xkey_h.contains("x-api-key") && xkey_h.contains("sk-ant"));
+        assert!(!xkey_h.to_lowercase().contains("authorization"));
     }
 }

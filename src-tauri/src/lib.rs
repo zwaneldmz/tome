@@ -212,6 +212,17 @@ fn boot_auth_and_egress<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     state
         .egress
         .load_repo_consents(&dir.join("egress-repo-consents.json"));
+
+    // Chat keys (plan §4.3): load the one keychain blob ONCE, at boot —
+    // the effective unlock point (this build has no re-lock, and commands
+    // are lock-gated anyway). `chat_key_set` replaces the snapshot after
+    // every save; the chat path itself never touches the keyring.
+    let vault = crate::chat::vault::Vault::new(&dir);
+    let (chat_keys, kind) = vault.load();
+    *state
+        .chat_keys
+        .write()
+        .expect("AppState.chat_keys lock poisoned") = (chat_keys, kind);
 }
 
 /// Spawns the in-app scheduler's 30-second tick loop (plan §Flow products
@@ -449,6 +460,9 @@ pub fn run() {
             ipc::chat::chat_abort,
             ipc::chat::chat_providers,
             ipc::chat::chat_complete,
+            ipc::chat::chat_key_set,
+            ipc::chat::chat_provider_set,
+            ipc::chat::chat_provider_delete,
             // mentor
             ipc::mentor::mentor_answer,
             ipc::mentor::mentor_judge,
