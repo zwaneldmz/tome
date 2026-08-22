@@ -138,17 +138,24 @@ at it).
 - For non-sensitive bugs: the
   [GitHub issue tracker](https://github.com/zwaneldmz/tome/issues).
 
+**Response commitment (solo maintainer, stated honestly):** sandbox
+escapes, confinement bypasses, and lock-gate/auth bypasses are triaged
+within **48 hours** of a report and fixed in the next release; everything
+else is triaged within a week. This project is maintained by one person —
+the commitment above is sized to what that person can actually keep, and
+will be updated if that changes.
+
 **In scope:** sandbox escapes (seatbelt or proxy bypass), lock-gate bypasses
 (IPC reachable pre-auth that shouldn't be), consent bypasses on repo
 allowlists, confused-deputy paths through the conductor that defeat the
 auto-run guard.
 
 **Out of scope:** `TOME_SHOT` dev mode — a lock-gate bypass that exists for
-development screenshots, gated on `tauri::is_dev()` (see
-`src-tauri/src/lib.rs`'s `boot_auth_and_egress`) and documented in the
-threat model; issues requiring physical access or an already-compromised
-host; the `xlsx` package's CDN distribution pin (deliberate, integrity-pinned
-— see [docs/THREATMODEL.md](docs/THREATMODEL.md)).
+development screenshots, gated on `tauri::is_dev()` **and a second witness
+env var `TOME_SHOT_ACK`** (see `src-tauri/src/lib.rs`'s `boot_auth_and_egress`)
+and documented in the threat model; issues requiring physical access or an
+already-compromised host; the `xlsx` package's CDN distribution pin
+(deliberate, integrity-pinned — see [docs/THREATMODEL.md](docs/THREATMODEL.md)).
 
 ---
 
