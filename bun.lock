@@ -17,7 +17,7 @@
         "@xterm/addon-fit": "^0.11.0",
         "@xterm/xterm": "^6.0.0",
         "codemirror": "^6.0.0",
-        "dockview": "^8.1.0",
+        "dockview": "^8.2.0",
         "mammoth": "^1.12.0",
         "postcss": "^8.5.26",
         "prettier": "^3.9.6",
@@ -293,9 +293,9 @@
 
     "dingbat-to-unicode": ["dingbat-to-unicode@1.0.1", "", {}, "sha512-98l0sW87ZT58pU4i61wa2OHwxbiYSbuxsCBozaVnYX2iCnr3bLM3fIes1/ej7h1YdOKuKt/MLs706TVnALA65w=="],
 
-    "dockview": ["dockview@8.1.0", "", { "dependencies": { "dockview-core": "^8.1.0" } }, "sha512-jZzxrpwKsEbULHoUvWDBSwNYzoO3LTL5h4tU1St7AZ0O0a+exR+mb7R92K+KdBw9CI1vaWgAH1VKLJf/RE6BNw=="],
+    "dockview": ["dockview@8.2.0", "", { "dependencies": { "dockview-core": "^8.2.0" } }, "sha512-Jj+fnFWSrdEhF+1DmpGNYjEvyqf7J0FHkDqsD98wL4WOYB2CSKavDCL49B3LHIGYvWNN7Q1O1j4p7Pts38CM5A=="],
 
-    "dockview-core": ["dockview-core@8.1.0", "", {}, "sha512-Vx8TAbsnMmc3IGQPvoXVZeJJsuk/yZGx75oCMUApROZ0FIWeFV+9ohlvzlmwTEmZR7M+VNCcC8HQt1ufzjjGnw=="],
+    "dockview-core": ["dockview-core@8.2.0", "", {}, "sha512-+L+xdvmO1b4in8rVkFtQM13IkPDKqDLoHJvq5HtAIsMxsPptSVveKeViYBqquaoHF+t0xb9f6692gTeKnjCKGw=="],
 
     "duck": ["duck@0.1.12", "", { "dependencies": { "underscore": "^1.13.1" } }, "sha512-wkctla1O6VfP89gQ+J/yDesM0S7B7XLXjKGzXxMDVFg7uEn706niAtyYovKbyq1oT9YwDcly721/iUWoc8MVRg=="],
 
