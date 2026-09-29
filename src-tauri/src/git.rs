@@ -190,6 +190,9 @@ pub async fn log(dir: &str, limit: Option<u32>) -> Result<Value, String> {
 /// original's inner-only try/catch) — a failure in the initial `git show`
 /// propagates as `Err`, uncaught, same as the original.
 pub async fn commit(dir: &str, hash: &str) -> Result<Value, String> {
+    if hash.starts_with('-') {
+        return Err("invalid revision".into());
+    }
     let body = git(dir, &["show", "-s", "--format=%B", hash])
         .await?
         .trim()
@@ -242,6 +245,15 @@ pub async fn commit(dir: &str, hash: &str) -> Result<Value, String> {
 /// show` for a root commit (no `^` parent to diff against) — a failure in
 /// *that* fallback propagates as `Err`, uncaught, same as the original.
 pub async fn diff(dir: &str, hash: &str, file: &str) -> Result<Value, String> {
+    // The renderer supplies `hash`; one starting with '-' would be parsed by
+    // git as an option (e.g. `--output=<path>`), not a revision.
+    if hash.starts_with('-') {
+        return Err("invalid revision".into());
+    }
+    // Empty hash = the working tree against HEAD (the Changes sidebar).
+    if hash.is_empty() {
+        return Ok(json!(git(dir, &["diff", "HEAD", "--", file]).await?));
+    }
     let text = match git(dir, &["diff", &format!("{hash}^"), hash, "--", file]).await {
         Ok(s) => s,
         Err(_) => git(dir, &["show", "--format=", hash, "--", file]).await?,
@@ -500,6 +512,25 @@ mod tests {
         let text = v.as_str().unwrap();
         assert!(text.contains("-1"));
         assert!(text.contains("+2"));
+    }
+
+    #[tokio::test]
+    async fn diff_with_empty_hash_is_the_working_tree() {
+        let repo = init_repo();
+        write_and_commit(repo.path(), "a.txt", "1\n", "initial");
+        std::fs::write(repo.path().join("a.txt"), "2\n").unwrap();
+        let v = diff(repo.path().to_str().unwrap(), "", "a.txt").await.unwrap();
+        let text = v.as_str().unwrap();
+        assert!(text.contains("-1") && text.contains("+2"));
+    }
+
+    #[tokio::test]
+    async fn option_shaped_revisions_are_refused() {
+        let repo = init_repo();
+        write_and_commit(repo.path(), "a.txt", "1\n", "initial");
+        let dir = repo.path().to_str().unwrap();
+        assert!(diff(dir, "--output=/tmp/x", "a.txt").await.is_err());
+        assert!(commit(dir, "--output=/tmp/x").await.is_err());
     }
 
     #[tokio::test]

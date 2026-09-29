@@ -16,9 +16,12 @@ export async function refreshGit() {
   if (!wsState.activeRoot) {
     gitChip.classList.add('hidden')
     gitStats.textContent = ''
+    window.dispatchEvent(new window.CustomEvent('git:info', { detail: null }))
     return
   }
   const info = await tome.git.info(wsState.activeRoot)
+  // The Changes sidebar listens: its badge and list follow the same poll.
+  window.dispatchEvent(new window.CustomEvent('git:info', { detail: info.repo ? { dir: wsState.activeRoot, ...info } : null }))
   if (!info.repo) {
     gitChip.classList.add('hidden')
     gitStats.textContent = ''
@@ -135,7 +138,28 @@ async function commitFlow() {
   m.button('Cancel', () => m.close(), 'ghost')
 }
 
-async function pushFlow() {
+// Stage everything and commit — the Changes sidebar's button. Same
+// comprehension gate as the modal path.
+export function commitAll(dir, message, files, onDone) {
+  const doCommit = async () => {
+    try {
+      await tome.git.stage(dir, null)
+      const r = await tome.git.commitCreate(dir, message)
+      if (r?.ok) {
+        toast(`Committed ${r.hash.slice(0, 7)}`, 'ok')
+        onDone?.()
+        refreshGit()
+      } else {
+        toast(r?.error || 'Nothing to commit')
+      }
+    } catch (err) {
+      toast(err.message)
+    }
+  }
+  comprehensionGate('commit', `staged files:\n${files.map((f) => `${f.x}${f.y} ${f.path}`).join('\n')}`, doCommit)
+}
+
+export async function pushFlow() {
   const dir = wsState.activeRoot
   if (!dir) return toast('no active folder')
   comprehensionGate('push', 'git push — the current branch to its remote', async () => {

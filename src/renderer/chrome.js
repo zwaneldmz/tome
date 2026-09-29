@@ -1,9 +1,7 @@
 // Window chrome that isn't a menu: the sidebar minimizer and the appearance
 // picker. Both persist through the ui-state store.
 import { tome } from './util.js'
-import { floatingMenu, menuItem, menuLabel } from './menus.js'
-import { THEME_GLYPH, THEME_ORDER, onTheme, setTheme, themeState } from './theme.js'
-import { sidebarIcon, themeIcon, bellIcon, plusIcon, branchIcon } from './icons.js'
+import { sidebarIcon, bellIcon, plusIcon, branchIcon, searchIcon } from './icons.js'
 
 // ---------- left pane minimizer ----------
 const sidebarBtn = document.getElementById('btn-sidebar')
@@ -63,38 +61,16 @@ divider.addEventListener('pointerdown', (e) => {
 })
 
 // ---------- appearance ----------
-const themeBtn = document.getElementById('btn-theme')
-const THEME_LABEL = { system: 'Match system', light: 'Light', dark: 'Dark' }
-
-// Shared by the topbar button and (via menu-bridge) the View ▸ Appearance
-// submenu, so the native menu can offer the same radio choices.
+// No titlebar button: appearance is a palette row (and View ▸ Appearance).
 export function openThemeMenu() {
-  floatingMenu(themeBtn, (menu) => {
-    menuLabel(menu, 'Appearance')
-    for (const pref of THEME_ORDER) {
-      menuItem(menu, {
-        label: `${THEME_GLYPH[pref]}  ${THEME_LABEL[pref]}`,
-        active: themeState.pref === pref,
-        onClick: () => setTheme(pref),
-      })
-    }
-  })
+  import('./commands.js').then((m) => m.openPalette('>theme'))
 }
-
-themeBtn.addEventListener('click', (e) => {
-  e.stopPropagation()
-  openThemeMenu()
-})
-
-onTheme(() => {
-  themeBtn.replaceChildren(themeIcon(themeState.pref))
-  themeBtn.title = `Appearance — ${THEME_LABEL[themeState.pref]}`
-})
 
 // ---------- static topbar icons (bell, add, git glyph) ----------
 document.getElementById('btn-notifs').appendChild(bellIcon())
 document.getElementById('btn-add').querySelector('.plus').appendChild(plusIcon())
 document.getElementById('git-chip').querySelector('.gly').appendChild(branchIcon())
+document.querySelector('#cmdk .cmdk-icon').appendChild(searchIcon())
 
 export async function bootChrome() {
   const w = await tome.store.get('sidebar-width')

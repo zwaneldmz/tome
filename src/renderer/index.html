@@ -12,6 +12,9 @@
   <body>
     <header id="topbar">
       <div class="traffic-pad"></div>
+      <button id="btn-sidebar" class="icon-btn" title="Hide sidebar (⌘B)" aria-label="Toggle sidebar">
+        <span class="chev"></span>
+      </button>
       <div class="chip-wrap">
         <button id="ws-chip" title="Workspace — switch, create, or add folders" aria-label="Workspace" aria-haspopup="true">
           <span class="sigil">▚</span><span id="ws-name">no workspace</span><span class="caret">▾</span>
@@ -20,12 +23,21 @@
       </div>
       <div class="chip-wrap">
         <button id="git-chip" class="hidden" title="Git branch" aria-label="Git branch" aria-haspopup="true">
-          <span class="gly"></span><span id="git-branch"></span>
+          <span class="gly"></span><span id="git-branch"></span><span id="git-stats"></span>
         </button>
         <div id="git-menu" class="menu hidden" role="menu"></div>
       </div>
-      <div id="git-stats" title="Working tree changes"></div>
       <div class="spacer"></div>
+      <button id="cmdk" type="button" aria-label="Search files and commands" aria-keyshortcuts="Meta+K">
+        <span class="cmdk-icon"></span><span class="cmdk-text">Search or run a command</span><kbd>⌘K</kbd>
+      </button>
+      <div class="spacer"></div>
+      <div class="chip-wrap">
+        <button id="seal-chip" type="button" aria-haspopup="true" aria-label="Containment">
+          <span class="seal-icon"></span><span id="seal-text">Sealed</span>
+        </button>
+        <div id="seal-menu" class="menu seal-menu hidden" role="menu"></div>
+      </div>
       <button
         id="btn-voice"
         class="icon-btn"
@@ -34,28 +46,34 @@
         aria-pressed="false"
         aria-haspopup="true"
       ></button>
-      <button id="btn-theme" class="icon-btn" title="Appearance" aria-label="Appearance"></button>
       <div class="chip-wrap">
-        <button id="btn-notifs" class="icon-btn" title="Notifications — recent activity &amp; blocked requests" aria-label="Notifications" aria-haspopup="true"></button>
+        <button id="btn-notifs" class="icon-btn" title="Activity — recent events &amp; blocked requests" aria-label="Activity" aria-haspopup="true"></button>
         <div id="notifs-menu" class="menu hidden" role="menu"></div>
       </div>
       <div class="chip-wrap">
-        <button id="btn-add" class="icon-btn" title="New pane — agents, terminal, editor, chat" aria-label="New pane" aria-haspopup="true">
-          <span class="plus"></span>
+        <button id="btn-add" class="new-btn" title="Open something new (⌘T)" aria-label="New" aria-haspopup="true">
+          <span class="plus"></span><span class="new-label">New</span>
         </button>
         <div id="add-menu" class="menu hidden" role="menu"></div>
       </div>
     </header>
     <div id="body">
       <aside id="tree">
-        <div id="tree-head">
-          <button id="btn-sidebar" class="icon-btn" title="Hide sidebar (⌘B)" aria-label="Toggle sidebar">
-            <span class="chev"></span>
-          </button>
-          <button id="btn-new-file" class="icon-btn" title="New file" aria-label="New file"></button>
-          <button id="btn-new-folder" class="icon-btn" title="New folder" aria-label="New folder"></button>
-        </div>
-        <div id="tree-body"></div>
+        <nav id="side-tabs" role="tablist" aria-label="Sidebar">
+          <button role="tab" data-view="open" aria-selected="true">Open<span class="tab-count" id="open-count"></span></button>
+          <button role="tab" data-view="files" aria-selected="false">Files</button>
+          <button role="tab" data-view="changes" aria-selected="false">Changes<span class="tab-count" id="changes-count"></span></button>
+        </nav>
+        <section id="side-open" class="side-view" role="tabpanel" aria-label="Open sessions"></section>
+        <section id="side-files" class="side-view hidden" role="tabpanel" aria-label="Files">
+          <div id="tree-head">
+            <span class="side-label">Explorer</span>
+            <button id="btn-new-file" class="icon-btn" title="New file" aria-label="New file"></button>
+            <button id="btn-new-folder" class="icon-btn" title="New folder" aria-label="New folder"></button>
+          </div>
+          <div id="tree-body"></div>
+        </section>
+        <section id="side-changes" class="side-view hidden" role="tabpanel" aria-label="Changes"></section>
       </aside>
       <div id="tree-divider" title="Drag to resize the sidebar"></div>
       <main id="dock"></main>

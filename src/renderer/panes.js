@@ -22,6 +22,8 @@ import { EventsPanel } from './panels/events.js'
 import { RunsPanel } from './panels/runs.js'
 import { ReportPanel } from './panels/report.js'
 import { HistoryPanel } from './history.js'
+import { DiffPanel } from './panels/diff.js'
+import { Welcome } from './welcome.js'
 import { renderStatusbar, setStatusbarDock } from './statusbar.js'
 import { plusIcon, popoutIcon } from './icons.js'
 import { AGENTS } from '../shared/pane-kinds.js'
@@ -30,15 +32,6 @@ import { VOICE_CHAT_ID } from './chat-lifecycle.js'
 import { createFlow } from '../shared/flow-model.js'
 import { stripControlChars } from '../shared/terminal-text.js'
 import { isValidSavedLayout } from '../shared/layout.js'
-
-class Watermark {
-  constructor() {
-    this.element = document.createElement('div')
-    this.element.className = 'watermark'
-    this.element.textContent = '＋ open a pane — agents · terminal · editor · chat'
-  }
-  init() {}
-}
 
 // The shell document a pane gets when it is dragged out into its own OS
 // window. Resolved against the current page so it works both under the dev
@@ -99,7 +92,7 @@ export const dock = createDockview(document.getElementById('dock'), {
     dndPanelOverlay: 'group',
   },
   popoutUrl: POPOUT_URL,
-  createWatermarkComponent: () => new Watermark(),
+  createWatermarkComponent: () => new Welcome(),
   createRightHeaderActionComponent: (group) => new GroupActions(group),
   createComponent: (opts) => {
     switch (opts.name) {
@@ -123,6 +116,8 @@ export const dock = createDockview(document.getElementById('dock'), {
         return new ReportPanel()
       case 'flow':
         return new FlowPanel()
+      case 'diff':
+        return new DiffPanel()
       default:
         return new TerminalPanel()
     }
@@ -563,6 +558,7 @@ const DOC_MODES = new Set(['pdf', 'img', 'doc', 'binary'])
 function componentOf(panel) {
   const params = panel.params || {}
   if (params.ptyId) return 'terminal'
+  if (params.diff) return 'diff'
   if (params.chatId) return 'chat'
   // Must precede the params.ws -> 'brain' fallthrough: a code-graph pane
   // also carries a ws (the workspace ROOT DIR, unlike brain's workspace
@@ -683,6 +679,8 @@ export async function restoreLayout() {
           const dir = typeof params.dir === 'string' && (await dirExists(params.dir)) ? params.dir : null
           if (dir) spawnHistory(dir, p)
           else removePanel(p)
+        } else if (component === 'diff') {
+          removePanel(p) // a working-tree diff is a moment, not a place — reopen from Changes
         } else if (component === 'events') {
           // main owns the log file (userData) — nothing to existence-check.
           spawnEvents(p)
@@ -770,7 +768,7 @@ export function spawnTerminal({ kind, cwd, egress, wsName, saved, target, model,
   return dock.addPanel({
     id,
     component: 'terminal',
-    title: saved?.title || (isAgent ? `${gapped ? '⛨ ' : ''}${kind} — ${name}` : `zsh — ${name}`),
+    title: saved?.title?.replace(/^[⛨⛉] /, '') || (isAgent ? `${kind} — ${name}` : `zsh — ${name}`),
     position: saved ? { referencePanel: saved.id } : place(target),
     // `model` (a flow node's pinned model) rides in params rather than being
     // passed straight to the pty, because params is what survives layout
@@ -924,6 +922,18 @@ function spawnHistory(dir, saved, target) {
     position: saved ? { referencePanel: saved.id } : place(target),
     params: { dir },
   })
+}
+
+// One diff pane per repo, re-pointed at each file picked in Changes.
+export function showDiff(dir, file) {
+  const id = `diff:${dir}`
+  const existing = dock.getPanel(id)
+  if (existing) {
+    existing.view.content.show(dir, file)
+    existing.api.setActive()
+    return
+  }
+  dock.addPanel({ id, component: 'diff', title: 'Δ ' + file.split('/').pop(), position: place(), params: { dir, file, diff: true } })
 }
 
 export function addEvents(target) {

@@ -118,3 +118,17 @@ export const brainIcon = () =>
 export const historyIcon = () =>
   svg(['M8 2.4 A5.6 5.6 0 1 0 8 13.6 A5.6 5.6 0 1 0 8 2.4 Z', 'M8 5 V8.2 L10.3 9.8'])
 export const docIcon = fileIcon
+
+// ---- shell v1 ----
+export const searchIcon = () => svg(['M7 12 A5 5 0 1 0 7 2 A5 5 0 0 0 7 12 Z', 'M10.6 10.6 L14 14'])
+export const shieldIcon = () => svg('M8 1.8 L13.2 3.8 V7.6 C13.2 10.8 11 13.2 8 14.4 C5 13.2 2.8 10.8 2.8 7.6 V3.8 Z')
+export const shieldOpenIcon = () =>
+  svg(['M8 1.8 L13.2 3.8 V7.6 C13.2 10.8 11 13.2 8 14.4 C5 13.2 2.8 10.8 2.8 7.6 V3.8 Z', 'M5.6 8 H10.4'])
+export const layersIcon = () => svg(['M8 2 L14 5 L8 8 L2 5 Z', 'M2 8 L8 11 L14 8', 'M2 11 L8 14 L14 11'])
+export const changesIcon = () => svg(['M4 2.5 V13.5', 'M12 2.5 V9', 'M4 10.5 C4 8 12 11 12 9', 'M10 11.5 H14 M12 9.5 V13.5'])
+export const filesIcon = () => svg(['M3 2.5 H7.5 L9 4 H13 V13.5 H3 Z', 'M3 6.5 H13'])
+export const closeIcon = () => svg('M4 4 L12 12 M12 4 L4 12')
+export const agentIcon = () => svg(['M3 4 L7 8 L3 12', 'M8.5 12 H13'])
+export const flowIcon = () => svg(['M2.5 4 H6 V7 H2.5 Z', 'M10 9 H13.5 V12 H10 Z', 'M6 5.5 H8 V10.5 H10'])
+export const speakerIcon = () => svg(['M2.5 6 H5 L8.5 3 V13 L5 10 H2.5 Z', 'M11 5.5 A3.5 3.5 0 0 1 11 10.5', 'M12.8 3.6 A6 6 0 0 1 12.8 12.4'])
+export const stopIcon = () => svg('M4.5 4.5 H11.5 V11.5 H4.5 Z', { filled: true })

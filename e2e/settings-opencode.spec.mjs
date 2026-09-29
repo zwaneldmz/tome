@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { openAddMenu } from './helpers.mjs'
+import { openAddMenu, runCommand } from './helpers.mjs'
 
 // @settings: the Settings overlay's close affordance (WIG: visible ✕, not
 // Escape/backdrop-only) and the opencode section (credentials, default
@@ -11,8 +11,7 @@ async function openSettings(page, seedFn) {
   if (seedFn) await page.addInitScript(seedFn)
   await page.goto('/')
   await expect(page.locator('#btn-add')).toBeVisible()
-  await openAddMenu(page)
-  await page.getByRole('menuitem', { name: /Settings/ }).click()
+  await runCommand(page, 'Settings')
   await expect(page.locator('.prefs-shell')).toBeVisible()
 }
 

@@ -29,13 +29,20 @@ import './viibi.js' // the mascot: status-bar sprite + processing-state wiring
 import './mentor.js' // mentor mode: gate subscription + per-workspace uq/verbose
 import './keys.js' // the keyboard spine: pane keys, quick open, zoom, reference
 import './menu-bridge.js' // native menu bar actions → the same functions the buttons use
+import { onPtyData, onPtyExit } from './sidebar.js' // Open / Files / Changes
+import { initSeal } from './seal.js' // titlebar containment chip + switches
+import './commands.js' // ⌘K palette
 import './style.css'
 
 // ---------- pty / chat / brain fan-out ----------
-tome.pty.onData(({ id, data }) => terms.get(id)?.write(data))
-tome.pty.onExit(({ id, exitCode }) =>
+tome.pty.onData(({ id, data }) => {
+  terms.get(id)?.write(data)
+  onPtyData(id, data) // the sidebar's working / needs-you lamps
+})
+tome.pty.onExit(({ id, exitCode }) => {
   terms.get(id)?.write(`\r\n\x1b[2m[process exited ${exitCode}]\x1b[0m\r\n`)
-)
+  onPtyExit(id)
+})
 // While the ambient voice session owns 'chat-voice' it renders the open
 // transcript pane itself (voice.js drives bubble/appendDelta/toolNote/finish
 // so history never forks) — fanning the same events out here too would
@@ -92,6 +99,7 @@ mark('module evaluation start')
     prefs.containmentOnly = true
   }
   tome.egress.state().then((s) => Object.assign(agState, s))
+  initSeal() // after the security prefs above are loaded
   syncFolders() // main starts with an empty confinement list
   wsState.activeRoot = activeWorkspace()?.folders[0] || null
   syncAssistantRoot() // the assistant starts AT the project root
@@ -138,7 +146,7 @@ mark('module evaluation start')
       dock.addPanel({
         id,
         component: 'terminal',
-        title: `⛨ zsh — demo`,
+        title: `zsh — demo`,
         params: { ptyId: id, kind: 'terminal', cwd: root, egress: true },
       })
       openFile(`${root}/package.json`)
