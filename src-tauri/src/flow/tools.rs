@@ -22,7 +22,6 @@
 // flow::tools::read_flow / draft_flow"), a different slice landing after
 // this one. Same rationale and shape as `agent_spawn.rs`'s own top-level
 // allow.
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 

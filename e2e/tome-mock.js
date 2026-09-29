@@ -94,7 +94,7 @@
       write: noop,
       resize: noop,
       kill: noop,
-      onData: on,
+      onData: sub('pty:data'),
       onExit: sub('pty:exit'),
     },
 

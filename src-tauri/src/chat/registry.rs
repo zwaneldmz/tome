@@ -40,7 +40,6 @@
 // Landed ahead of its consumer: the `ipc::chat` rewrite (slice 2) is
 // this module's production caller; until then only its own tests
 // exercise it. Same transitional allow as confine.rs/pty.rs carried.
-#![allow(dead_code)]
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;

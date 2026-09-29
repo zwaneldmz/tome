@@ -31,7 +31,6 @@
 // Landed ahead of its consumer: `state.rs`/`ipc::chat` (the slice-2
 // rewrite) are this module's production callers; until then only its own
 // tests exercise it. Same transitional allow as confine.rs/pty.rs carried.
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::fs;

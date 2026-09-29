@@ -177,9 +177,38 @@ fn view_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
             "Toggle Sidebar",
             Some("CmdOrCtrl+B"),
         )?)
+        .item(&item(
+            app,
+            "side-view|open",
+            "Open Panes",
+            Some("CmdOrCtrl+Shift+A"),
+        )?)
+        .item(&item(
+            app,
+            "side-view|files",
+            "Files",
+            Some("CmdOrCtrl+Shift+E"),
+        )?)
+        .item(&item(
+            app,
+            "side-view|changes",
+            "Changes",
+            Some("CmdOrCtrl+Shift+G"),
+        )?)
+        .item(&item(
+            app,
+            "next-waiting",
+            "Next Waiting Agent",
+            Some("CmdOrCtrl+J"),
+        )?)
         .item(&appearance)
         .separator()
-        .item(&item(app, "quick-open", "Quick Open", Some("CmdOrCtrl+P"))?)
+        .item(&item(
+            app,
+            "quick-open",
+            "Command Palette",
+            Some("CmdOrCtrl+P"),
+        )?)
         .item(&item(
             app,
             "shortcuts",
@@ -239,10 +268,11 @@ fn action_payload(raw: &str) -> Option<serde_json::Value> {
     match (id, param) {
         ("new-pane", Some(kind)) => Some(serde_json::json!({ "id": "new-pane", "kind": kind })),
         ("set-theme", Some(pref)) => Some(serde_json::json!({ "id": "set-theme", "pref": pref })),
+        ("side-view", Some(view)) => Some(serde_json::json!({ "id": "side-view", "view": view })),
         (
             "open-preferences" | "open-onboarding" | "toggle-sidebar" | "toggle-voice"
             | "quick-open" | "shortcuts" | "close-pane" | "save" | "save-all" | "open-file"
-            | "open-folder" | "new-file" | "new-workspace",
+            | "open-folder" | "new-file" | "new-workspace" | "next-waiting",
             None,
         ) => Some(serde_json::json!({ "id": id })),
         _ => None,
@@ -319,6 +349,18 @@ mod tests {
         assert_eq!(
             action_payload("save-all"),
             Some(serde_json::json!({ "id": "save-all" }))
+        );
+    }
+
+    #[test]
+    fn action_payload_routes_sidebar_views_and_triage() {
+        assert_eq!(
+            action_payload("side-view|changes"),
+            Some(serde_json::json!({ "id": "side-view", "view": "changes" }))
+        );
+        assert_eq!(
+            action_payload("next-waiting"),
+            Some(serde_json::json!({ "id": "next-waiting" }))
         );
     }
 

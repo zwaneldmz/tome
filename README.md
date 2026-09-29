@@ -72,9 +72,21 @@ To use the assistant, set an API key for one provider (see
 
 ## What's in the grid
 
-You start with an empty grid and a `＋` button. Everything in Tome opens from
-that menu into the same tiling grid: agents, terminals, editors, documents,
-flows, notes.
+Open a folder and Tome offers the agents it found on your `PATH`, a terminal,
+and the assistant. Everything opens into the same tiling grid: agents,
+terminals, editors, documents, flows, notes. Three things get you around:
+
+- **`⌘K` — the command palette.** Every action, open pane, file, security
+  switch and workspace in one list. Start with `>` to search commands only.
+  It works from inside a terminal too.
+- **The sidebar** has three views. **Open** (`⌘⇧A`) lists every pane, agents
+  first, each with a status lamp — *working*, *needs you* (it finished while
+  you were elsewhere), *idle*, *exited* — and its containment. `⌘J` jumps to
+  the next agent waiting for you. **Files** (`⌘⇧E`) is the project tree.
+  **Changes** (`⌘⇧G`) lists the working tree: click a file to review its diff
+  against `HEAD`, then commit and push from the box underneath.
+- **New** (`⌘T`) opens agents, terminals, the assistant, flows, notes, and
+  files.
 
 ![An empty workspace inviting you to open a pane, with a project tree on the left](docs/tour-workspace.png)
 
@@ -88,15 +100,16 @@ flows, notes.
 | **Assistant** | A chat that can also drive the grid — read scrollback, open panes, type into terminals. |
 | **Brain** | A per-workspace markdown note vault with `[[wikilinks]]`, backlinks, and a graph view. |
 | **Code graph** | One-click knowledge graph of the workspace's code ([graphify](https://github.com/Graphify-Labs/graphify)): tree-sitter AST extraction, Leiden communities, an interactive `graph.html`, a plain-language report, and read-only `query` / `path` / `explain` / `affected` lookups. Builds are pinned offline — no LLM, no network. |
-| **Git** | Branch chip, live `+ ~ −` / `↑↓` counters, and a commit **History** pane. |
+| **Git** | Branch and live `+ ~ −` / `↑↓` counters in the title bar, the **Changes** sidebar for review and commit, and a commit **History** pane. |
 | **Voice** | Push-to-talk and hands-free voice chat, transcribed on-device (Apple Speech) with a local whisper.cpp fallback — audio never leaves the machine. |
 
 Drag panes to rearrange, drop one on another to stack them as tabs, tear a
 pane off into its own OS window with `⧉`. Your layout is saved and restored.
 
-The `＋` menu lists every agent CLI found on your `PATH`, alongside plain
-terminals and the app's own panes. The two toggles that matter live right
-here: *spawn agents sandboxed* and *assistant may run commands*.
+The switches that matter live on the **seal** in the title bar — the chip
+that says *Sealed*, *1 open*, or *Unsealed*: *start agents sealed*, *sandboxed
+Docker*, and *assistant may run commands*, plus every sealed pane with its
+network state and a one-click relock.
 
 ## How the containment works
 
@@ -120,21 +133,22 @@ domains and nothing else**.
                         (api.anthropic.com, api.openai.com, …)
 ```
 
-- A pane's **cyan strip** opens that pane's proxy for 15, 30, or 60 minutes,
-  then it re-locks on its own. Opening it asks for your second factor (an
-  authenticator code, or your passphrase). Blocked hosts show up on the
-  strip.
+- A sealed pane wears a **green seam** and a strip that reads *Sealed · model
+  APIs only*; *Allow internet…* on that strip opens the pane's proxy for 15, 30, or 60 minutes,
+  then it re-locks on its own (the seam turns amber while it's open). Opening
+  it asks for your second factor (an authenticator code, or your passphrase).
+  Blocked hosts show up on the strip.
 - Opening a pane widens the **proxy**, never the sandbox — a contained pane
   still can't touch raw sockets, SSH, or your Tome config files.
-- Need full, normal network access? Spawn an **uncontained pane** from the
-  `＋` menu. Because that pane can run anything with your privileges, Tome
+- Need full, normal network access? Open a plain **Terminal** (or turn off
+  *start agents sealed* on the seal). Because that pane can run anything with your privileges, Tome
   asks for your passphrase or code first — every time.
 - A repo can ship a **team allowlist** at `.tome/egress.json`. Tome validates
   it and asks you to approve it before using it; editing it later re-asks.
 - A **security event log** records unlocks, blocked hosts, and assistant
-  actions (what happened, never the contents). Open it from the `＋` menu.
+  actions (what happened, never the contents). Open it from the seal or `⌘K`.
 - **Containment-only mode** (Preferences → Security) deletes the uncontained
-  escape hatch entirely: the option disappears from the `＋` menu and the
+  escape hatch entirely: the option disappears from New, the seal and `⌘K`, and the
   backend refuses uncontained spawns — a ceiling, enforced outside the
   renderer, not just a default.
 - On Linux where Landlock can't back file confinement (fail-open rung), a
@@ -204,8 +218,8 @@ to a browser or logged.
 The assistant is also a **conductor** — it can list your panes, open panes
 and files, and type into a terminal. Two guardrails:
 
-- It only **runs** a command when you turn on *assistant may run commands* in
-  the `＋` menu (off by default). With it off, nothing is submitted without
+- It only **runs** a command when you turn on *assistant may run commands* on
+  the seal (off by default). With it off, nothing is submitted without
   your Enter.
 - It can **read** a terminal's scrollback only for panes you approve — Tome
   asks before the first read, and contained panes are never readable.

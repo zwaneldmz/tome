@@ -3,12 +3,11 @@
 // after nested flows. Tagged @preferences; fast (@smoke) — mock-backed.
 //@feature @preferences @smoke
 import { test, expect } from '@playwright/test'
-import { boot, openAddMenu } from './helpers.mjs'
+import { boot, runCommand } from './helpers.mjs'
 
 const openSettings = async (page) => {
   await boot(page)
-  await openAddMenu(page)
-  await page.getByRole('menuitem', { name: /Settings/ }).click()
+  await runCommand(page, 'Settings')
   await expect(page.locator('.prefs-shell')).toBeVisible()
 }
 
@@ -35,8 +34,7 @@ test.describe('slice 3a settings shell', () => {
       window.tome.stt.status = slow({ available: false })
       window.tome.stt.engine = slow('apple')
     })
-    await openAddMenu(page)
-    await page.getByRole('menuitem', { name: /Settings/ }).click()
+    await runCommand(page, 'Settings')
 
     // Immediately: shell + rail + sync sections + loading placeholders.
     await expect(page.locator('.prefs-nav')).toBeVisible()
@@ -250,8 +248,7 @@ test.describe('slice 3a settings shell', () => {
       window.__cardkeys = keys
       window.__cardhidden = hidden
     })
-    await openAddMenu(page)
-    await page.getByRole('menuitem', { name: /Settings/ }).click()
+    await runCommand(page, 'Settings')
 
     // Cards render; the banner carries the REAL resolution.
     await expect(page.locator('.prov-card')).toHaveCount(2)

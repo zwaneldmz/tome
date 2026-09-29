@@ -40,15 +40,8 @@
 //! copy is gone so there is exactly one Rust-side list of which env vars a
 //! login shell's full `env` dump may leak into an agent pane.
 
-// Every function below is exercised by its own #[cfg(test)] fixture, but in
-// a plain (non-test, non-`--ignored`) build nothing calls `login_env()` yet:
-// the real consumer (`pty.rs`'s terminal/agent spawn paths, per this
-// phase's brief) is a different slice landing in parallel and may not be in
-// the tree yet when this file's own `cargo check`/`cargo test` gates run.
-// One module-level allow here, same rationale (and same shape) as
-// `confine.rs`'s — see that module's top doc comment — rather than
-// scattering `#[allow(dead_code)]` over every item.
-#![allow(dead_code)]
+// `login_env()` is exercised by this file's own #[cfg(test)] fixtures and
+// called in production by `ipc::pty::pty_create`'s gapped-pane path.
 
 use std::collections::HashMap;
 use std::path::Path;

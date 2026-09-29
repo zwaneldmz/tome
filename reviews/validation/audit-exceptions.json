@@ -1,6 +1,1 @@
-{
-  "GHSA-5xrq-8626-4rwp": {
-    "reason": "vitest advisory (arbitrary file read/execute when the Vitest UI/API server is listening, CVSS 9.8). Tome's only Vitest entry point is `vitest run` (package.json test script, CI); no script, workflow, or config starts --ui/--api/an inspector listener, so the vulnerable code path is never reached. Dev-only dependency, not shipped in the packaged app. Full assessment: reviews/validation/TOME-017-acceptance.md. package.json also bumps vitest past the vulnerable range (>=4.0.0 <4.1.0); this exception covers the gap until the lockfile regeneration that follows this change lands.",
-    "expires": "2026-09-10"
-  }
-}
+{}

@@ -10,6 +10,7 @@ import { shouldAbortOnDispose } from '../chat-lifecycle.js'
 import { providerLineText, needsProviderPick } from '../chat-gate.js'
 import { voiceActive } from '../voice.js'
 import { isVerbose, mentorState } from '../mentor.js'
+import { micIcon, speakerIcon, stopIcon, historyIcon } from '../icons.js'
 
 export class ChatPanel {
   constructor() {
@@ -18,16 +19,19 @@ export class ChatPanel {
     this.element.innerHTML = `
       <div class="chat-header">
         <button type="button" class="chat-provider-line" title="Which provider the next message goes to — click to change" aria-label="Assistant provider">…</button>
-        <button type="button" class="chat-history-btn" title="Search past conversations" aria-label="Search chat history">⌕</button>
+        <button type="button" class="chat-history-btn" title="Search past conversations" aria-label="Search chat history"></button>
       </div>
       <div class="chat-log"></div>
       <form class="chat-form">
-        <button type="button" class="chat-brain-toggle" title="Inject workspace brain context" aria-label="Inject workspace brain context" aria-pressed="false">◈ brain</button>
-        <textarea rows="2" aria-label="Message the assistant" placeholder="Ask the assistant… (Enter to send · Shift+Enter newline · dictate with the 🎤 key)"></textarea>
-        <button type="button" class="chat-mic" title="Push to talk — local whisper transcription (click to start/stop · Esc cancels)" aria-label="Push to talk">🎙</button>
-        <button type="button" class="chat-speak" title="Speak replies aloud" aria-label="Speak replies aloud" aria-pressed="false">🔊</button>
-        <button type="button" class="chat-stop hidden" title="Stop the reply (aborts the assistant's current answer)" aria-label="Stop the reply">■</button>
-        <button type="submit">Send</button>
+        <textarea rows="2" aria-label="Message the assistant" placeholder="Ask the assistant — Enter sends, ⇧Enter for a new line"></textarea>
+        <div class="chat-tools">
+          <button type="button" class="chat-brain-toggle" title="Include the workspace brain (notes) as context" aria-label="Include workspace brain context" aria-pressed="false">Brain</button>
+          <button type="button" class="chat-mic" title="Push to talk — transcribed locally (click to start/stop · Esc cancels)" aria-label="Push to talk"></button>
+          <button type="button" class="chat-speak" title="Speak replies aloud" aria-label="Speak replies aloud" aria-pressed="false"></button>
+          <span class="chat-tools-gap"></span>
+          <button type="button" class="chat-stop hidden" title="Stop the reply" aria-label="Stop the reply"></button>
+          <button type="submit" class="chat-send">Send</button>
+        </div>
       </form>`
   }
   init({ params }) {
@@ -59,6 +63,10 @@ export class ChatPanel {
       openChatHistory((id) => this.loadConversation(id))
     )
     this.micBtn = this.element.querySelector('.chat-mic')
+    this.micBtn.appendChild(micIcon())
+    this.speakBtn.appendChild(speakerIcon())
+    this.stopBtn.appendChild(stopIcon())
+    this.historyBtn.appendChild(historyIcon())
     this.micBtn.addEventListener('click', () => (this.rec ? this.stopRec() : this.startRec()))
     this.element.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && this.rec) {

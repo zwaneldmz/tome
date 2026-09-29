@@ -38,15 +38,8 @@
 //! have no port — an empty slice already covers "nothing to match
 //! against".
 
-// Every item below is exercised by its own #[cfg(test)] suite, but in a
-// plain (non-test) build nothing calls any of it yet: the real caller
-// (`ipc::pty::pty_create`) is a different slice's file (this phase's
-// binding decision reserves `state.rs`/`Cargo.toml` — and so the PTY
-// infra that would wire this in — to slice P1) and is still a stub as of
-// this slice landing. One module-level allow here, same rationale as
-// `confine.rs`'s (see that module's top doc comment), rather than
-// scattering `#[allow(dead_code)]` over every item.
-#![allow(dead_code)]
+// The command-line builders below are exercised by this file's own
+// #[cfg(test)] suite and called in production by `ipc::pty::pty_create`.
 
 /// Mirrors `src/shared/pane-kinds.js`'s `AGENTS` constant — the built-in
 /// agent CLIs spawnable as panes. `src/shared/**` stays JS-only per the
@@ -306,6 +299,60 @@ pub fn build_agent_spawn(kind: &str, model: Option<&str>) -> Option<String> {
     build_agent_spawn_from(&builtins, kind, model)
 }
 
+// ---- agent-reported pane state (interactive claude panes) ----
+
+/// Appended to an INTERACTIVE `claude` pane's command line: Claude Code
+/// lifecycle hooks that report the session's state to Tome, so the sidebar
+/// shows what the agent is actually doing instead of guessing from output
+/// timing.
+///
+/// Transport: each hook writes `OSC 8663 ; <state> BEL` to the pane's own
+/// pty, named by `$TOME_PANE_TTY` (set by `pty::spawn_raw` — Claude Code
+/// runs hooks detached, so `/dev/tty` is ENXIO inside them; verified), and
+/// the renderer's xterm parses it (an OSC is consumed, never drawn). No new channel, no sandbox change: the agent
+/// could already write any byte to that terminal. Closed vocabulary —
+/// `working` | `waiting` | `done` — so a spoofed sequence (anything in the
+/// pane can print one) can only move a status lamp, never inject text into
+/// trusted UI or reach a security decision.
+///
+///   UserPromptSubmit, PostToolUse → working   (a turn started / resumed)
+///   Notification                  → waiting   (blocked on you: a permission
+///                                              prompt, or idle input)
+///   Stop                          → done      (the turn finished)
+///
+/// Shape constraints, pinned by the tests below, because this rides inside
+/// the login shell's `-c` string in single quotes:
+/// - no `'` (would end the quoting),
+/// - no `\\` (fish rewrites `\\` inside single quotes; the ESC/BEL bytes
+///   are therefore spelled as JSON `\u001b`/`\u0007`, which every shell
+///   passes through literally and the JSON parser turns into raw bytes),
+/// - valid JSON once unquoted.
+///
+/// Claude Code runs hook commands with `/bin/sh` (verified: independent of
+/// the user's `$SHELL`), MERGES `--settings` hooks with the user's and the
+/// project's own (verified: both fire), and headless spawns never get this
+/// (they have no terminal; `build_headless_spawn` is a separate shape). A
+/// `/dev/tty` that cannot be opened is swallowed — the hook never fails.
+pub const CLAUDE_STATE_HOOKS_ARG: &str = concat!(
+    " --settings '{\"hooks\":{",
+    "\"UserPromptSubmit\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"{ printf \\\"\\u001b]8663;working\\u0007\\\" >\\\"$TOME_PANE_TTY\\\"; } 2>/dev/null || true\"}]}],",
+    "\"PostToolUse\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"{ printf \\\"\\u001b]8663;working\\u0007\\\" >\\\"$TOME_PANE_TTY\\\"; } 2>/dev/null || true\"}]}],",
+    "\"Notification\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"{ printf \\\"\\u001b]8663;waiting\\u0007\\\" >\\\"$TOME_PANE_TTY\\\"; } 2>/dev/null || true\"}]}],",
+    "\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"{ printf \\\"\\u001b]8663;done\\u0007\\\" >\\\"$TOME_PANE_TTY\\\"; } 2>/dev/null || true\"}]}]",
+    "}}'"
+);
+
+/// The interactive-pane suffix for `kind`: the state hooks for the built-in
+/// `claude` (custom agents can't take that id — `vet_custom_agent` refuses
+/// built-in names), nothing for anything else.
+pub fn interactive_suffix(kind: &str) -> &'static str {
+    if kind == "claude" {
+        CLAUDE_STATE_HOOKS_ARG
+    } else {
+        ""
+    }
+}
+
 // ---- headless (background flow runs) ----
 
 /// `{ cmd, args }` for a headless spawn — the argv `build_headless_spawn`
@@ -424,6 +471,61 @@ pub fn build_headless_spawn(
 mod tests {
     use super::*;
     use crate::custom_agents::vet_custom_agent;
+
+    // ---- interactive state hooks (claude) ----
+
+    fn hooks_json() -> serde_json::Value {
+        let arg = CLAUDE_STATE_HOOKS_ARG;
+        let json = arg
+            .strip_prefix(" --settings '")
+            .and_then(|s| s.strip_suffix('\''))
+            .expect("the suffix is ` --settings '<json>'`");
+        serde_json::from_str(json).expect("the hooks settings must be valid JSON")
+    }
+
+    #[test]
+    fn state_hooks_are_shell_safe_inside_single_quotes_in_every_login_shell() {
+        let inner =
+            &CLAUDE_STATE_HOOKS_ARG[" --settings '".len()..CLAUDE_STATE_HOOKS_ARG.len() - 1];
+        assert!(
+            !inner.contains('\''),
+            "a quote would end the single-quoting"
+        );
+        assert!(
+            !inner.contains("\\\\"),
+            "fish rewrites \\\\ inside single quotes"
+        );
+        assert!(!inner.contains('\n'), "a newline would split the -c string");
+    }
+
+    #[test]
+    fn state_hooks_report_the_closed_vocabulary_over_the_pane_tty() {
+        let v = hooks_json();
+        let expect = [
+            ("UserPromptSubmit", "working"),
+            ("PostToolUse", "working"),
+            ("Notification", "waiting"),
+            ("Stop", "done"),
+        ];
+        let hooks = v["hooks"].as_object().unwrap();
+        assert_eq!(hooks.len(), expect.len(), "no hook beyond the four states");
+        for (event, state) in expect {
+            let cmd = hooks[event][0]["hooks"][0]["command"].as_str().unwrap();
+            assert_eq!(
+                cmd,
+                format!("{{ printf \"\u{1b}]8663;{state}\u{7}\" >\"$TOME_PANE_TTY\"; }} 2>/dev/null || true"),
+                "{event}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_the_builtin_claude_gets_the_state_hooks() {
+        assert_eq!(interactive_suffix("claude"), CLAUDE_STATE_HOOKS_ARG);
+        for kind in ["opencode", "pi", "terminal", "codex", ""] {
+            assert_eq!(interactive_suffix(kind), "", "{kind}");
+        }
+    }
 
     // ---- build_agent_spawn — no model pinned ----
 

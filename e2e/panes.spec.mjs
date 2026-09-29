@@ -53,8 +53,8 @@ test.describe('@panes pane spawning', () => {
   })
 
   // P2.1 containment-only ceiling: with the pref on, the ＋ menu drops the
-  // unsandboxed Terminal row and the egress-default toggle (a default, not
-  // a ceiling), and agent rows stay — forced gapped.
+  // unsandboxed Terminal row, the seal drops the egress-default switch (a
+  // default, not a ceiling), and agent rows stay — forced sealed.
   test('@containment containment-only removes unsandboxed spawns from the ＋ menu', async ({
     page,
   }) => {
@@ -67,13 +67,19 @@ test.describe('@panes pane spawning', () => {
     await openAddMenu(page)
 
     await expect(page.getByRole('menuitem', { name: /Terminal/ })).toHaveCount(0)
-    await expect(page.getByRole('menuitem', { name: /spawn agents contained/ })).toHaveCount(0)
-    // Agent rows survive — and are marked contained.
-    await expect(page.getByRole('menuitem', { name: /⛨ claude/ })).toBeVisible()
+    // Agent rows survive — under a label that says they start sealed.
+    await expect(page.locator('#add-menu')).toContainText('Agents · start sealed')
+    await expect(page.getByRole('menuitem', { name: /claude/ })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await page.click('#seal-chip')
+    await expect(page.getByRole('menuitemcheckbox', { name: /Start agents sealed/ })).toHaveCount(0)
+    await expect(page.locator('#seal-menu')).toContainText('Containment-only mode is on')
+    await page.keyboard.press('Escape')
 
     // Spawning one still records a GAPPED pty.create: the ceiling forces
-    // egress on even though the menu no longer offers the toggle.
-    await page.getByRole('menuitem', { name: /⛨ claude/ }).click()
+    // egress on even though nothing offers the toggle.
+    await openAddMenu(page)
+    await page.getByRole('menuitem', { name: /claude/ }).click()
     const calls = await ptyCreateCalls(page)
     expect(calls).toHaveLength(1)
     expect(calls[0].kind).toBe('claude')

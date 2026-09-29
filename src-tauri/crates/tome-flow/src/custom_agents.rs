@@ -32,13 +32,9 @@
 //! survives Tauri's own IPC deserialization, but here the "string" the
 //! store hands back is exactly the point being defended against.
 
-// Every item below is exercised by its own #[cfg(test)] suite, but in a
-// plain (non-test) build nothing calls any of it yet — same rationale as
-// `agent_spawn.rs`'s module-level allow (see that module's top doc
-// comment): the real caller (`ipc::pty::pty_create`, resolving `kind`
-// against `merge_agents(AGENTS, readStore("custom-agents"))`) is a
-// different slice's file and still a stub as of this slice landing.
-#![allow(dead_code)]
+// Exercised by this file's own #[cfg(test)] suite and called in production
+// by `ipc::pty::pty_create`, which resolves a pane's `kind` against
+// `merge_agents(AGENTS, read_store("custom-agents"))`.
 
 use std::collections::HashSet;
 

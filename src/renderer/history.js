@@ -7,6 +7,20 @@ const tome = () => window.tome
 
 const STATUS = { A: ['A', 'g-add'], M: ['M', 'g-mod'], D: ['D', 'g-del'], R: ['R', 'g-mod'], C: ['C', 'g-add'], T: ['T', 'g-mod'] }
 
+// Unified-diff text → one classed row per line (shared with the Changes view).
+export function renderDiff(text) {
+  const frag = document.createDocumentFragment()
+  for (const line of text.split('\n')) {
+    let cls = 'ctx'
+    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ') || line.startsWith('index ')) cls = 'head'
+    else if (line.startsWith('@@')) cls = 'hunk'
+    else if (line.startsWith('+')) cls = 'add'
+    else if (line.startsWith('-')) cls = 'del'
+    frag.appendChild(el('div', 'dl ' + cls, line || ' '))
+  }
+  return frag
+}
+
 export class HistoryPanel {
   constructor() {
     this.element = el('div', 'panel-history')
@@ -112,15 +126,6 @@ export class HistoryPanel {
       this.diffEl.appendChild(el('div', 'hist-err', '(no textual diff — binary file or merge)'))
       return
     }
-    const frag = document.createDocumentFragment()
-    for (const line of text.split('\n')) {
-      let cls = 'ctx'
-      if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ') || line.startsWith('index ')) cls = 'head'
-      else if (line.startsWith('@@')) cls = 'hunk'
-      else if (line.startsWith('+')) cls = 'add'
-      else if (line.startsWith('-')) cls = 'del'
-      frag.appendChild(el('div', 'dl ' + cls, line || ' '))
-    }
-    this.diffEl.appendChild(frag)
+    this.diffEl.appendChild(renderDiff(text))
   }
 }

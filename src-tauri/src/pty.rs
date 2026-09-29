@@ -9,10 +9,11 @@
 //! resolution (`buildAgentSpawnFrom`), gapping policy
 //! (`resolveGapping`/`unrestrictedSpawnNeedsReauth`), cwd fallback
 //! (`resolveSpawnCwd`), the login-shell PATH/secrets harvest
-//! (`ensureLoginEnv`), or the seatbelt/bwrap wrap. [`TerminalOpts`] is
-//! intentionally a "give me an already-resolved spawn spec" shape — no
-//! policy fields — so that slice can build one without this module needing
-//! to know anything about gapping, custom agents, or re-auth.
+//! (`ensureLoginEnv`), or the seatbelt/bwrap wrap. [`Registry::spawn_raw`]
+//! takes an already-resolved `CommandBuilder` — no policy fields — so that
+//! slice builds the whole command line (shell, sandbox wrap, env) without
+//! this module needing to know anything about gapping, custom agents, or
+//! re-auth.
 //!
 //! ## Why explicit kill + explicit reap (unlike node-pty)
 //!
@@ -76,19 +77,11 @@
 //! via lossy decoding; nothing is ever held back forever.
 //!
 //! `ipc::pty::pty_create` (a different, "integration", slice's file — see
-//! its own doc comment) is `spawn_terminal`/`spawn_raw`'s real production
-//! caller for the terminal branch this phase actually spawns. The blanket
-//! allow below stays rather than shrinking to one attribute per item: a
-//! handful of things here — `Registry::contains`/`size_of`, the
-//! `#[cfg(test)]`-only introspection helpers — are still exercised by
-//! nothing but this module's own tests, and narrowing this further isn't
-//! this pass's concern; `cargo test` compiles and exercises every item here
-//! regardless of which ones a non-test build currently reaches.
-#![allow(dead_code)]
+//! its own doc comment) is [`Registry::spawn_raw`]'s real production caller:
+//! it builds the sandboxed command line and hands it here.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -99,8 +92,7 @@ use tauri::ipc::Channel;
 
 /// A per-pane output tap: called with each flushed (batched, UTF-8-decoded)
 /// chunk on the batcher task, alongside the `pty:data` Channel send. Kept a
-/// bare `Fn(&str)` so this module stays conductor-agnostic (matching
-/// `TerminalOpts`'s "no policy fields" design) — `ipc::pty::pty_create`
+/// bare `Fn(&str)` so this module stays conductor-agnostic — `ipc::pty::pty_create`
 /// installs one that captures an `Arc<Conductor>` + pane id and calls
 /// `Conductor::record`, the scrollback ring `read_terminal` reads back.
 pub type DataTap = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
@@ -116,36 +108,6 @@ const PTY_FLUSH_MS: u64 = 4;
 /// a more literal "64KB" than the original's code-unit count ever was for
 /// non-ASCII output, not a behavioral regression.
 const PTY_FLUSH_BYTES: usize = 64 * 1024;
-
-/// Everything [`Registry::spawn_terminal`] needs to start a plain
-/// login-shell pane, already resolved by the caller. No policy fields on
-/// purpose — see the module doc comment.
-pub struct TerminalOpts {
-    /// The renderer-generated pane id — becomes the `id` field of every
-    /// `pty:data`/`pty:exit` message this pane produces.
-    pub id: String,
-    /// Absolute path to the login shell, for example `index.js`'s
-    /// `const SHELL = process.env.SHELL || '/bin/zsh'` (line 138 — not this
-    /// module's job to read that env var; the caller resolves it).
-    pub shell: String,
-    /// Already-resolved starting directory (`resolveSpawnCwd`'s output — a
-    /// different slice's function). Used as-is, no existence check: a bad
-    /// cwd surfaces as a normal spawn failure, same as it would from
-    /// `pty.spawn` in the original.
-    pub cwd: PathBuf,
-    /// The child's COMPLETE environment. Replaces whatever this process's
-    /// own environment is — it is not merged with it (see
-    /// `build_terminal_command`'s doc comment for why that matters). The
-    /// caller (`buildAgentEnv`'s future port) owns allowlisting/secrets/
-    /// `TERM`; this module applies exactly what it is given.
-    pub env: Vec<(String, String)>,
-    /// Initial size. `index.js`'s `pty.spawn` call hardcodes
-    /// `cols: 80, rows: 24` regardless of the pane's real rendered size —
-    /// callers should pass that same default to match; the renderer
-    /// corrects it with a real `pty:resize` immediately after create.
-    pub cols: u16,
-    pub rows: u16,
-}
 
 /// One live pane's resources. Never `Clone`/`Copy` — moved out of the
 /// registry wholesale by [`Registry::kill`], and by `reader_loop` on a
@@ -183,7 +145,7 @@ struct PaneHandle {
 /// The map itself lives behind an `Arc` (not just the `Mutex`) so
 /// background tasks spawned by [`Registry::spawn_raw`] can hold their own
 /// cheap clone of it — those tasks must outlive the `&self` borrow of
-/// whichever `spawn_terminal` call started them.
+/// whichever `spawn_raw` call started them.
 pub struct Registry {
     inner: Arc<Mutex<HashMap<String, PaneHandle>>>,
     /// One fresh `u64` per [`Registry::spawn_raw`] call — see
@@ -297,33 +259,7 @@ impl Registry {
         true
     }
 
-    /// Builds the login-shell command line per `index.js`'s terminal
-    /// branch (`kind === 'terminal'` -> `agentCmd` is `null` ->
-    /// `spawnArgs = ['-l']`, line 753) and delegates to [`Self::spawn_raw`].
-    ///
-    /// `on_exit`: see [`Self::spawn_raw`]'s doc comment — fires with this
-    /// pane's `pty:exit` exactly once, after its process has actually been
-    /// reaped.
-    pub async fn spawn_terminal(
-        &self,
-        opts: TerminalOpts,
-        channel: Channel<Value>,
-        tap: Option<DataTap>,
-        on_exit: impl FnOnce(i64) + Send + 'static,
-    ) -> Result<(), String> {
-        let id = opts.id.clone();
-        let size = PtySize {
-            rows: opts.rows,
-            cols: opts.cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        };
-        let cmd = build_terminal_command(&opts);
-        self.spawn_raw(id, cmd, size, channel, tap, on_exit).await
-    }
-
-    /// The mechanism every spawn path shares — `spawn_terminal` above is a
-    /// thin `CommandBuilder` builder on top of this; a later phase's agent
+    /// The mechanism every spawn path shares; a later phase's agent
     /// path (once the egress port lifts the phase 2 restriction — see this
     /// slice's task brief) is expected to call this directly with its own
     /// `CommandBuilder` (sandbox wrap argv and all) rather than duplicating
@@ -336,8 +272,7 @@ impl Registry {
     /// — the production caller (`ipc::pty::pty_create`) passes a closure
     /// that does `app.emit("pty:exit", ...)`. A plain callback rather than
     /// a concrete `AppHandle` parameter, so this module stays decoupled
-    /// from Tauri specifics (matching `TerminalOpts`'s "no policy fields"
-    /// design) and so this module's own tests can observe an exit without
+    /// from Tauri specifics, and so this module's own tests can observe an exit without
     /// needing Tauri's `test` cargo feature, which this crate's
     /// `Cargo.toml` — out of this slice's scope to edit — does not enable
     /// (see `events.rs`'s "Testing boundary note" for the identical
@@ -376,6 +311,15 @@ impl Registry {
     ) -> Result<(), String> {
         let pty_system = native_pty_system();
         let pair = pty_system.openpty(size).map_err(|e| e.to_string())?;
+        // The pane's own terminal, by path, for processes in it that have no
+        // controlling terminal — Claude Code runs hooks detached, so
+        // `/dev/tty` is ENXIO there. The state hooks write to this (see
+        // `agent_spawn::CLAUDE_STATE_HOOKS_ARG`). Not a secret: `tty` prints
+        // the same path from any shell in the pane.
+        let mut cmd = cmd;
+        if let Some(tty) = pair.master.tty_name() {
+            cmd.env("TOME_PANE_TTY", tty);
+        }
         let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
         // The parent must not keep its own copy of the slave open past
         // spawn: portable-pty dup()s the slave into the child's stdio
@@ -488,27 +432,6 @@ fn fail_spawned_child(mut child: Box<dyn Child + Send + Sync>, msg: String) -> S
     let _ = child.kill();
     let _ = child.wait();
     msg
-}
-
-/// Pure builder for `spawn_terminal`'s `CommandBuilder` — separated out so
-/// the exact argv/cwd/env shape is unit-testable without spawning anything.
-fn build_terminal_command(opts: &TerminalOpts) -> CommandBuilder {
-    let mut cmd = CommandBuilder::new(&opts.shell);
-    cmd.arg("-l");
-    cmd.cwd(&opts.cwd);
-    // CommandBuilder::new() seeds itself from THIS PROCESS's own
-    // environment (portable-pty's `get_base_env()`) — that must never
-    // reach a pty child unfiltered (the TOME-007 least-privilege rule
-    // `buildAgentBaseEnv`/`buildAgentEnv` enforce; neither of them this
-    // slice's files, but whatever allowlisted env they hand this module
-    // must land in the child exactly, not merged on top of Tome's own
-    // process env). `env_clear()` wipes that inherited seed; every pair in
-    // `opts.env` is then the ONLY thing the child ends up with.
-    cmd.env_clear();
-    for (k, v) in &opts.env {
-        cmd.env(k, v);
-    }
-    cmd
 }
 
 /// Runs on a `spawn_blocking` thread for the pane's whole lifetime. See the
@@ -883,61 +806,6 @@ mod tests {
             "expected a replacement character, got {out:?}"
         );
         assert!(buf.is_empty());
-    }
-
-    // ================= build_terminal_command =================
-
-    fn opts(env: Vec<(&str, &str)>) -> TerminalOpts {
-        TerminalOpts {
-            id: "pane-1".to_string(),
-            shell: "/bin/sh".to_string(),
-            cwd: PathBuf::from("/tmp"),
-            env: env
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-            cols: 80,
-            rows: 24,
-        }
-    }
-
-    #[test]
-    fn terminal_command_is_a_bare_login_shell() {
-        let cmd = build_terminal_command(&opts(vec![]));
-        let argv: Vec<String> = cmd
-            .get_argv()
-            .iter()
-            .map(|s| s.to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(argv, vec!["/bin/sh".to_string(), "-l".to_string()]);
-    }
-
-    #[test]
-    fn terminal_command_uses_the_given_cwd() {
-        let cmd = build_terminal_command(&opts(vec![]));
-        assert_eq!(cmd.get_cwd().unwrap().to_string_lossy(), "/tmp");
-    }
-
-    #[test]
-    fn terminal_command_env_is_exactly_what_was_given_not_merged_with_this_process() {
-        // Seed a known value into THIS process's env first, so the leak-check
-        // below stays meaningful even on a minimal CI container (for example fedora)
-        // that sets neither USER nor LOGNAME.
-        std::env::set_var("USER", "tome-test-user");
-        let cmd = build_terminal_command(&opts(vec![("PATH", "/usr/bin"), ("HOME", "/home/x")]));
-        assert_eq!(cmd.get_env("PATH").unwrap().to_string_lossy(), "/usr/bin");
-        assert_eq!(cmd.get_env("HOME").unwrap().to_string_lossy(), "/home/x");
-        // TOME-007 property: something that is almost certainly set in
-        // THIS test process's real environment, but was not in opts.env,
-        // must not leak into the child's env. CommandBuilder::new() seeds
-        // itself from this process's env unconditionally — this is exactly
-        // what env_clear() must undo.
-        assert!(
-            std::env::var("USER").is_ok() || std::env::var("LOGNAME").is_ok(),
-            "test precondition: expected USER or LOGNAME to be set in the test process"
-        );
-        assert!(cmd.get_env("USER").is_none() || std::env::var("USER").is_err());
-        assert!(cmd.get_env("LOGNAME").is_none() || std::env::var("LOGNAME").is_err());
     }
 
     // ================= Registry: unknown-id no-ops =================

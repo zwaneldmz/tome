@@ -6,9 +6,9 @@
 // fire even from inside inputs; everything else bails when an editable
 // element has focus. The quick-open palette installs its own keydown
 // listener while it is open.
-import { tome, el, toast } from './util.js'
-import { dock, closePanel, openFile, addTerminal, addChat, addBrain, addReport } from './panes.js'
-import { activeWorkspace } from './workspaces.js'
+import { el } from './util.js'
+import { openPalette } from './commands.js'
+import { dock, closePanel } from './panes.js'
 import { zoomTerminals } from './panels/terminal.js'
 import { closeMenus } from './menus.js'
 
@@ -45,246 +45,46 @@ function cyclePanel(step) {
   panels[(idx + step + panels.length) % panels.length].api.setActive()
 }
 
-// ---------- quick-open palette ----------
-const SKIP_DIRS = new Set(['node_modules', '.git', 'out', 'dist', '.venv', '__pycache__', '.next', 'target'])
-const MAX_DEPTH = 8
-const MAX_DIRS = 400
-const MAX_FILES = 4000
-const MAX_RESULTS = 40
-
-// Lazily-walked file index for the active workspace's folders. Rebuilt each
-// time the palette opens, but the walk is incremental so the palette is
-// usable (and keeps filling in) while big trees are still being scanned.
-class FileIndex {
-  constructor(roots) {
-    this.files = []
-    this.roots = roots
-    this.dirs = 0
-    this.cancelled = false
-    this.done = false
-    this.version = 0
-  }
-  cancel() {
-    this.cancelled = true
-  }
-  async start() {
-    const walk = async (dir, depth) => {
-      if (this.cancelled || this.files.length >= MAX_FILES) return
-      if (depth > MAX_DEPTH || ++this.dirs > MAX_DIRS) return
-      let entries
-      try {
-        entries = await tome.fs.readDir(dir)
-      } catch {
-        return
-      }
-      for (const e of entries) {
-        if (this.cancelled || this.files.length >= MAX_FILES) return
-        const path = dir + '/' + e.name
-        if (e.dir) {
-          if (!SKIP_DIRS.has(e.name) && !e.name.startsWith('.')) await walk(path, depth + 1)
-        } else {
-          this.files.push(path)
-        }
-      }
-      this.version++
-    }
-    await Promise.all(this.roots.map((r) => walk(r, 0)))
-    this.done = true
-    this.version++
-  }
-}
-
-// Subsequence match with a small score: consecutive runs and matches at
-// word starts (path separators, camelCase) rank higher. Returns null when
-// the query isn't a subsequence of the candidate.
-function fuzzy(query, text) {
-  const q = query.toLowerCase()
-  const t = text.toLowerCase()
-  let ti = 0
-  let score = 0
-  let run = 0
-  for (let qi = 0; qi < q.length; qi++) {
-    const found = t.indexOf(q[qi], ti)
-    if (found === -1) return null
-    run = found === ti ? run + 1 : 0
-    score += run * 4
-    if (found === 0 || '/._- '.includes(t[found - 1])) score += 6
-    score -= (found - ti) * 0.3 // gap penalty
-    ti = found + 1
-  }
-  return score - text.length * 0.01
-}
-
-function relToWorkspace(path) {
-  const w = activeWorkspace()
-  for (const root of w?.folders || []) {
-    if (path.startsWith(root + '/')) return path.slice(root.length + 1)
-  }
-  return path
-}
-
 const isEditable = (n) =>
   !!n && (n.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName))
 
-export function quickOpen() {
-  if (document.getElementById('qo-overlay')) return
-  const w = activeWorkspace()
-  closeMenus()
-  const overlay = el('div')
-  overlay.id = 'qo-overlay'
-  const box = el('div', 'qo-box')
-  const input = el('input', 'qo-input')
-  input.placeholder = 'type to find a file, pane, or action…'
-  input.spellcheck = false
-  const list = el('div', 'qo-list')
-  box.append(input, list)
-  overlay.appendChild(box)
-  overlay.addEventListener('mousedown', (e) => e.target === overlay && close())
-  document.body.appendChild(overlay)
-
-  // Static items — open panes and the action list — are available at once;
-  // files fill in behind them as the lazy walk discovers them.
-  const staticItems = [
-    ...dock.panels.map((p) => ({
-      name: p.title || p.id || 'untitled pane',
-      hint: 'pane',
-      run: () => p.api.setActive(),
-    })),
-    { name: 'New terminal', hint: 'pane', run: () => addTerminal('terminal') },
-    { name: 'Assistant chat', hint: 'pane', run: () => addChat() },
-    {
-      name: 'Brain',
-      hint: 'pane',
-      run: () => (activeWorkspace() ? addBrain() : toast('a brain pane needs an active workspace')),
-    },
-    { name: 'Review report…', hint: 'pane', run: () => addReport() },
-    {
-      name: 'Settings…',
-      hint: 'preferences',
-      run: () => import('./preferences.js').then((m) => m.preferencesModal()),
-    },
-    { name: 'Keyboard shortcuts', hint: 'reference', run: () => shortcutsModal() },
-  ]
-
-  const index = w?.folders.length ? new FileIndex(w.folders) : null
-  if (index) index.start()
-  let results = []
-  let sel = 0
-  let shownVersion = -1
-
-  function close() {
-    index?.cancel()
-    overlay.remove()
-  }
-
-  function refresh() {
-    const q = input.value.trim()
-    const scored = []
-    for (const it of staticItems) {
-      const s = q ? fuzzy(q, it.name + ' ' + it.hint) : 0
-      if (s !== null) scored.push([s, it])
-    }
-    if (index) {
-      for (const f of index.files) {
-        const rel = relToWorkspace(f)
-        const s = q ? fuzzy(q, rel) : 0
-        if (s !== null) {
-          const slash = rel.lastIndexOf('/')
-          scored.push([
-            s,
-            { name: slash === -1 ? rel : rel.slice(slash + 1), hint: slash === -1 ? 'file' : rel.slice(0, slash), run: () => openFile(f) },
-          ])
-        }
-      }
-    }
-    // Stable sort keeps insertion order for ties, so panes + actions surface
-    // ahead of files on an empty query, and best matches win once typed.
-    scored.sort((a, b) => b[0] - a[0])
-    results = scored.slice(0, MAX_RESULTS).map((r) => r[1])
-    sel = Math.min(sel, Math.max(0, results.length - 1))
-    shownVersion = index?.version ?? -1
-    list.innerHTML = ''
-    results.forEach((it, i) => {
-      const row = el('div', 'qo-row' + (i === sel ? ' sel' : ''))
-      row.append(el('span', 'qo-name', it.name), el('span', 'qo-dir', it.hint))
-      row.addEventListener('click', () => pick(it))
-      row.addEventListener('mousemove', () => {
-        if (sel !== i) {
-          sel = i
-          paintSel()
-        }
-      })
-      list.appendChild(row)
-    })
-    if (!results.length) {
-      list.appendChild(
-        el('div', 'qo-empty', index && !index.done ? 'scanning… ' + index.files.length + ' files so far' : 'no matches')
-      )
-    } else if (index && !index.done) {
-      list.appendChild(el('div', 'qo-empty', 'scanning… ' + index.files.length + ' files'))
-    }
-    list.querySelector('.qo-row.sel')?.scrollIntoView({ block: 'nearest' })
-  }
-
-  const paintSel = () => {
-    list.querySelectorAll('.qo-row').forEach((row, i) => row.classList.toggle('sel', i === sel))
-  }
-
-  function move(step) {
-    if (!results.length) return
-    sel = (sel + step + results.length) % results.length
-    paintSel()
-    list.querySelector('.qo-row.sel')?.scrollIntoView({ block: 'nearest' })
-  }
-
-  function pick(it) {
-    close()
-    it.run()
-  }
-
-  input.addEventListener('input', () => {
-    sel = 0
-    refresh()
-  })
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n')) {
-      e.preventDefault()
-      move(1)
-    } else if (e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'p')) {
-      e.preventDefault()
-      move(-1)
-    } else if (e.key === 'Enter') {
-      e.preventDefault()
-      if (results[sel]) pick(results[sel])
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      close()
-    }
-    e.stopPropagation()
-  })
-  // Keep filling in while the lazy walk is still discovering files.
-  const poll = setInterval(() => {
-    if (!overlay.isConnected) return clearInterval(poll)
-    if ((index?.version ?? -1) !== shownVersion) refresh()
-  }, 250)
-  refresh()
-  input.focus()
+// ⌘K / ⌘P — the palette lives in commands.js. Opened synchronously so the
+// keystrokes typed right after ⌘K land in its input.
+export function quickOpen(initial) {
+  openPalette(initial)
 }
 
 // ---------- shortcut reference ----------
 const SHORTCUTS = [
-  [MOD + 'B', 'Toggle the sidebar'],
-  [MOD + 'S', 'Save the active editor'],
-  [MOD + '⌥S', 'Save every editor with unsaved changes'],
-  [MOD + 'W', 'Close the active pane (asks if unsaved)'],
-  [MOD + 'P / ' + MOD + 'K', 'Quick open — files, panes, and actions'],
-  [MOD + ',', 'Preferences'],
-  [MOD + '1–9', 'Focus the Nth tab of the active group'],
-  [MOD + '⇧[ / ' + MOD + '⇧]', 'Previous / next tab (also Ctrl+PageUp/PageDown)'],
-  [MOD + '= / ' + MOD + '-', 'Zoom terminal text in / out'],
-  [MOD + '0', 'Reset terminal text size'],
-  ['Enter / Shift+Enter', 'Send / newline in the assistant chat'],
-  ['Esc', 'Close menus, the palette, and modals'],
+  ['Find anything', [
+    [MOD + 'K', 'Command palette — files, panes, commands'],
+    [MOD + 'P', 'Same palette (VS Code habit)'],
+    [MOD + 'J', 'Jump to the next agent waiting for you'],
+    [MOD + 'T', 'New… (agents, terminal, chat)'],
+  ]],
+  ['Sidebar', [
+    [MOD + 'B', 'Show / hide the sidebar'],
+    [MOD + '⇧A', 'Open panes'],
+    [MOD + '⇧E', 'Files'],
+    [MOD + '⇧G', 'Changes — review and commit'],
+  ]],
+  ['Panes', [
+    [MOD + 'W', 'Close the active pane (asks if unsaved)'],
+    [MOD + '1–9', 'Focus the Nth tab of the active group'],
+    [MOD + '⇧[ / ' + MOD + '⇧]', 'Previous / next tab'],
+    [MOD + '= / ' + MOD + '- / ' + MOD + '0', 'Terminal text bigger / smaller / reset'],
+  ]],
+  ['Editing', [
+    [MOD + 'S', 'Save'],
+    [MOD + '⌥S', 'Save all'],
+    ['Enter / ⇧Enter', 'Send / new line in chat'],
+    [MOD + 'Enter', 'Commit, from the Changes message box'],
+  ]],
+  ['App', [
+    [MOD + ',', 'Settings'],
+    [MOD + '/', 'This list'],
+    ['Esc', 'Close menus, the palette, and dialogs'],
+  ]],
 ]
 
 export function shortcutsModal() {
@@ -294,13 +94,16 @@ export function shortcutsModal() {
   overlay.id = 'keys-overlay'
   const box = el('div', 'ag-box keys-box')
   box.append(el('h3', '', 'Keyboard shortcuts'))
-  const grid = el('div', 'keys-grid')
-  for (const [keys, desc] of SHORTCUTS) {
-    const k = el('span', 'keys-col')
-    for (const part of keys.split(' / ')) k.append(el('kbd', '', part))
-    grid.append(k, el('span', 'keys-desc', desc))
+  for (const [title, rows] of SHORTCUTS) {
+    box.appendChild(el('div', 'keys-section', title))
+    const grid = el('div', 'keys-grid')
+    for (const [keys, desc] of rows) {
+      const k = el('span', 'keys-col')
+      for (const part of keys.split(' / ')) k.append(el('kbd', '', part))
+      grid.append(k, el('span', 'keys-desc', desc))
+    }
+    box.appendChild(grid)
   }
-  box.appendChild(grid)
   overlay.appendChild(box)
   overlay.addEventListener('mousedown', (e) => e.target === overlay && overlay.remove())
   document.body.appendChild(overlay)
@@ -329,6 +132,22 @@ window.addEventListener('keydown', (e) => {
   // menu-bridge routes them here; the renderer must not also handle them or
   // they would fire twice. ⌘, (Preferences) is also a native menu accelerator
   // routed via menu-bridge, so it is likewise NOT handled here.
+  // ⌘⇧A/E/G (sidebar views), ⌘J (next waiting agent) and ⌘/ are native
+  // menu accelerators routed through menu-bridge — not handled here.
+  // ⌘K — the command palette, from anywhere (terminals included: the
+  // palette is the advertised way around the app, so it outranks a shell's
+  // clear-scrollback habit).
+  if (!e.shiftKey && e.key.toLowerCase() === 'k') {
+    e.preventDefault()
+    e.stopPropagation()
+    quickOpen()
+    return
+  }
+  if (!e.shiftKey && e.key.toLowerCase() === 't') {
+    e.preventDefault()
+    document.getElementById('btn-add')?.click()
+    return
+  }
   if (!e.shiftKey && DIGITS.includes(e.key)) {
     e.preventDefault()
     focusNthPanel(DIGITS.indexOf(e.key))
@@ -353,14 +172,6 @@ window.addEventListener('keydown', (e) => {
   // Tab cycling: ⌘⇧[/⌘⇧] on mac, Ctrl+PageUp/PageDown everywhere. Not
   // global inside inputs — plain PageUp/Down there belong to the field.
   if (isEditable(e.target)) return
-  // ⌘K — the command palette (files, panes, actions). Handled in the
-  // renderer (not a native accelerator) so it stays off when typing, and so a
-  // terminal keeps its own ⌘K (clear scrollback) for itself.
-  if (!e.shiftKey && e.key.toLowerCase() === 'k') {
-    e.preventDefault()
-    quickOpen()
-    return
-  }
   const prevKey = e.key === '[' || e.key === '{' || e.key === 'PageUp'
   const nextKey = e.key === ']' || e.key === '}' || e.key === 'PageDown'
   if ((e.metaKey && e.shiftKey && (prevKey || nextKey)) || (e.ctrlKey && !e.metaKey && (prevKey || nextKey))) {

@@ -23,14 +23,15 @@ export function stripRender(paneId) {
     st?.confinement === 'network-only' ? ' · network-contained only' : ''
   if (!st || st.mode === 'providers') {
     strip.classList.remove('open')
-    label.textContent = '⛨ model APIs only — click to allow internet' + confinementNote
+    label.textContent = 'Sealed · model APIs only' + confinementNote
+    strip.dataset.action = 'Allow internet…'
   } else {
     strip.classList.add('open')
     const left = Math.max(0, st.expiresAt - Date.now())
     const m = Math.floor(left / 60000)
     const s = String(Math.floor((left % 60000) / 1000)).padStart(2, '0')
-    label.textContent =
-      `⛉ internet open · relocks in ${m}:${s} — click to relock` + confinementNote
+    label.textContent = `Internet open · relocks in ${m}:${s}` + confinementNote
+    strip.dataset.action = 'Relock now'
   }
   // the tally only lives on the strip while the pane is providers-only
   if (st?.mode === 'open') setBlockedCount(paneId, 0)
@@ -96,7 +97,7 @@ export async function egressModal(paneId) {
     return
   }
 
-  const m = modalShell('⛨ allow internet for this pane')
+  const m = modalShell('Allow internet for this pane')
   m.note(`Grants this pane open internet for a limited time, then relocks itself.`)
   // app login already proved the passphrase — opening a pane wants the second
   // factor: the authenticator code when enrolled, the passphrase otherwise
@@ -159,7 +160,7 @@ export async function reauthPrompt(errMsg) {
       resolve(v)
     }
     // onClose fires on Escape/scrim/Cancel — treat every dismissal as "no".
-    const m = modalShell('⛨ unlock to launch an unsandboxed shell', () => done(null))
+    const m = modalShell('Unlock to start an unsandboxed shell', () => done(null))
     m.note(
       'This pane runs with your full privileges and open network access. Re-enter your credentials to allow it — every unsandboxed pane asks again.'
     )
@@ -181,7 +182,7 @@ export async function reauthPrompt(errMsg) {
 }
 
 function setupModal(paneId) {
-  const m = modalShell('⛨ set up network unlock')
+  const m = modalShell('Set up network unlock')
   m.note('Choose the passphrase that allows internet on contained panes. Stored as a salted hash.')
   const p1 = m.input('passphrase')
   const p2 = m.input('repeat passphrase')

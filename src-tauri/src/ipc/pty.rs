@@ -621,6 +621,10 @@ pub async fn pty_create(
             .as_ref()
             .map(|c| c.trim().to_string())
             .filter(|c| !c.is_empty());
+    } else if let Some(cmd) = agent_cmd.as_mut() {
+        // Every pty:create pane is interactive: claude panes report their
+        // state over their own terminal (see CLAUDE_STATE_HOOKS_ARG).
+        cmd.push_str(agent_spawn::interactive_suffix(&opts.kind));
     }
 
     let egress_default = {

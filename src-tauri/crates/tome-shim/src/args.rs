@@ -53,12 +53,8 @@
 //!
 //! [`parse_args`]'s only real (non-test) caller is `main.rs`'s
 //! `#[cfg(target_os = "linux")]` branch, so on a native macOS build
-//! nothing outside this file's own `#[cfg(test)]` module ever calls it —
-//! `#![allow(dead_code)]` below for that reason, same rationale (and same
-//! pattern) as `src-tauri/src/egress/mod.rs`'s and
-//! `src-tauri/src/pty_authority.rs`'s own module-level allows for code
-//! whose only real caller is a different slice/target.
-#![allow(dead_code)]
+//! nothing outside this file's own `#[cfg(test)]` module calls it — its
+//! `pub` visibility is what keeps the dead-code lint quiet there.
 
 use std::path::PathBuf;
 

@@ -37,7 +37,7 @@ async function consent(root, hash) {
 
 function consentModal(root, hosts, rejected) {
   return new Promise((resolve) => {
-    const m = modalShell(`⛨ ${root.split('/').pop() || root} asks to widen network access`, () =>
+    const m = modalShell(`${root.split('/').pop() || root} asks to widen network access`, () =>
       resolve(false)
     )
     m.note(

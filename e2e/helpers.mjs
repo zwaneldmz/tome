@@ -23,3 +23,13 @@ export async function openAddMenu(page) {
 export function ptyCreateCalls(page) {
   return page.evaluate(() => window.__tomeMock.calls.ptyCreate)
 }
+
+// Runs a command through the ⌘K palette: waits until the best match is the
+// named row, then presses Enter. `name` is the row's exact label.
+export async function runCommand(page, name) {
+  await page.keyboard.press('ControlOrMeta+k')
+  await expect(page.locator('.pal-input')).toBeFocused()
+  await page.keyboard.type(name)
+  await expect(page.locator('.pal-row.sel .pal-name')).toHaveText(name)
+  await page.keyboard.press('Enter')
+}

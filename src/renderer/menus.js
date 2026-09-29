@@ -3,15 +3,14 @@
 import { tome, toast, el, notifLog } from './util.js'
 import { prefs, wsState } from './state.js'
 import { activeWorkspace, saveWs, renderWsChip } from './workspaces.js'
-import { addTerminal, addChat, addBrain, addGraphify, addEvents, addRuns, addReport, openFile, createFlowFile } from './panes.js'
+import { addTerminal, addChat, addBrain, addGraphify, openFile, createFlowFile } from './panes.js'
 import { spawnPolicy } from './spawn-policy.js'
 import { confirmModal, promptModal } from './modals.js'
 import { renderStatusbar } from './statusbar.js'
 import { renderTree, createFileIn, createFolderIn } from './tree.js'
 import { validateRelPath } from './tree-create.js'
+import { refreshWelcome } from './welcome.js'
 import { refreshGit } from './git.js'
-import { shortcutsModal } from './keys.js'
-import { preferencesModal } from './preferences.js'
 import { isVerbose, mentorState } from './mentor.js'
 
 const allMenus = []
@@ -223,6 +222,7 @@ wireMenu('btn-notifs', 'notifs-menu', (menu) => {
 
 // ---------- workspace UI ----------
 export function renderAll() {
+  refreshWelcome()
   renderWsChip()
   renderTree()
   refreshGit()
@@ -240,7 +240,20 @@ export async function addFolderToActive() {
   renderAll()
 }
 
-function createWorkspace(name) {
+// The zero-to-working path: pick a folder; with no workspace yet it becomes
+// one, named after the folder. Otherwise the folder joins the active one.
+export async function openFolder() {
+  if (activeWorkspace()) return addFolderToActive()
+  const dir = await tome.pickFolder()
+  if (!dir) return
+  wsState.ws.workspaces.push({ name: dir.split('/').pop() || dir, folders: [dir] })
+  wsState.ws.active = wsState.ws.workspaces.length - 1
+  wsState.activeRoot = dir
+  saveWs()
+  renderAll()
+}
+
+export function createWorkspace(name) {
   wsState.ws.workspaces.push({ name, folders: [] })
   wsState.ws.active = wsState.ws.workspaces.length - 1
   wsState.activeRoot = null
@@ -259,7 +272,7 @@ async function renameActiveWorkspace() {
   renderAll()
 }
 
-function switchWorkspace(i) {
+export function switchWorkspace(i) {
   wsState.ws.active = i
   wsState.activeRoot = activeWorkspace()?.folders[0] || null
   saveWs()
@@ -337,89 +350,62 @@ export async function populateAddMenu(menu, target) {
   menu.innerHTML = ''
   const agents = await tome.agents.list()
   // Containment-only is a CEILING (P2.1): the unsandboxed Terminal row
-  // disappears and agents are forced gapped — the pure rules live in
-  // spawn-policy.js (vitest-pinned), this builder only applies them.
+  // disappears and agents are forced sealed — the pure rules live in
+  // spawn-policy.js (vitest-pinned), this builder only applies them. The
+  // switches themselves live in the titlebar seal (seal.js).
   const policy = spawnPolicy(prefs)
   // The wizard's Agents step (and Settings → Agents) can deselect a CLI:
   // it stays installed, it just leaves this menu. pty:create in main still
   // accepts the kind — deselection is a UI convenience, not a sandbox rule.
   const disabled = new Set((await tome.store.get('agents-disabled')) || [])
-  for (const a of agents.filter((a) => !a.custom && !disabled.has(a.name))) {
+  const shown = agents.filter((a) => !disabled.has(a.name))
+  menuLabel(menu, policy.agentsGapped ? 'Agents · start sealed' : 'Agents · start unsealed')
+  for (const a of shown) {
     menuItem(menu, {
-      label: (policy.agentsGapped ? '⛨ ' : '') + a.name,
-      hint: a.available ? (target ? 'as a tab' : 'agent') : 'not installed',
+      label: a.custom ? a.label || a.name : a.name,
+      hint: a.available ? (target ? 'as a tab' : '') : 'not installed',
       disabled: !a.available,
       onClick: () => addTerminal(a.name, target),
     })
   }
-  // User-declared CLIs (Preferences → Agents) spawn exactly like built-ins —
-  // same addTerminal path, same grayed-with-a-hint treatment when the bin
-  // isn't on PATH; main re-vets the kind again at pty:create.
-  const customs = agents.filter((a) => a.custom && !disabled.has(a.name))
-  if (customs.length) {
-    menuLabel(menu, 'Custom agents')
-    for (const a of customs) {
-      menuItem(menu, {
-        label: (policy.agentsGapped ? '⛨ ' : '') + (a.label || a.name),
-        hint: a.available ? (target ? 'as a tab' : 'agent') : 'not installed',
-        disabled: !a.available,
-        onClick: () => addTerminal(a.name, target),
-      })
-    }
-  }
-  if (policy.showEgressDefaultToggle) {
-    menuItem(menu, {
-      label: 'spawn agents contained',
-      hint: prefs.egressDefault ? 'on' : 'off',
-      active: prefs.egressDefault,
-      onClick: () => {
-        prefs.egressDefault = !prefs.egressDefault
-        tome.store.set('egress-default', prefs.egressDefault)
-      },
-    })
-  }
-  menuItem(menu, {
-    label: 'sandboxed docker',
-    hint: prefs.dockerPanes ? 'on' : 'off',
-    active: prefs.dockerPanes,
-    disabled: !prefs.dockerGateway,
-    onClick: () => {
-      prefs.dockerPanes = !prefs.dockerPanes
-      if (prefs.dockerPanes && !prefs.dockerGateway) {
-        toast('enable sandboxed Docker in Preferences → Security first', 'err')
-        prefs.dockerPanes = false
-      }
-    },
-  })
-  menuItem(menu, {
-    label: 'assistant may run commands',
-    hint: prefs.conductorRun ? 'on' : 'off',
-    active: prefs.conductorRun,
-    onClick: () => {
-      prefs.conductorRun = !prefs.conductorRun
-      tome.store.set('conductor-run', prefs.conductorRun)
-      tome.conductor.allowRun(prefs.conductorRun)
-    },
-  })
   menuRule(menu)
-  menuItem(menu, { label: 'Assistant chat', hint: 'API', onClick: () => addChat(target) })
   if (policy.showUnsandboxedTerminal) {
-    menuItem(menu, { label: 'Terminal', hint: 'zsh', onClick: () => addTerminal('terminal', target) })
+    menuItem(menu, { label: 'Terminal', hint: 'host shell', onClick: () => addTerminal('terminal', target) })
   }
+  menuItem(menu, { label: 'Assistant chat', onClick: () => addChat(target) })
+  menuRule(menu)
+  const root = wsState.activeRoot
+  menuItem(menu, {
+    label: 'Flow…',
+    hint: root ? '' : 'open a folder first',
+    disabled: !root,
+    onClick: async () => {
+      const input = await promptModal('New flow', 'name — e.g. review-pipeline', '', 'Create')
+      if (input == null) return // cancelled
+      const check = validateRelPath(input)
+      if (!check.ok) return toast(check.reason)
+      // Flows live flat in .tome/flows/ (plan §2.3): a nested name would
+      // silently create a .flow.json nothing else browses to.
+      if (check.rel.includes('/')) return toast('Flow names can\'t contain "/" — flows live flat in .tome/flows/')
+      createFlowFile(root, check.rel, target)
+    },
+  })
   menuItem(menu, {
     label: 'Brain',
-    hint: activeWorkspace() ? 'vault' : 'needs a workspace',
+    hint: activeWorkspace() ? 'notes' : 'needs a workspace',
     disabled: !activeWorkspace(),
     onClick: () => addBrain(target),
   })
   menuItem(menu, {
     label: 'Code graph',
-    hint: wsState.activeRoot ? 'graphify' : 'needs a workspace',
-    disabled: !wsState.activeRoot,
+    hint: root ? '' : 'open a folder first',
+    disabled: !root,
     onClick: () => addGraphify(target),
   })
+  menuRule(menu)
   menuItem(menu, {
     label: 'Open file…',
+    hint: '⌘O',
     onClick: async () => {
       const p = await tome.pickFile()
       if (p) openFile(p, undefined, target)
@@ -427,41 +413,15 @@ export async function populateAddMenu(menu, target) {
   })
   menuItem(menu, {
     label: 'New file…',
-    hint: wsState.activeRoot ? '' : 'needs a workspace folder',
-    disabled: !wsState.activeRoot,
-    onClick: () => createFileIn(wsState.activeRoot, target),
+    hint: root ? '⌘N' : 'open a folder first',
+    disabled: !root,
+    onClick: () => createFileIn(root, target),
   })
   menuItem(menu, {
     label: 'New folder…',
-    hint: wsState.activeRoot ? '' : 'needs a workspace folder',
-    disabled: !wsState.activeRoot,
-    onClick: () => createFolderIn(wsState.activeRoot, target),
+    disabled: !root,
+    onClick: () => createFolderIn(root, target),
   })
-  menuItem(menu, {
-    label: 'Flow diagram…',
-    hint: wsState.activeRoot ? '' : 'needs a workspace folder',
-    disabled: !wsState.activeRoot,
-    onClick: async () => {
-      const input = await promptModal('New flow', 'name — e.g. review-pipeline', '', 'Create')
-      if (input == null) return // cancelled
-      const check = validateRelPath(input)
-      if (!check.ok) return toast(check.reason)
-      // validateRelPath allows a multi-segment relative path (that's the
-      // point for New file/New folder, which can create nested dirs) — but
-      // flows live flat in .tome/flows/ (plan §2.3), so a name that still has
-      // a "/" in it after that check needs its own refusal here rather than
-      // silently nesting a .flow.json under a folder nothing else browses to.
-      if (check.rel.includes('/')) return toast('flow names can\'t contain "/" — flows live flat in .tome/flows/')
-      createFlowFile(wsState.activeRoot, check.rel, target)
-    },
-  })
-  menuRule(menu)
-  menuItem(menu, { label: 'Flow runs', onClick: () => addRuns(target) })
-  menuItem(menu, { label: 'Event log', hint: 'audit', onClick: () => addEvents(target) })
-  menuItem(menu, { label: 'Review report…', hint: 'usage', onClick: () => addReport(target) })
-  menuRule(menu)
-  menuItem(menu, { label: 'Settings…', hint: '⌘,', onClick: () => preferencesModal() })
-  menuItem(menu, { label: 'Keyboard shortcuts', hint: '⌘', onClick: () => shortcutsModal() })
 }
 
 wireMenu('btn-add', 'add-menu', (menu) => populateAddMenu(menu))

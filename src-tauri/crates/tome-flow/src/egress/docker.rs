@@ -46,7 +46,6 @@
 // Same module-level rationale as the other egress submodules: everything
 // here is exercised by `#[cfg(test)]` below, and the real callers
 // (`ipc::egress`, `ipc::pty`) are separate files.
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -389,7 +388,6 @@ struct GatewayState {
 /// A single pane's filtered Docker gateway: binds a Unix socket, proxies
 /// the Engine API to the real daemon, and refuses escape primitives.
 pub struct DockerGateway {
-    state: Arc<GatewayState>,
     socket_path: PathBuf,
     accept_task: AbortHandle,
 }
@@ -411,7 +409,11 @@ impl DockerGateway {
             policy,
             on_deny: Box::new(on_deny),
         });
-        let accept_state = state.clone();
+        // The accept task owns the only live reference to the gateway state
+        // (its policy + on_deny). The `DockerGateway` handle keeps just the
+        // socket path and the task's abort handle — it never reads the state
+        // itself, so holding a second `Arc` clone in the struct would be dead.
+        let accept_state = state;
         let accept_task = tokio::spawn(async move {
             loop {
                 match listener.accept().await {
@@ -420,14 +422,17 @@ impl DockerGateway {
                             eprintln!("[docker-gw] accepted connection");
                         }
                         let st = accept_state.clone();
-                        tokio::spawn(async move { handle_connection(stream, st).await });
+                        // Box::pin: this per-connection future is large
+                        // (~17KB inline) and one is spawned per accepted
+                        // Docker connection — keep it off the accept task's
+                        // frame (clippy::large_futures).
+                        tokio::spawn(Box::pin(handle_connection(stream, st)));
                     }
                     Err(_) => continue,
                 }
             }
         });
         Ok(Self {
-            state,
             socket_path,
             accept_task: accept_task.abort_handle(),
         })
@@ -568,14 +573,28 @@ async fn handle_connection(stream: UnixStream, state: Arc<GatewayState>) {
         .and_then(|v| v.trim().parse().ok());
     let mut daemon = daemon_reader.into_inner();
 
+    // Box::pin both legs: each is a ~16KB future and this handler already
+    // sits under a per-connection task — boxing keeps that task's frame
+    // small (clippy::large_futures).
     if resp.is_status(101) || is_upgrade {
         // Hijacked stream: raw bidirectional copy until either side closes.
         let mut client_buf = pending;
         let mut daemon_buf = resp_pending;
-        copy_bidirectional_with_buffers(&mut client, &mut daemon, &mut client_buf, &mut daemon_buf)
-            .await;
+        Box::pin(copy_bidirectional_with_buffers(
+            &mut client,
+            &mut daemon,
+            &mut client_buf,
+            &mut daemon_buf,
+        ))
+        .await;
     } else {
-        forward_body(&mut daemon, &mut client, resp_pending, resp_content_length).await;
+        Box::pin(forward_body(
+            &mut daemon,
+            &mut client,
+            resp_pending,
+            resp_content_length,
+        ))
+        .await;
         let _ = client.shutdown().await;
     }
 }

@@ -7,6 +7,8 @@ import { tome, toast } from './util.js'
 import { addTerminal, addChat, addBrain, openFile } from './panes.js'
 import { activeWorkspace } from './workspaces.js'
 import { toggleSidebar, openThemeMenu } from './chrome.js'
+import { setTheme } from './theme.js'
+import { showSideView, jumpToWaiting } from './sidebar.js'
 import { quickOpen, shortcutsModal, closeActivePanel, saveActivePanel } from './keys.js'
 import { preferencesModal } from './preferences.js'
 import { toggleVoice } from './voice.js'
@@ -54,10 +56,16 @@ tome.menu.onAction((action) => {
       toggleVoice()
       break
     case 'set-theme':
-      // The native Appearance submenu can't render live radio state (the
-      // menu is static), so it opens the same appearance picker the ☾/☀
-      // button uses — that one reflects the current pref.
-      openThemeMenu()
+      // The submenu item names its pref; fall back to the palette's theme
+      // rows if an older menu sends none.
+      if (action.pref) setTheme(action.pref)
+      else openThemeMenu()
+      break
+    case 'side-view':
+      showSideView(action.view)
+      break
+    case 'next-waiting':
+      if (!jumpToWaiting()) toast('No agent is waiting for you', 'ok')
       break
     case 'quick-open':
       quickOpen()
