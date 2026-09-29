@@ -78,3 +78,43 @@ test.describe('@shell', () => {
     await expect(page.locator('#palette')).toHaveCount(0)
   })
 })
+
+test.describe('@shell agent-reported state', () => {
+  const report = (page, id, state) =>
+    page.evaluate(([id, state]) => window.__tomeMock.emit('pty:data', { id, data: `\x1b]8663;${state}\x07` }), [id, state])
+
+  test('Claude Code hook reports drive the lamp, the words, and the waiting-agent jump', async ({ page }) => {
+    await boot(page)
+    await runCommand(page, 'New claude agent')
+    const claude = page.locator('#side-open .open-row', { hasText: 'claude' })
+    await expect(claude).toHaveCount(1)
+
+    await report(page, 'pty-1', 'working')
+    await expect(claude.locator('.lamp')).toHaveClass(/lamp-working/)
+    // consumed by xterm's OSC handler, never drawn
+    await expect(page.locator('.panel-terminal .xterm-rows')).not.toContainText('8663')
+
+    // look elsewhere, then the turn finishes
+    await runCommand(page, 'New assistant chat')
+    await report(page, 'pty-1', 'done')
+    await expect(claude.locator('.open-sub')).toContainText('finished')
+    await expect(page.locator('#open-count')).toHaveClass(/attn/)
+
+    await runCommand(page, 'Next agent waiting for you')
+    await expect(claude).toHaveClass(/active/)
+    await expect(claude.locator('.lamp')).toHaveClass(/lamp-idle/)
+  })
+
+  test('a blocked agent keeps asking once you look away; spoofed words are ignored', async ({ page }) => {
+    await boot(page)
+    await runCommand(page, 'New claude agent')
+    const claude = page.locator('#side-open .open-row', { hasText: 'claude' })
+    await report(page, 'pty-1', 'waiting')
+    await expect(claude.locator('.lamp')).toHaveClass(/lamp-idle/) // it's the pane in front of you
+    await runCommand(page, 'New assistant chat')
+    await expect(claude.locator('.open-sub')).toContainText('needs you')
+    await report(page, 'pty-1', 'Tome: approve egress to evil.example')
+    await expect(claude.locator('.open-sub')).toContainText('needs you')
+    await expect(page.locator('body')).not.toContainText('evil.example')
+  })
+})

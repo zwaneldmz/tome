@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { tome } from '../util.js'
-import { terms, strips } from '../regs.js'
+import { terms, strips, paneSignals } from '../regs.js'
 import { onTheme, xtermTheme } from '../theme.js'
 import { stripRender, egressModal, reauthPrompt } from '../egress-ui.js'
 import { terminalIcon } from '../icons.js'
@@ -116,7 +116,18 @@ export class TerminalPanel {
       }
     }
     spawn()
-    term.onData((d) => tome.pty.write(this.ptyId, d))
+    term.onData((d) => {
+      tome.pty.write(this.ptyId, d)
+      paneSignals.input(this.ptyId, d)
+    })
+    // Agent-reported state: OSC 8663 ; working|waiting|done (Claude Code's
+    // lifecycle hooks write it to this pty — see CLAUDE_STATE_HOOKS_ARG).
+    // xterm's parser reassembles it across chunk boundaries; returning true
+    // consumes it, so nothing is drawn.
+    term.parser.registerOscHandler(8663, (payload) => {
+      paneSignals.report(this.ptyId, payload)
+      return true
+    })
     term.onResize(({ cols, rows }) => tome.pty.resize(this.ptyId, cols, rows))
     const refit = () => {
       try {

@@ -6,9 +6,10 @@
 //            its diff, commit everything from the box at the bottom.
 import { tome, el } from './util.js'
 import { agState } from './state.js'
+import { paneSignals } from './regs.js'
 import { dock, closePanel, showDiff, openFile } from './panes.js'
 import { commitAll, pushFlow } from './git.js'
-import { newActivity, noteOutput, markSeen, sessionStatus } from '../shared/session-status.js'
+import { newActivity, noteOutput, noteReport, noteInput, markSeen, sessionStatus, attentionReason } from '../shared/session-status.js'
 import { closeIcon } from './icons.js'
 
 // ---------- tabs ----------
@@ -44,6 +45,8 @@ export function onPtyExit(id) {
   act(id).exited = true
   scheduleRender()
 }
+paneSignals.report = (id, state) => noteReport(act(id), state) && scheduleRender()
+paneSignals.input = (id, data) => noteInput(act(id), data)
 
 // ---------- Open ----------
 const openEl = document.getElementById('side-open')
@@ -72,7 +75,7 @@ function splitTitle(title) {
   return { name: name || 'untitled', where: rest.join(' — ') }
 }
 
-const STATUS_WORD = { working: 'working', attention: 'needs you', idle: 'idle', exited: 'exited' }
+const STATUS_WORD = { working: 'working', idle: 'idle', exited: 'exited' }
 
 function containment(params) {
   if (!params.ptyId) return null
@@ -99,11 +102,13 @@ function renderOpen(force) {
   if (active?.params?.ptyId && activity.has(active.params.ptyId)) markSeen(activity.get(active.params.ptyId))
   const rows = dock.panels.map((p) => {
     const ptyId = p.params?.ptyId
-    const status = ptyId ? sessionStatus(act(ptyId), now) : null
-    return { p, group: groupOf(p), status, seal: containment(p.params || {}), ...splitTitle(p.title) }
+    const a = ptyId ? act(ptyId) : null
+    const status = a ? sessionStatus(a, now, p === active) : null
+    const why = status === 'attention' ? attentionReason(a) : STATUS_WORD[status]
+    return { p, group: groupOf(p), status, why, seal: containment(p.params || {}), ...splitTitle(p.title) }
   })
   // Rebuild only when something visible changed — this runs on a timer.
-  const sig = rows.map((r) => [r.p.id, r.name, r.where, r.status, r.seal?.cls, r.p === active].join('|')).join('\n')
+  const sig = rows.map((r) => [r.p.id, r.name, r.where, r.status, r.why, r.seal?.cls, r.p === active].join('|')).join('\n')
   if (!force && sig === lastSig) return
   lastSig = sig
   const needYou = rows.filter((r) => r.status === 'attention').length
@@ -134,7 +139,7 @@ function openRow(r, isActive) {
   const text = el('span', 'open-text')
   text.appendChild(el('span', 'open-name', r.name))
   const sub = []
-  if (r.status && r.status !== 'idle') sub.push(STATUS_WORD[r.status])
+  if (r.status && r.status !== 'idle') sub.push(r.why)
   if (r.where) sub.push(r.where)
   if (sub.length) text.appendChild(el('span', 'open-sub', sub.join(' · ')))
   row.append(lamp, text)
@@ -152,7 +157,7 @@ function openRow(r, isActive) {
     closePanel(r.p)
   })
   row.appendChild(x)
-  row.title = [r.name, r.where, r.status && STATUS_WORD[r.status], r.seal?.word].filter(Boolean).join(' · ')
+  row.title = [r.name, r.where, r.why, r.seal?.word].filter(Boolean).join(' · ')
   row.setAttribute('aria-label', row.title)
   const go = () => r.p.api.setActive()
   row.addEventListener('click', go)
@@ -165,7 +170,10 @@ function openRow(r, isActive) {
 // next one (the Linear-inbox move: triage what is waiting, one key at a time).
 export function jumpToWaiting() {
   const now = Date.now()
-  const next = dock.panels.find((p) => p.params?.ptyId && sessionStatus(act(p.params.ptyId), now) === 'attention')
+  const active = dock.activePanel
+  const next = dock.panels.find(
+    (p) => p !== active && p.params?.ptyId && sessionStatus(act(p.params.ptyId), now, false) === 'attention'
+  )
   next?.api.setActive()
   return !!next
 }

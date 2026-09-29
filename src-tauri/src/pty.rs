@@ -376,6 +376,15 @@ impl Registry {
     ) -> Result<(), String> {
         let pty_system = native_pty_system();
         let pair = pty_system.openpty(size).map_err(|e| e.to_string())?;
+        // The pane's own terminal, by path, for processes in it that have no
+        // controlling terminal — Claude Code runs hooks detached, so
+        // `/dev/tty` is ENXIO there. The state hooks write to this (see
+        // `agent_spawn::CLAUDE_STATE_HOOKS_ARG`). Not a secret: `tty` prints
+        // the same path from any shell in the pane.
+        let mut cmd = cmd;
+        if let Some(tty) = pair.master.tty_name() {
+            cmd.env("TOME_PANE_TTY", tty);
+        }
         let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
         // The parent must not keep its own copy of the slave open past
         // spawn: portable-pty dup()s the slave into the child's stdio
