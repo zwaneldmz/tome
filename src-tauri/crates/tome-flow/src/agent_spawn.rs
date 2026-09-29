@@ -485,9 +485,16 @@ mod tests {
 
     #[test]
     fn state_hooks_are_shell_safe_inside_single_quotes_in_every_login_shell() {
-        let inner = &CLAUDE_STATE_HOOKS_ARG[" --settings '".len()..CLAUDE_STATE_HOOKS_ARG.len() - 1];
-        assert!(!inner.contains('\''), "a quote would end the single-quoting");
-        assert!(!inner.contains("\\\\"), "fish rewrites \\\\ inside single quotes");
+        let inner =
+            &CLAUDE_STATE_HOOKS_ARG[" --settings '".len()..CLAUDE_STATE_HOOKS_ARG.len() - 1];
+        assert!(
+            !inner.contains('\''),
+            "a quote would end the single-quoting"
+        );
+        assert!(
+            !inner.contains("\\\\"),
+            "fish rewrites \\\\ inside single quotes"
+        );
         assert!(!inner.contains('\n'), "a newline would split the -c string");
     }
 

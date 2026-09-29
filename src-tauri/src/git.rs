@@ -519,7 +519,9 @@ mod tests {
         let repo = init_repo();
         write_and_commit(repo.path(), "a.txt", "1\n", "initial");
         std::fs::write(repo.path().join("a.txt"), "2\n").unwrap();
-        let v = diff(repo.path().to_str().unwrap(), "", "a.txt").await.unwrap();
+        let v = diff(repo.path().to_str().unwrap(), "", "a.txt")
+            .await
+            .unwrap();
         let text = v.as_str().unwrap();
         assert!(text.contains("-1") && text.contains("+2"));
     }

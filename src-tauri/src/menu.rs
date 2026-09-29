@@ -177,13 +177,38 @@ fn view_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Submenu<R>> {
             "Toggle Sidebar",
             Some("CmdOrCtrl+B"),
         )?)
-        .item(&item(app, "side-view|open", "Open Panes", Some("CmdOrCtrl+Shift+A"))?)
-        .item(&item(app, "side-view|files", "Files", Some("CmdOrCtrl+Shift+E"))?)
-        .item(&item(app, "side-view|changes", "Changes", Some("CmdOrCtrl+Shift+G"))?)
-        .item(&item(app, "next-waiting", "Next Waiting Agent", Some("CmdOrCtrl+J"))?)
+        .item(&item(
+            app,
+            "side-view|open",
+            "Open Panes",
+            Some("CmdOrCtrl+Shift+A"),
+        )?)
+        .item(&item(
+            app,
+            "side-view|files",
+            "Files",
+            Some("CmdOrCtrl+Shift+E"),
+        )?)
+        .item(&item(
+            app,
+            "side-view|changes",
+            "Changes",
+            Some("CmdOrCtrl+Shift+G"),
+        )?)
+        .item(&item(
+            app,
+            "next-waiting",
+            "Next Waiting Agent",
+            Some("CmdOrCtrl+J"),
+        )?)
         .item(&appearance)
         .separator()
-        .item(&item(app, "quick-open", "Command Palette", Some("CmdOrCtrl+P"))?)
+        .item(&item(
+            app,
+            "quick-open",
+            "Command Palette",
+            Some("CmdOrCtrl+P"),
+        )?)
         .item(&item(
             app,
             "shortcuts",
