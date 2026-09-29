@@ -38,15 +38,8 @@
 //! have no port — an empty slice already covers "nothing to match
 //! against".
 
-// Every item below is exercised by its own #[cfg(test)] suite, but in a
-// plain (non-test) build nothing calls any of it yet: the real caller
-// (`ipc::pty::pty_create`) is a different slice's file (this phase's
-// binding decision reserves `state.rs`/`Cargo.toml` — and so the PTY
-// infra that would wire this in — to slice P1) and is still a stub as of
-// this slice landing. One module-level allow here, same rationale as
-// `confine.rs`'s (see that module's top doc comment), rather than
-// scattering `#[allow(dead_code)]` over every item.
-#![allow(dead_code)]
+// The command-line builders below are exercised by this file's own
+// #[cfg(test)] suite and called in production by `ipc::pty::pty_create`.
 
 /// Mirrors `src/shared/pane-kinds.js`'s `AGENTS` constant — the built-in
 /// agent CLIs spawnable as panes. `src/shared/**` stays JS-only per the

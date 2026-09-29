@@ -14,12 +14,8 @@
 //! without a live Tauri app behind them; the future `ipc::pty::pty_create`
 //! is the only intended caller of any of them.
 
-// Every item below is exercised by its own #[cfg(test)] suite, but in a
-// plain (non-test) build nothing calls any of it yet — same rationale as
-// `agent_spawn.rs`'s module-level allow (see that module's top doc
-// comment): the real caller (`ipc::pty::pty_create`) is a different
-// slice's file and still a stub as of this slice landing.
-#![allow(dead_code)]
+// All three decisions are exercised by this module's own #[cfg(test)] suite
+// and called in production by `ipc::pty::pty_create`.
 
 use std::path::{Component, Path, PathBuf};
 

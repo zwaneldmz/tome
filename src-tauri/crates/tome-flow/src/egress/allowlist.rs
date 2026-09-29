@@ -16,7 +16,6 @@
 //! orchestration layer (`mod.rs`, a later slice — see that file's own doc
 //! comment for the ownership split) and `proxy.rs` (this same slice) are
 //! its only intended callers.
-#![allow(dead_code)]
 
 use serde_json::Value;
 

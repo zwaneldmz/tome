@@ -31,9 +31,7 @@
 // `pub mod products;`/`pub mod run_plan;` (a `mod` declaration compiles
 // its contents regardless of whether anything references the module by
 // name; a `use`/re-export does not get that same pass). Kept anyway for
-// API-shape parity with every module this slice's brief named — the same
-// "kept even though nothing calls it yet" posture `agent_spawn.rs`'s and
-// `custom_agents.rs`'s own `#![allow(dead_code)]` take.
+// API-shape parity with every module this slice's brief named.
 #[allow(unused_imports)]
 pub use tome_flow::flow::{confine, model, products, run_plan, runner};
 pub mod tools;

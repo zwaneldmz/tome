@@ -8,14 +8,10 @@
 //! anything in this file that touched them would fail to compile on every
 //! other target, defeating the point.
 //!
-//! Everything here is exercised by `linux.rs` at runtime on Linux only;
-//! `#[allow(dead_code)]` at module level (rather than scattered over each
-//! item) because on a non-Linux `cargo check`/`cargo test`, `linux.rs`
-//! doesn't exist as a compiled module at all, so nothing calls these —
-//! same rationale this workspace already uses in
-//! `src-tauri/src/egress/mod.rs` and `src-tauri/src/pty_authority.rs` for
-//! code whose only caller is a different slice/target.
-#![allow(dead_code)]
+//! Everything here is exercised by `linux.rs` at runtime on Linux only. The
+//! items are `pub`, so on a non-Linux build — where `linux.rs` is not a
+//! compiled module and nothing calls them — they are exempt from the
+//! dead-code lint without needing a module-level allow.
 
 /// Maps a `std::process::ExitStatus`'s `(code, signal)` pair — as read via
 /// `ExitStatusExt` on the raw wait status `linux::run` gets back from

@@ -64,11 +64,9 @@
 //! the spawn with an error naming the problem when the directory does not
 //! resolve to itself.
 
-// Real and tested (see `#[cfg(test)]` below), with one real call site
-// (`ipc::pty::pty_create` builds the profile AFTER creating the pane's
-// proxy, because the profile must name its port — F-01). Same rationale
-// as `pty_authority.rs`'s module-level allow.
-#![allow(dead_code)]
+// Tested (see `#[cfg(test)]` below) and called in production by
+// `ipc::pty::pty_create`, which builds the profile AFTER creating the
+// pane's proxy, because the profile must name its port — F-01.
 
 use std::path::Path;
 

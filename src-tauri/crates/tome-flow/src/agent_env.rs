@@ -32,16 +32,9 @@
 //! credentials are layered on separately, by exact key, never by
 //! widening this list.
 
-// `build_agent_base_env`/`AGENT_ENV_ALLOWLIST` are covered end-to-end by
-// this file's own #[cfg(test)] suite. `AGENT_SECRET_KEYS` already has a
-// real caller (`login_env.rs`'s `compute`, via `crate::agent_env::
-// AGENT_SECRET_KEYS`). `compose_agent_env`/`AgentEnvExtras` are still
-// unused outside tests until the PTY integration slice
-// (`ipc::pty::pty_create`, a different slice's file) wires them in. One
-// module-level allow here, same rationale as `confine.rs`'s (see that
-// module's top doc comment), rather than scattering
-// `#[allow(dead_code)]` over individual items.
-#![allow(dead_code)]
+// Covered end-to-end by this file's own #[cfg(test)] suite; the env
+// builders are called in production by `login_env.rs` and the PTY spawn
+// path (`ipc::pty::pty_create`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;

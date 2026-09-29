@@ -92,14 +92,9 @@
 //! why a heuristic "yes" from rung 2's own preflight check is not the same
 //! thing as rung 2 actually succeeding at spawn time.
 
-// Every item below has its own #[cfg(test)] coverage, but — same as
-// seatbelt.rs/proxy.rs/mod.rs's own module-level allows — nothing in this
-// tree calls any of it yet: the integrator that takes a `SandboxStrategy` +
-// assembled argv and actually spawns a gapped Linux pane is a different
-// slice's file (`ipc::pty::pty_create`, explicitly out of this slice's
-// scope). One allow here rather than scattering `#[allow(dead_code)]` over
-// every item.
-#![allow(dead_code)]
+// Each item has its own #[cfg(test)] coverage; the `SandboxStrategy` + argv
+// builders are consumed in production by `ipc::pty::pty_create`, which
+// spawns the gapped Linux pane.
 
 use std::path::{Path, PathBuf};
 
@@ -1849,6 +1844,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn pane_socket_path_uses_xdg_runtime_dir_when_given() {
         let p = pane_socket_path(Some("/run/user/1000"), &PathBuf::from("/tmp"), "pty-1").unwrap();
         assert_eq!(p, PathBuf::from("/run/user/1000/tome/pane-pty-1.sock"));

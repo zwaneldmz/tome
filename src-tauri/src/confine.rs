@@ -22,15 +22,8 @@
 //! slice's files. `confined_real_path` lives here, real and tested, for
 //! those call sites to use once they land.
 
-// Every function below is exercised by its own #[cfg(test)] suite, but in
-// a plain (non-test) build only `confine` and `confined_real_path` are
-// meant to be reachable from outside this module — and neither has a
-// caller yet: this slice's own fs.rs/git.rs don't confine (see their doc
-// comments for why), and the future callers that will (doc.rs, shell.rs,
-// brain.rs) are still Phase 1 stubs. One module-level allow here instead
-// of scattering #[allow(dead_code)] over nine individual items; `cargo
-// test` still compiles and exercises every one of them regardless.
-#![allow(dead_code)]
+// The reachable entry points from outside this module are `confine` and
+// `confined_real_path`; the rest are their tested internals.
 
 use std::env;
 use std::path::{Component, Path, PathBuf};
@@ -109,7 +102,7 @@ fn normalize_lexically(p: &Path) -> PathBuf {
 /// Windows-style traversal string can't sneak past a POSIX host, matching
 /// the original's `rel.split(/[\\/]/)`), or resolving to `root` itself —
 /// containment is strict, the root is not a valid target (contrast
-/// `is_confined_path` below, where an open workspace folder's root *is*
+/// `is_confined` below, where an open workspace folder's root *is*
 /// a valid target).
 ///
 /// The JS original also rejects non-string `rel` (`null`/`undefined`/a
@@ -204,12 +197,6 @@ pub(crate) fn is_confined_with_roots(
     open_folders.iter().any(|f| abs.starts_with(f))
         || store_roots.iter().any(|r| abs.starts_with(r))
         || is_brain_path(&abs)
-}
-
-fn is_confined_path(state: &State<'_, AppState>, p: &Path) -> bool {
-    let folders_synced = *state.folders_synced.read().unwrap();
-    let open_folders = state.open_folders.read().unwrap();
-    is_confined(&open_folders, folders_synced, p)
 }
 
 /// The reason half of `index.js`'s `confinementError(what)` — everything

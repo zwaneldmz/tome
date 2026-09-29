@@ -86,15 +86,8 @@
 //! attempt — an event this module never produces, since it never runs a
 //! server. Left to `egress::proxy` (slice A1) or the integrator (Task A4).
 
-// Every item below is exercised by its own #[cfg(test)] suite, but in a
-// plain (non-test) build nothing calls any of it yet — same rationale as
-// `pty_authority.rs`'s module-level allow (see that module's top doc
-// comment): the real callers (`ipc::egress::*`, `ipc::pty::pty_create`'s
-// gapped-pane path) are different slices' files and still stubs as of this
-// slice landing. One module-level allow here instead of scattering
-// `#[allow(dead_code)]` over two dozen individual items; `cargo test` still
-// compiles and exercises every one of them regardless.
-#![allow(dead_code)]
+// Exercised by this module's #[cfg(test)] suites and called in production
+// by `ipc::egress::*` and `ipc::pty::pty_create`'s gapped-pane path.
 
 pub mod allowlist;
 pub mod docker;
